@@ -1,0 +1,5 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["deck_title","storyline","pages"],
+  "properties":{"deck_title":{"type":"string"},"storyline":{"type":"string"},"pages":{"type":"array","minItems":1,"items":{"type":"object","required":["page_id","title","purpose","on_slide_text","visual_suggestion","speaker_notes","evidence_ids","figure_refs"],"properties":{"page_id":{"type":"string"},"title":{"type":"string"},"purpose":{"type":"string"},"on_slide_text":{"type":"array","items":{"type":"string"}},"visual_suggestion":{"type":"string"},"speaker_notes":{"type":"string"},"evidence_ids":{"type":"array","items":{"type":"string"}},"figure_refs":{"type":"array","items":{"type":"object","required":["figure_id","source_id","locator","intended_use","reuse_status"],"properties":{"figure_id":{"type":"string"},"source_id":{"type":"string"},"locator":{"type":"string"},"intended_use":{"type":"string"},"reuse_status":{"enum":["allowed","citation_only","permission_required","unknown"]}},"additionalProperties":false}}},"additionalProperties":false}}},"additionalProperties":false
+}
+

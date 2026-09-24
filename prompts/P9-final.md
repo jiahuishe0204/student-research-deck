@@ -1,0 +1,1 @@
+目标：依据 verification_results={{verification_results}} 同步修订 draft_report={{draft_report}} 和 draft_ppt={{draft_ppt}}。supported保留；partially_supported降级；unsupported删除；cannot_determine删除或标未核实。修复语义断裂、悬空引用和空页，不引入新事实。输出最终报告、PPT内容包、核验说明、open_issues、来源与证据编号和evidence_version。

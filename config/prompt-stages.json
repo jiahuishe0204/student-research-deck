@@ -1,0 +1,16 @@
+{
+  "version": "0.1",
+  "global_prompt": "prompts/system.md",
+  "stages": [
+    {"id":"P1","name":"intent_detection","prompt":"prompts/P1-intent.md","output_schema":"schemas/P1-intent.schema.json","fast_model_class":"reasoning_high","deep_model_class":"reasoning_high"},
+    {"id":"P2","name":"research_planning","prompt":"prompts/P2-plan.md","output_schema":"schemas/P2-plan.schema.json","fast_model_class":"reasoning_high_merged_with_P1","deep_model_class":"reasoning_high"},
+    {"id":"P3","name":"candidate_screening","prompt":"prompts/P3-screen.md","output_schema":"schemas/generic-object.schema.json","fast_model_class":"economy","deep_model_class":"economy"},
+    {"id":"P4","name":"evidence_extraction","prompt":"prompts/P4-evidence.md","output_schema":"schemas/generic-object.schema.json","fast_model_class":"economy","deep_model_class":"economy"},
+    {"id":"P5","name":"report_generation","prompt":"prompts/P5-report.md","output_schema":"schemas/generic-object.schema.json","fast_model_class":"economy","deep_model_class":"economy_with_selective_upgrade"},
+    {"id":"P6","name":"ppt_storyboard","prompt":"prompts/P6-ppt.md","output_schema":"schemas/P6-ppt.schema.json","fast_model_class":"economy","deep_model_class":"economy_with_structure_review"},
+    {"id":"P7","name":"claim_extraction","prompt":"prompts/P7-claims.md","output_schema":"schemas/generic-object.schema.json","fast_model_class":"economy","deep_model_class":"economy"},
+    {"id":"P8","name":"citation_verification","prompt":"prompts/P8-verify.md","output_schema":"schemas/generic-object.schema.json","fast_model_class":"reasoning_high_on_risk","deep_model_class":"reasoning_high"},
+    {"id":"P9","name":"final_assembly","prompt":"prompts/P9-final.md","output_schema":"schemas/generic-object.schema.json","fast_model_class":"economy","deep_model_class":"reasoning_high_on_failure"}
+  ]
+}
+

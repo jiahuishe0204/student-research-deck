@@ -1,0 +1,12 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "type":"object",
+  "required":["domain","normalized_topic","scope_hint","tier","assumptions","need_clarification","clarification_question","confirmation_text"],
+  "properties":{
+    "domain":{"type":"string"},"normalized_topic":{"type":"string","minLength":1},"scope_hint":{"type":"string"},
+    "tier":{"enum":["fast","deep"]},"assumptions":{"type":"array","items":{"type":"string"}},
+    "need_clarification":{"type":"boolean"},"clarification_question":{"type":["string","null"]},"confirmation_text":{"type":"string","minLength":1}
+  },
+  "additionalProperties":false
+}
+

@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+  "required":["research_scope","exclusions","questions","search_concepts","source_plan","selection_criteria","stop_conditions","report_outline","ppt_story_arc","risks"],
+  "properties":{
+    "research_scope":{"type":"string"},"exclusions":{"type":"array","items":{"type":"string"}},
+    "questions":{"type":"array","minItems":3,"maxItems":6,"items":{"type":"object","required":["question_id","question","evidence_needs"],"properties":{"question_id":{"type":"string"},"question":{"type":"string"},"evidence_needs":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}},
+    "search_concepts":{"type":"object"},"source_plan":{"type":"array"},"selection_criteria":{"type":"array"},"stop_conditions":{"type":"array"},"report_outline":{"type":"array"},"ppt_story_arc":{"type":"array"},"risks":{"type":"array"}
+  },"additionalProperties":false
+}
+

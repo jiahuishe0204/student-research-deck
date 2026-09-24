@@ -20,8 +20,9 @@ for relative in required:
 
 routing = json.loads((ROOT / "config/model-routing.json").read_text())
 assert routing["strategy"] == "critical_nodes_upgrade"
-assert routing["tiers"]["fast"]["intent_and_plan"] == "reasoning_high"
-assert routing["tiers"]["deep"]["research_planning"] == "reasoning_high"
+assert routing["tiers"]["fast"]["intent_and_plan"]["model"] == "deepseek-flash"
+assert routing["tiers"]["deep"]["research_planning"]["model"] == "deepseek-v4-pro"
+assert routing["pricing_snapshot"]["deepseek-v4-pro"]["output"]["peak"] == 27.0
 
 home = (ROOT / "web/index.html").read_text()
 for phrase in ["PPT逐页内容", "演讲者注释", "快速版", "深入版"]:

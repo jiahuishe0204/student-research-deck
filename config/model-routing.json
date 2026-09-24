@@ -1,22 +1,22 @@
 {
-  "version": "0.1",
+  "version": "0.2",
   "updated_at": "2026-09-24",
   "strategy": "critical_nodes_upgrade",
   "tiers": {
     "fast": {
-      "intent_and_plan": "reasoning_high",
-      "retrieval_screening": "economy",
-      "content_generation": "economy",
-      "high_risk_verification": "reasoning_high",
-      "ppt_storyboard": "economy"
+      "intent_and_plan": {"model":"deepseek-flash","thinking":"enabled","reasoning_effort":"high"},
+      "retrieval_screening": {"model":"deepseek-flash","thinking":"disabled"},
+      "content_generation": {"model":"deepseek-flash","thinking":"disabled"},
+      "high_risk_verification": {"model":"deepseek-flash","thinking":"enabled","reasoning_effort":"high"},
+      "ppt_storyboard": {"model":"deepseek-flash","thinking":"disabled"}
     },
     "deep": {
-      "intent_detection": "reasoning_high",
-      "research_planning": "reasoning_high",
-      "retrieval_screening": "economy",
-      "content_generation": "economy_with_selective_upgrade",
-      "high_risk_verification": "reasoning_high",
-      "ppt_storyboard": "economy_with_structure_review"
+      "intent_detection": {"model":"deepseek-v4-pro","thinking":"enabled","reasoning_effort":"high"},
+      "research_planning": {"model":"deepseek-v4-pro","thinking":"enabled","reasoning_effort":"high"},
+      "retrieval_screening": {"model":"deepseek-flash","thinking":"disabled"},
+      "content_generation": {"model":"deepseek-flash","thinking":"enabled","reasoning_effort":"low","upgrade_model":"deepseek-v4-pro"},
+      "high_risk_verification": {"model":"deepseek-v4-pro","thinking":"enabled","reasoning_effort":"high"},
+      "ppt_storyboard": {"model":"deepseek-flash","thinking":"enabled","reasoning_effort":"low","structure_review_model":"deepseek-v4-pro"}
     }
   },
   "upgrade_triggers": {
@@ -36,10 +36,16 @@
       "failed_first_pass"
     ]
   },
+  "pricing_snapshot": {
+    "verified_at":"2026-09-24",
+    "currency":"CNY_per_1M_tokens",
+    "peak_hours_beijing":"Mon-Fri 09:00-12:00, 14:00-18:00",
+    "deepseek-flash":{"cache_hit_input":{"off_peak":0.02,"peak":0.04},"cache_miss_input":{"off_peak":1.0,"peak":2.0},"output":{"off_peak":4.0,"peak":8.0}},
+    "deepseek-v4-pro":{"cache_hit_input":{"off_peak":0.15,"peak":0.30},"cache_miss_input":{"off_peak":4.5,"peak":9.0},"output":{"off_peak":13.5,"peak":27.0}}
+  },
   "notes": [
-    "Provider model IDs and prices must be verified before production.",
+    "Model IDs and prices were checked against official DeepSeek API documentation on 2026-09-24 and must be rechecked before launch.",
     "Deterministic validation should not be delegated to a language model.",
     "Cost reduction must never weaken citation authenticity."
   ]
 }
-
