@@ -20,7 +20,8 @@ for relative in required:
 
 routing = json.loads((ROOT / "config/model-routing.json").read_text())
 assert routing["strategy"] == "critical_nodes_upgrade"
-assert routing["tiers"]["fast"]["intent_and_plan"]["model"] == "deepseek-flash"
+assert routing["tiers"]["fast"]["intent_detection"]["model"] == "deepseek-flash"
+assert routing["tiers"]["fast"]["intent_detection"]["thinking"] == "disabled"
 assert routing["tiers"]["deep"]["research_planning"]["model"] == "deepseek-v4-pro"
 assert routing["pricing_snapshot"]["deepseek-v4-pro"]["output"]["peak"] == 27.0
 

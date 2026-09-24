@@ -1,0 +1,40 @@
+{
+  "case_id": "P1-clear",
+  "run": 2,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 1.811,
+  "usage": {
+    "prompt_tokens": 672,
+    "completion_tokens": 211,
+    "total_tokens": 883,
+    "prompt_tokens_details": {
+      "cached_tokens": 512
+    },
+    "prompt_cache_hit_tokens": 512,
+    "prompt_cache_miss_tokens": 160
+  },
+  "output": {
+    "type": "json_object",
+    "intent": "topic_confirmation",
+    "topic_raw": "CRISPR分子诊断的主要技术路线",
+    "topic_normalized": "CRISPR分子诊断的主要技术路线",
+    "domain": "life_sciences",
+    "domain_judgement": "属于生命科学与医学交叉领域，涉及CRISPR核酸识别原理及其在分子诊断中的应用。",
+    "scope": {
+      "domain": "生命科学/分子诊断",
+      "object": "CRISPR分子诊断技术路线",
+      "goal": "理解主题边界，为后续调研与报告策划做准备",
+      "depth": "概览性技术路线梳理"
+    },
+    "constraints": {
+      "language": "zh-CN",
+      "tier": "fast",
+      "no_retrieval": true,
+      "no_conclusions": true
+    },
+    "clarification_needed": false,
+    "confirmed_message": "已确认主题：CRISPR分子诊断的主要技术路线，属于生命科学相关范围。本轮仅完成主题理解与规范化，不进行检索或形成结论。"
+  }
+}

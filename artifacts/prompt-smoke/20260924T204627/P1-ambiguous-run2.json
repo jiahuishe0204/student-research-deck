@@ -1,0 +1,38 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 2,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 2.718,
+  "usage": {
+    "prompt_tokens": 666,
+    "completion_tokens": 247,
+    "total_tokens": 913,
+    "prompt_tokens_details": {
+      "cached_tokens": 512
+    },
+    "prompt_cache_hit_tokens": 512,
+    "prompt_cache_miss_tokens": 154
+  },
+  "output": {
+    "intent": {
+      "normalized_topic": "苹果（Malus domestica；作为植物/农作物/食品/营养学等生命科学相关对象）",
+      "domain": "生命科学相关",
+      "subdomain": "植物科学 / 农业与食品科学（可能涉及园艺学、植物生理与育种、食品营养与功能成分）",
+      "task_type": "主题理解与范围界定",
+      "scope_notes": [
+        "主题词过于宽泛，可指苹果属植物、栽培苹果、果实食品或其营养/功能成分。",
+        "首版限定生命科学、医学、药学、生物工程相关主题，苹果作为植物、农作物、果实食品或其生物活性成分研究对象时属于范围。",
+        "不检索，不形成结论，不扩展为具体研究问题。"
+      ],
+      "assumptions": [
+        "按“苹果”在生命科学语境下理解为植物/农作物/果实食品对象，而非企业品牌或消费电子产品。",
+        "语言输出按 runtime_config 使用 zh-CN。"
+      ],
+      "deliverable": "确认主题与学科归属，不输出检索结果、证据或结论。",
+      "needs_clarification": false,
+      "clarification_question": null
+    }
+  }
+}

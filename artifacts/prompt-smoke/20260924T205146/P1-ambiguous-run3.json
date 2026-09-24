@@ -1,0 +1,33 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 3,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 3.023,
+  "usage": {
+    "prompt_tokens": 762,
+    "completion_tokens": 274,
+    "total_tokens": 1036,
+    "prompt_tokens_details": {
+      "cached_tokens": 512
+    },
+    "prompt_cache_hit_tokens": 512,
+    "prompt_cache_miss_tokens": 250
+  },
+  "output": {
+    "domain": "agri_food_biology",
+    "normalized_topic": "苹果（Malus domestica）在生命科学相关语境下的主题确认",
+    "scope_hint": "当前主题“苹果”可作为植物/农业与食品相关的生命科学对象理解；若后续调研涉及具体方向，可聚焦于苹果的生物学、栽培、遗传育种、采后生理、营养与食品安全、生物工程应用等分支。本步骤不检索、不展开结论。",
+    "tier": "fast",
+    "assumptions": [
+      "用户输入的“苹果”指苹果植物、果实或其相关生命科学主题，而非科技公司Apple Inc.",
+      "按生命科学、医学、药学、生物工程范围，苹果可作为植物科学、食品科学或农业生物技术对象纳入",
+      "当前仅做主题规范化和领域判断，不进行文献检索、证据分析或结论撰写",
+      "默认中文输出，中英文检索关键词可在后续步骤中使用"
+    ],
+    "need_clarification": false,
+    "clarification_question": null,
+    "confirmation_text": "已确认：主题“苹果”在生命科学相关范围内，可理解为苹果（Malus domestica）这一植物/果实及其相关生物学、农业与食品科学方向。当前仅完成主题规范化与领域判断，不进行检索、证据整理或结论生成。"
+  }
+}

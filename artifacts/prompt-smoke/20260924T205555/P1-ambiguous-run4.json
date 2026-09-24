@@ -1,0 +1,28 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 4,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 1.963,
+  "usage": {
+    "prompt_tokens": 812,
+    "completion_tokens": 100,
+    "total_tokens": 912,
+    "prompt_tokens_details": {
+      "cached_tokens": 640
+    },
+    "prompt_cache_hit_tokens": 640,
+    "prompt_cache_miss_tokens": 172
+  },
+  "output": {
+    "domain": "ambiguous",
+    "normalized_topic": "苹果",
+    "scope_hint": "该词既可指蔷薇科植物苹果（Malus domestica）及其果实，也可能指科技公司；当前无法确定应归入生命科学范围。",
+    "tier": "fast",
+    "assumptions": [],
+    "need_clarification": true,
+    "clarification_question": "你说的“苹果”是指蔷薇科植物/水果（Malus domestica），还是指苹果科技公司？",
+    "confirmation_text": null
+  }
+}

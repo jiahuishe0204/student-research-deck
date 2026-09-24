@@ -1,0 +1,125 @@
+{
+  "case_id": "P2-deep",
+  "run": 2,
+  "stage": "P2",
+  "model": "deepseek-v4-pro",
+  "effort": "high",
+  "elapsed_seconds": 58.669,
+  "usage": {
+    "prompt_tokens": 829,
+    "completion_tokens": 2982,
+    "total_tokens": 3811,
+    "prompt_tokens_details": {
+      "cached_tokens": 768
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 1440
+    },
+    "prompt_cache_hit_tokens": 768,
+    "prompt_cache_miss_tokens": 61
+  },
+  "output": {
+    "research_scope": "聚焦CAR-T细胞治疗实体瘤的技术路线比较，包括但不限于：靶点选择（如HER2、GPC3、MSLN、EGFRvIII等）、CAR结构设计（共刺激域、铰链区、跨膜区）、增强肿瘤浸润与持久性的改造策略（如趋化因子受体、装甲细胞因子、克服免疫抑制微环境）、联合治疗方式（如免疫检查点抑制剂、溶瘤病毒、放化疗）等。比较维度涵盖作用机制、临床前证据、临床试验结果（客观缓解率、安全性、持久性）、适用肿瘤类型与患者亚群。纳入基础研究、转化研究和临床研究，但结论重点基于人体证据而非纯体外或动物实验。",
+    "exclusions": "排除血液系统恶性肿瘤的CAR-T研究；排除非CAR-T细胞疗法（如TCR-T、TIL、CAR-NK等）除非作为直接对照技术路线；排除不涉及技术路线比较的单一病例报告、会议摘要、新闻稿、商业宣传材料；排除非同行评议的预印本；排除仅讨论生产、成本、法规但未涉及技术路线比较的内容。",
+    "research_questions": [
+      "当前CAR-T治疗实体瘤的主要技术路线有哪些？各自的分子设计、作用机制和关键组分是什么？",
+      "不同技术路线在临床前模型和人体临床试验中的抗肿瘤活性、安全性及持久性证据强度如何？",
+      "各技术路线在克服实体瘤关键障碍（如T细胞归巢与浸润、抗原异质性、免疫抑制微环境）方面的比较优势与局限是什么？",
+      "现有证据中是否存在相互矛盾或冲突的结果？可能的解释是什么（如靶点选择、肿瘤类型差异、试验设计异质性）？",
+      "哪些技术路线存在明显的证据缺口或仅有概念验证，哪些已出现失败或阴性结果？反证有哪些？",
+      "在特定实体瘤类型或患者亚群中，哪些技术路线显示出更明确的适用条件或生物标志物指导价值？"
+    ],
+    "evidence_requirements": "优先纳入系统综述、荟萃分析、随机对照试验和前瞻性临床试验；其次纳入设计良好的临床前研究（需说明动物模型与人体的相关性）；专利仅作为技术披露线索，不作为有效性与安全性证据；所有结论需标注证据等级和来源编号；对不同来源的证据冲突需明确记录并分析原因；不得将相关性表述为因果性。",
+    "search_concepts": {
+      "core": [
+        "CAR-T",
+        "chimeric antigen receptor T cell",
+        "solid tumor",
+        "solid tumour",
+        "neoplasm"
+      ],
+      "mechanism_design": [
+        "co-stimulatory domain",
+        "CD28",
+        "4-1BB",
+        "armored CAR-T",
+        "cytokine",
+        "chemokine receptor",
+        "immune checkpoint inhibitor",
+        "tumor microenvironment"
+      ],
+      "targets": [
+        "HER2",
+        "GPC3",
+        "MSLN",
+        "EGFRvIII",
+        "CEA",
+        "MUC1"
+      ],
+      "comparison_outcomes": [
+        "efficacy",
+        "safety",
+        "objective response rate",
+        "persistence",
+        "clinical trial"
+      ],
+      "negative_evidence": [
+        "failure",
+        "toxicity",
+        "antigen escape",
+        "limited efficacy",
+        "adverse events"
+      ]
+    },
+    "source_plan": {
+      "databases": [
+        "PubMed",
+        "Europe PMC",
+        "Crossref",
+        "official"
+      ],
+      "resource_allocation": {
+        "systematic_reviews_meta_analyses": "5-8篇",
+        "key_clinical_trials": "5-8篇",
+        "preclinical_representative": "3-4篇",
+        "official_guidelines_reports": "2-3篇",
+        "total_limit": 19
+      },
+      "search_strategy": "先执行PubMed/Europe PMC检索，使用MeSH词与自由词组合，按相关性与时效性排序；通过Crossref补充获取完整元数据与引用关系；official来源用于获取权威指南或技术评估文件。检索分为三层：第一层定位系统综述和荟萃分析；第二层定位关键临床试验；第三层定位高影响力临床前研究和官方报告。若某一子问题证据不足，则增加检索词变体或放宽时间范围。"
+    },
+    "screening_stopping_criteria": "筛选标准：标题与摘要需与CAR-T实体瘤技术路线直接相关；排除重复发表、无全文链接且无可靠摘要、低质量期刊（需说明判断依据）；优先近5年高质量证据。对于系统综述，若发现两篇以上独立、高质量且结论一致的系统综述覆盖同一子问题，可停止该子问题检索；当新增文献不再提供新的技术路线或比较维度时，认为信息饱和；达到总来源数19篇时强制停止，并记录未覆盖的潜在相关文献。",
+    "report_structure": [
+      "摘要",
+      "背景与实体瘤挑战概述",
+      "技术路线分类与分子机制（按路线分节）",
+      "证据比较：临床前与临床疗效、安全性、持久性",
+      "反证、阴性结果与失败案例分析",
+      "证据冲突与解释",
+      "适用条件与患者选择生物标志物",
+      "研究空白与未来方向",
+      "参考文献与证据编号"
+    ],
+    "ppt_narrative": [
+      "封面与目标问题",
+      "实体瘤对CAR-T的主要障碍",
+      "技术路线全景图（分类框架）",
+      "路线1：靶点选择与设计策略（含证据）",
+      "路线2：克服微环境与装甲策略（含证据）",
+      "路线3：联合治疗策略（含证据）",
+      "关键证据比较表（疗效/安全性/阶段）",
+      "反面证据与失败案例：为什么一些路线未成功",
+      "证据冲突与不确定性讨论",
+      "适用条件总结：何时选择哪种路线",
+      "结论与待解决研究问题",
+      "参考资料与证据编号"
+    ],
+    "risks": [
+      "证据偏倚风险：存在发表偏倚和阳性结果偏倚，阴性结果可能未被充分报告；缓解措施：主动检索阴性结果和失败案例，关注试验注册库（如果可用）。",
+      "研究异质性大：不同试验在患者人群、肿瘤类型、CAR设计、联合治疗上差异显著，难以直接比较；缓解措施：采用结构化提取表，按亚组分层比较。",
+      "临床前到临床转化不确定性：动物模型结果可能无法外推到人，需在报告中明确区分并标注证据等级。",
+      "来源数量限制（19篇）：可能遗漏重要但较早或非主流的研究；缓解措施：优先纳入系统综述和涵盖多路线的综述，并记录被排除的潜在相关文献。",
+      "语言偏倚：仅检索中英文，可能遗漏其他语言的高质量研究；缓解措施：报告局限性。",
+      "官方来源更新滞后：指南或技术评估文件可能未包含最新研究；缓解措施：以近期同行评议文献为主，official来源仅作背景或框架参考。"
+    ]
+  }
+}

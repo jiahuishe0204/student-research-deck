@@ -1,0 +1,32 @@
+{
+  "case_id": "P1-clear",
+  "run": 3,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 2.114,
+  "usage": {
+    "prompt_tokens": 768,
+    "completion_tokens": 197,
+    "total_tokens": 965,
+    "prompt_tokens_details": {
+      "cached_tokens": 512
+    },
+    "prompt_cache_hit_tokens": 512,
+    "prompt_cache_miss_tokens": 256
+  },
+  "output": {
+    "domain": "生命科学",
+    "normalized_topic": "CRISPR分子诊断的主要技术路线",
+    "scope_hint": "面向中国高校生命科学相关专业本科生和研究生，聚焦CRISPR分子诊断的技术路线类型、原理框架与代表方向，不限定具体场合、听众规模或时长。",
+    "tier": "fast",
+    "assumptions": [
+      "主题属于生命科学/生物工程相关范围，核心为CRISPR分子诊断技术路线综述。",
+      "首版默认中文输出、中英文检索。",
+      "当前步骤仅确认主题理解与范围，不进行检索、不形成研究结论、不提供证据编号。"
+    ],
+    "need_clarification": false,
+    "clarification_question": null,
+    "confirmation_text": "已确认主题：CRISPR分子诊断的主要技术路线。该主题属于生命科学相关范围，拟按快速层级推进，默认面向中国高校生命科学相关专业本科生和研究生，先进行主题规范化与范围界定，不检索、不写结论。"
+  }
+}

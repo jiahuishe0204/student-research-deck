@@ -1,0 +1,30 @@
+{
+  "case_id": "P1-clear",
+  "run": 1,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 1.494,
+  "usage": {
+    "prompt_tokens": 672,
+    "completion_tokens": 116,
+    "total_tokens": 788,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "prompt_cache_hit_tokens": 0,
+    "prompt_cache_miss_tokens": 672
+  },
+  "output": {
+    "intent": "确认主题理解与范围",
+    "normalized_topic": "CRISPR分子诊断的主要技术路线",
+    "domain": "生命科学",
+    "subdomain": "分子诊断技术",
+    "in_scope": true,
+    "scope_note": "聚焦基于CRISPR的分子诊断（如Cas12、Cas13等效应蛋白介导的核酸检测）的技术路线梳理与比较",
+    "output_language": "zh-CN",
+    "tier": "fast",
+    "clarification_needed": false,
+    "clarification_question": null
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "case_id": "P1-clear",
+  "run": 3,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 1.964,
+  "usage": {
+    "prompt_tokens": 672,
+    "completion_tokens": 132,
+    "total_tokens": 804,
+    "prompt_tokens_details": {
+      "cached_tokens": 512
+    },
+    "prompt_cache_hit_tokens": 512,
+    "prompt_cache_miss_tokens": 160
+  },
+  "output": {
+    "intent": {
+      "normalized_topic": "CRISPR分子诊断的主要技术路线",
+      "domain": "生命科学",
+      "domain_judgement": "属于",
+      "scope": "梳理CRISPR分子诊断的各类主要技术路线（如Cas效应蛋白识别与信号读出方式的组合分类），不检索文献、不形成结论",
+      "exclusions": [
+        "不检索文献或数据库",
+        "不比较各路线优劣或给出结论",
+        "不涉及具体产品注册与临床性能宣称"
+      ],
+      "language": "zh-CN",
+      "tier": "fast"
+    },
+    "clarification": {
+      "needed": false,
+      "question": null
+    }
+  }
+}

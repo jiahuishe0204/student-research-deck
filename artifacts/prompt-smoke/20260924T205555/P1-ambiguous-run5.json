@@ -1,0 +1,28 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 5,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 1.914,
+  "usage": {
+    "prompt_tokens": 812,
+    "completion_tokens": 114,
+    "total_tokens": 926,
+    "prompt_tokens_details": {
+      "cached_tokens": 640
+    },
+    "prompt_cache_hit_tokens": 640,
+    "prompt_cache_miss_tokens": 172
+  },
+  "output": {
+    "domain": "生命科学",
+    "normalized_topic": "苹果",
+    "scope_hint": "主题为单一名词，存在生命科学（苹果属植物/果实）与非生命科学（科技公司等）的常见歧义；当前无法确定应按哪一含义开展生命科学调研。",
+    "tier": "fast",
+    "assumptions": [],
+    "need_clarification": true,
+    "clarification_question": "你所说的“苹果”是指生物学中的苹果（如苹果属植物或其果实），还是其他含义（如科技公司）？",
+    "confirmation_text": null
+  }
+}

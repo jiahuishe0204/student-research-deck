@@ -1,0 +1,28 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 2,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 1.673,
+  "usage": {
+    "prompt_tokens": 762,
+    "completion_tokens": 142,
+    "total_tokens": 904,
+    "prompt_tokens_details": {
+      "cached_tokens": 512
+    },
+    "prompt_cache_hit_tokens": 512,
+    "prompt_cache_miss_tokens": 250
+  },
+  "output": {
+    "domain": "非生命科学（歧义：既可能指水果，也可能指企业/品牌等非生物学对象）",
+    "normalized_topic": "苹果",
+    "scope_hint": "若指水果，可涉及植物学、营养学、食品科学或采后生理等生命科学相关方向；若指企业、品牌或产品，则不属于本系统首版限定的生命科学、医学、药学和生物工程主题。",
+    "tier": "fast",
+    "assumptions": [],
+    "need_clarification": true,
+    "clarification_question": "你输入的“苹果”是指水果/植物学对象，还是指苹果公司/品牌等非生命科学对象？",
+    "confirmation_text": null
+  }
+}

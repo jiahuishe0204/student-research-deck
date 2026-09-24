@@ -1,0 +1,171 @@
+{
+  "created_at": "2026-09-24T12:54:42.854497+00:00",
+  "repeats": 3,
+  "calls": 9,
+  "usage": {
+    "prompt_tokens": 7545,
+    "completion_tokens": 11213,
+    "total_tokens": 18758
+  },
+  "results": [
+    {
+      "case_id": "P1-clear",
+      "run": 1,
+      "elapsed_seconds": 1.767,
+      "need_clarification": false,
+      "question_count": 0,
+      "output_keys": [
+        "assumptions",
+        "clarification_question",
+        "confirmation_text",
+        "domain",
+        "need_clarification",
+        "normalized_topic",
+        "scope_hint",
+        "tier"
+      ]
+    },
+    {
+      "case_id": "P1-clear",
+      "run": 2,
+      "elapsed_seconds": 1.944,
+      "need_clarification": false,
+      "question_count": 0,
+      "output_keys": [
+        "assumptions",
+        "clarification_question",
+        "confirmation_text",
+        "domain",
+        "need_clarification",
+        "normalized_topic",
+        "scope_hint",
+        "tier"
+      ]
+    },
+    {
+      "case_id": "P1-clear",
+      "run": 3,
+      "elapsed_seconds": 2.114,
+      "need_clarification": false,
+      "question_count": 0,
+      "output_keys": [
+        "assumptions",
+        "clarification_question",
+        "confirmation_text",
+        "domain",
+        "need_clarification",
+        "normalized_topic",
+        "scope_hint",
+        "tier"
+      ]
+    },
+    {
+      "case_id": "P1-ambiguous",
+      "run": 1,
+      "elapsed_seconds": 1.524,
+      "need_clarification": true,
+      "question_count": 0,
+      "output_keys": [
+        "assumptions",
+        "clarification_question",
+        "confirmation_text",
+        "domain",
+        "need_clarification",
+        "normalized_topic",
+        "scope_hint",
+        "tier"
+      ]
+    },
+    {
+      "case_id": "P1-ambiguous",
+      "run": 2,
+      "elapsed_seconds": 1.673,
+      "need_clarification": true,
+      "question_count": 0,
+      "output_keys": [
+        "assumptions",
+        "clarification_question",
+        "confirmation_text",
+        "domain",
+        "need_clarification",
+        "normalized_topic",
+        "scope_hint",
+        "tier"
+      ]
+    },
+    {
+      "case_id": "P1-ambiguous",
+      "run": 3,
+      "elapsed_seconds": 3.023,
+      "need_clarification": false,
+      "question_count": 0,
+      "output_keys": [
+        "assumptions",
+        "clarification_question",
+        "confirmation_text",
+        "domain",
+        "need_clarification",
+        "normalized_topic",
+        "scope_hint",
+        "tier"
+      ]
+    },
+    {
+      "case_id": "P2-deep",
+      "run": 1,
+      "elapsed_seconds": 58.95,
+      "need_clarification": null,
+      "question_count": 6,
+      "output_keys": [
+        "exclusions",
+        "ppt_story_arc",
+        "questions",
+        "report_outline",
+        "research_scope",
+        "risks",
+        "search_concepts",
+        "selection_criteria",
+        "source_plan",
+        "stop_conditions"
+      ]
+    },
+    {
+      "case_id": "P2-deep",
+      "run": 2,
+      "elapsed_seconds": 44.734,
+      "need_clarification": null,
+      "question_count": 6,
+      "output_keys": [
+        "exclusions",
+        "ppt_story_arc",
+        "questions",
+        "report_outline",
+        "research_scope",
+        "risks",
+        "search_concepts",
+        "selection_criteria",
+        "source_plan",
+        "stop_conditions"
+      ]
+    },
+    {
+      "case_id": "P2-deep",
+      "run": 3,
+      "elapsed_seconds": 60.68,
+      "need_clarification": null,
+      "question_count": 5,
+      "output_keys": [
+        "exclusions",
+        "ppt_story_arc",
+        "questions",
+        "report_outline",
+        "research_scope",
+        "risks",
+        "search_concepts",
+        "selection_criteria",
+        "source_plan",
+        "stop_conditions"
+      ]
+    }
+  ]
+}

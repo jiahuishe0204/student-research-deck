@@ -1,0 +1,40 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 3,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 2.033,
+  "usage": {
+    "prompt_tokens": 666,
+    "completion_tokens": 169,
+    "total_tokens": 835,
+    "prompt_tokens_details": {
+      "cached_tokens": 512
+    },
+    "prompt_cache_hit_tokens": 512,
+    "prompt_cache_miss_tokens": 154
+  },
+  "output": {
+    "status": "clarification_required",
+    "normalized_topic": "苹果",
+    "domain_check": {
+      "is_life_science_related": null,
+      "reason": "“苹果”可指水果（植物学/食品科学，属生命科学相关），也可指苹果公司（科技企业，通常不属于生命科学、医学、药学和生物工程范畴）"
+    },
+    "scope_axes": {
+      "possible_interpretations": [
+        "苹果属植物或苹果果实相关的生命科学研究",
+        "苹果公司或其技术产品",
+        "其他含‘苹果’名称的对象"
+      ]
+    },
+    "question": "你调研的“苹果”是指苹果这种植物/果实（生命科学方向），还是指苹果公司？",
+    "assumptions": [],
+    "excluded": [
+      "未进行任何检索",
+      "未形成研究结论"
+    ],
+    "next_step": "待用户澄清后规范主题并确认是否属于生命科学范围"
+  }
+}

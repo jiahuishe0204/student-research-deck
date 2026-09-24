@@ -1,0 +1,32 @@
+{
+  "case_id": "P1-clear",
+  "run": 1,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 1.767,
+  "usage": {
+    "prompt_tokens": 768,
+    "completion_tokens": 173,
+    "total_tokens": 941,
+    "prompt_tokens_details": {
+      "cached_tokens": 384
+    },
+    "prompt_cache_hit_tokens": 384,
+    "prompt_cache_miss_tokens": 384
+  },
+  "output": {
+    "domain": "生命科学",
+    "normalized_topic": "CRISPR分子诊断的主要技术路线",
+    "scope_hint": "聚焦于基于CRISPR的分子诊断技术路线分类与原理，不涉及具体产品评价、临床性能比较或商业前景分析",
+    "tier": "fast",
+    "assumptions": [
+      "topic 属于生命科学领域，与分子诊断和基因编辑技术相关",
+      "tier 为 fast，表示当前只需快速理解主题，不进行深度检索或结论撰写",
+      "输出语言为简体中文"
+    ],
+    "need_clarification": false,
+    "clarification_question": null,
+    "confirmation_text": "已理解主题：CRISPR分子诊断的主要技术路线。该主题属于生命科学领域。当前阶段仅确认主题范围和理解，不进行检索、证据收集或结论输出。"
+  }
+}

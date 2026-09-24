@@ -1,0 +1,41 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 1,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 2.951,
+  "usage": {
+    "prompt_tokens": 666,
+    "completion_tokens": 277,
+    "total_tokens": 943,
+    "prompt_tokens_details": {
+      "cached_tokens": 512
+    },
+    "prompt_cache_hit_tokens": 512,
+    "prompt_cache_miss_tokens": 154
+  },
+  "output": {
+    "status": "need_clarification",
+    "normalized_topic": "苹果",
+    "domain_check": {
+      "is_life_science_related": "uncertain",
+      "reason": "“苹果”既可指苹果属植物（Malus，属生命科学范畴），也可指苹果公司（科技企业，不属本系统范围）；仅凭该词无法确定。",
+      "possible_interpretations": [
+        "苹果属植物/果实（Malus domestica），如基因组、育种、采后生理、营养成分、病虫害等生命科学议题",
+        "苹果公司（Apple Inc.），不属生命科学、医学、药学或生物工程范围"
+      ]
+    },
+    "clarification": {
+      "question": "你输入的“苹果”是指苹果属植物（如苹果的生物学、育种、营养或病虫害等研究方向），还是指苹果公司（Apple Inc.）？",
+      "why_it_matters": "这一区别会直接决定主题是否属于生命科学范畴，从而实质改变调研范围与后续交付结构。",
+      "options": [
+        "苹果属植物/果实（生命科学方向，请进一步说明具体关注点，如基因组、育种、采后保鲜、营养成分、病虫害等）",
+        "苹果公司（Apple Inc.）",
+        "其他含义（请说明）"
+      ]
+    },
+    "assumptions": [],
+    "notes": "按规则不因缺少场合、听众或时长追问；仅就影响范围判定的主题歧义提出一个问题。"
+  }
+}

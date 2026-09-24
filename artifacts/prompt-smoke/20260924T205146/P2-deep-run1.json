@@ -1,0 +1,154 @@
+{
+  "case_id": "P2-deep",
+  "run": 1,
+  "stage": "P2",
+  "model": "deepseek-v4-pro",
+  "effort": "high",
+  "elapsed_seconds": 58.95,
+  "usage": {
+    "prompt_tokens": 985,
+    "completion_tokens": 3158,
+    "total_tokens": 4143,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 1540
+    },
+    "prompt_cache_hit_tokens": 0,
+    "prompt_cache_miss_tokens": 985
+  },
+  "output": {
+    "research_scope": "比较CAR-T用于实体瘤的主要技术路线，包括但不限于二代CAR共刺激域选择、双/多靶点CAR、装甲CAR、逻辑门控CAR、通用型CAR、局部/区域递送及联合治疗。重点分析各路线的作用机制、临床前与临床疗效、安全性、主要障碍、反证与冲突证据，以及适用条件。不涉及血液瘤CAR-T，不涉及非CAR-T的细胞疗法（如TCR-T、CAR-NK）除非直接作为比较对象。",
+    "exclusions": [
+      "血液系统恶性肿瘤中的CAR-T应用",
+      "非CAR-T的细胞治疗（如TCR-T、CAR-NK、TIL）",
+      "仅讨论基础T细胞生物学而不涉及CAR设计的内容",
+      "纯商业或市场分析",
+      "未提供机制或临床数据的纯观点文章"
+    ],
+    "questions": [
+      {
+        "question_id": "Q1",
+        "question": "不同二代CAR共刺激域（如CD28、4-1BB、CD27、OX40）在实体瘤模型和临床试验中的抗肿瘤活性、持久性和毒性特征有何差异？",
+        "evidence_needs": [
+          "实体瘤动物模型的头对头比较研究",
+          "实体瘤患者中的临床试验安全性数据",
+          "不同共刺激域对T细胞耗竭和记忆形成的影响研究"
+        ]
+      },
+      {
+        "question_id": "Q2",
+        "question": "多靶点或逻辑门控CAR-T（如AND门、NOT门、synNotch）在解决实体瘤抗原异质性和脱靶毒性方面的有效性和安全性证据如何？",
+        "evidence_needs": [
+          "多靶点或逻辑门控CAR-T在实体瘤模型中的疗效数据",
+          "临床前安全性评价（如细胞因子释放综合征、神经毒性）",
+          "与单靶点CAR-T比较的研究"
+        ]
+      },
+      {
+        "question_id": "Q3",
+        "question": "装甲CAR-T（分泌细胞因子如IL-12、IL-18或趋化因子）在克服实体瘤免疫抑制微环境方面的作用及潜在毒性有哪些证据？",
+        "evidence_needs": [
+          "装甲CAR-T在实体瘤微环境中的机制研究",
+          "体内肿瘤模型中的疗效和毒性数据",
+          "早期临床试验中的安全性报告"
+        ]
+      },
+      {
+        "question_id": "Q4",
+        "question": "通用型（同种异体）CAR-T与自体CAR-T在实体瘤应用中的比较证据，包括移植物抗宿主病风险、免疫排斥和疗效差异？",
+        "evidence_needs": [
+          "异体CAR-T实体瘤临床试验数据",
+          "基因编辑消除HLA/TCR的临床前研究",
+          "通用型与自体CAR-T的直接或间接比较分析"
+        ]
+      },
+      {
+        "question_id": "Q5",
+        "question": "局部/区域递送（如瘤内注射、肝动脉灌注）相对于系统静脉输注在实体瘤中的疗效、安全性和可行性的比较证据有哪些？",
+        "evidence_needs": [
+          "局部递送与系统递送比较的动物模型研究",
+          "局部递送CAR-T的临床试验报告",
+          "递送途径对CAR-T细胞浸润和持久性的影响证据"
+        ]
+      },
+      {
+        "question_id": "Q6",
+        "question": "CAR-T与免疫检查点抑制剂、溶瘤病毒或其他免疫调节剂联合用于实体瘤的证据，是否存在协同增效或额外毒性的冲突数据？",
+        "evidence_needs": [
+          "CAR-T联合治疗的实体瘤模型研究",
+          "早期临床试验中联合治疗的安全性和初步疗效数据",
+          "联合与单用CAR-T的比较或反证研究"
+        ]
+      }
+    ],
+    "search_concepts": [
+      "CAR-T solid tumor",
+      "chimeric antigen receptor T cell solid tumor",
+      "armored CAR-T",
+      "dual-target CAR-T",
+      "logic-gated CAR-T",
+      "synNotch CAR-T",
+      "universal CAR-T solid tumor",
+      "allogeneic CAR-T solid tumor",
+      "regional delivery CAR-T",
+      "intratumoral CAR-T",
+      "CAR-T combination immune checkpoint inhibitor",
+      "tumor microenvironment CAR-T",
+      "实体瘤 CAR-T",
+      "双靶点 CAR-T",
+      "装甲 CAR-T",
+      "通用型 CAR-T",
+      "局部递送 CAR-T"
+    ],
+    "source_plan": [
+      "使用PubMed和Europe PMC检索同行评审研究，优先获取全文和临床试验数据",
+      "使用Crossref补充文献元数据、引用关系和预印本信息",
+      "使用official来源（如FDA、NCI、ClinicalTrials.gov）获取监管披露、指南和已注册临床试验的官方结果",
+      "对每个问题交叉检索中英文概念，确保覆盖国际和国内研究"
+    ],
+    "selection_criteria": [
+      "仅纳入实体瘤相关CAR-T研究，排除血液瘤研究",
+      "优先纳入体内动物模型和临床试验数据，纯体外研究仅作为机制补充",
+      "纳入比较不同技术路线或不同设计的研究，重视头对头比较",
+      "纳入报告负面结果或失败案例的研究，以支持反证和冲突分析",
+      "纳入系统综述和荟萃分析用于背景，但主要证据应来自原始研究",
+      "涉及联合治疗时，必须有明确的CAR-T组分"
+    ],
+    "stop_conditions": [
+      "达到来源数量上限19个",
+      "每个关键问题至少获得3项独立证据支持（来自不同研究组或数据源）",
+      "针对主要技术路线的疗效和安全性结论达到饱和，新检索不再改变比较结论",
+      "已找到至少2项报告失败或负面结果的证据用于反证分析"
+    ],
+    "report_outline": [
+      "摘要：研究目的、方法、关键发现",
+      "背景：实体瘤对CAR-T的挑战与现有技术路线概述",
+      "技术路线分类与机制比较：共刺激域、双/多靶点、装甲、逻辑门控、通用型、局部递送、联合治疗",
+      "临床前证据比较：疗效、持久性、安全性的汇总",
+      "临床试验数据比较：已注册试验、结果、毒性与局限性",
+      "反证与冲突证据：各路线失败案例、相互矛盾的数据",
+      "适用条件分析：不同路线最适合的肿瘤类型、抗原表达模式、患者群体",
+      "知识缺口与未来方向",
+      "参考文献列表（附evidence_id）"
+    ],
+    "ppt_story_arc": [
+      "引入：实体瘤治疗困境与CAR-T的潜力",
+      "问题框架：实体瘤CAR-T的六大障碍",
+      "技术路线全景图：七类主要策略",
+      "关键比较：各路线在疗效、安全性和机制上的优劣",
+      "反证与冲突：哪些路线在临床前有效但临床失败？哪些数据矛盾？",
+      "适用条件：根据肿瘤特征选择合理路线",
+      "结论与展望：最可能突破的方向及证据等级"
+    ],
+    "risks": [
+      "部分技术路线缺乏临床试验数据，证据仅限临床前，外推性有限",
+      "不同研究使用异质性模型和终点，直接比较存在偏倚",
+      "来源上限19个可能导致某些路线证据不足",
+      "肿瘤类型差异巨大，综合比较可能掩盖亚组特异性",
+      "新发表的大型试验可能颠覆既有结论",
+      "官方来源更新滞后于学术文献"
+    ]
+  }
+}

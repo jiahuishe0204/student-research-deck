@@ -1,0 +1,30 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 1,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 1.524,
+  "usage": {
+    "prompt_tokens": 762,
+    "completion_tokens": 104,
+    "total_tokens": 866,
+    "prompt_tokens_details": {
+      "cached_tokens": 512
+    },
+    "prompt_cache_hit_tokens": 512,
+    "prompt_cache_miss_tokens": 250
+  },
+  "output": {
+    "domain": "非生命科学",
+    "normalized_topic": "苹果",
+    "scope_hint": "未指定具体方向，可能指水果（农业/食品科学）或科技品牌（消费电子）",
+    "tier": "fast",
+    "assumptions": [
+      "用户仅输入主题名称，未指定研究角度或领域"
+    ],
+    "need_clarification": true,
+    "clarification_question": "你说的“苹果”是指水果（农业/食品科学方向）还是科技品牌（消费电子方向）？",
+    "confirmation_text": null
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 2,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 2.162,
+  "usage": {
+    "prompt_tokens": 812,
+    "completion_tokens": 174,
+    "total_tokens": 986,
+    "prompt_tokens_details": {
+      "cached_tokens": 640
+    },
+    "prompt_cache_hit_tokens": 640,
+    "prompt_cache_miss_tokens": 172
+  },
+  "output": {
+    "domain": "待确认",
+    "normalized_topic": "苹果",
+    "scope_hint": "当前主题过短，无法判断是指生命科学相关对象（如苹果果实/植物学）还是非生命科学对象（如科技公司或品牌）；需先明确再进入后续调研。",
+    "tier": "fast",
+    "assumptions": [
+      "用户输入仅为单个词“苹果”。",
+      "未提供论文、专利、网页或图片等可判定领域的附加信息。",
+      "语言为简体中文，但不足以消解“苹果”的领域歧义。"
+    ],
+    "need_clarification": true,
+    "clarification_question": "你说的“苹果”是指生命科学相关的苹果（植物/果实/食品营养等），还是指非生命科学的苹果公司或消费电子品牌？",
+    "confirmation_text": null
+  }
+}

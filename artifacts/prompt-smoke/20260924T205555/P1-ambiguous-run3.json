@@ -1,0 +1,28 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 3,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 1.649,
+  "usage": {
+    "prompt_tokens": 812,
+    "completion_tokens": 114,
+    "total_tokens": 926,
+    "prompt_tokens_details": {
+      "cached_tokens": 640
+    },
+    "prompt_cache_hit_tokens": 640,
+    "prompt_cache_miss_tokens": 172
+  },
+  "output": {
+    "domain": "ambiguous",
+    "normalized_topic": "苹果",
+    "scope_hint": "主题仅有两个字，且同时存在生命科学含义（苹果属 Malus 的果实/植物）与非生命科学常见含义（科技公司 Apple Inc. 等），无法在不澄清的情况下确定调研对象。",
+    "tier": "fast",
+    "assumptions": [],
+    "need_clarification": true,
+    "clarification_question": "你说的“苹果”是指苹果这种植物/果实（生命科学相关），还是指苹果公司（科技企业）？",
+    "confirmation_text": null
+  }
+}

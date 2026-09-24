@@ -1,0 +1,75 @@
+{
+  "created_at": "2026-09-24T12:50:05.442204+00:00",
+  "repeats": 3,
+  "calls": 9,
+  "usage": {
+    "prompt_tokens": 6501,
+    "completion_tokens": 11936,
+    "total_tokens": 18437
+  },
+  "results": [
+    {
+      "case_id": "P1-clear",
+      "run": 1,
+      "elapsed_seconds": 1.494,
+      "need_clarification": null,
+      "question_count": 0
+    },
+    {
+      "case_id": "P1-clear",
+      "run": 2,
+      "elapsed_seconds": 1.811,
+      "need_clarification": null,
+      "question_count": 0
+    },
+    {
+      "case_id": "P1-clear",
+      "run": 3,
+      "elapsed_seconds": 1.964,
+      "need_clarification": null,
+      "question_count": 0
+    },
+    {
+      "case_id": "P1-ambiguous",
+      "run": 1,
+      "elapsed_seconds": 2.951,
+      "need_clarification": null,
+      "question_count": 0
+    },
+    {
+      "case_id": "P1-ambiguous",
+      "run": 2,
+      "elapsed_seconds": 2.718,
+      "need_clarification": null,
+      "question_count": 0
+    },
+    {
+      "case_id": "P1-ambiguous",
+      "run": 3,
+      "elapsed_seconds": 2.033,
+      "need_clarification": null,
+      "question_count": 0
+    },
+    {
+      "case_id": "P2-deep",
+      "run": 1,
+      "elapsed_seconds": 77.243,
+      "need_clarification": null,
+      "question_count": 0
+    },
+    {
+      "case_id": "P2-deep",
+      "run": 2,
+      "elapsed_seconds": 58.669,
+      "need_clarification": null,
+      "question_count": 0
+    },
+    {
+      "case_id": "P2-deep",
+      "run": 3,
+      "elapsed_seconds": 69.237,
+      "need_clarification": null,
+      "question_count": 0
+    }
+  ]
+}

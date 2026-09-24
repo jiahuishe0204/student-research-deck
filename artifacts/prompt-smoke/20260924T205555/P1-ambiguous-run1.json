@@ -1,0 +1,28 @@
+{
+  "case_id": "P1-ambiguous",
+  "run": 1,
+  "stage": "P1",
+  "model": "deepseek-flash",
+  "effort": "none",
+  "elapsed_seconds": 1.589,
+  "usage": {
+    "prompt_tokens": 812,
+    "completion_tokens": 113,
+    "total_tokens": 925,
+    "prompt_tokens_details": {
+      "cached_tokens": 384
+    },
+    "prompt_cache_hit_tokens": 384,
+    "prompt_cache_miss_tokens": 428
+  },
+  "output": {
+    "domain": "ambiguous",
+    "normalized_topic": "苹果",
+    "scope_hint": "需区分植物学/食品科学语境下的苹果（Malus domestica）含义与科技公司等其他非生命科学含义",
+    "tier": "fast",
+    "assumptions": [],
+    "need_clarification": true,
+    "clarification_question": "你指的“苹果”是生命科学语境下的苹果（植物/果实，如 Malus domestica），还是其他含义（如科技公司）？",
+    "confirmation_text": null
+  }
+}
