@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="把老师交代的调研题目，变成有来源的报告和PPT逐页方案。" />
+    <title>调研交付台｜从题目到能讲的PPT</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="#top">调研交付台 <span>试验版</span></a>
+      <nav><a href="#deliverable">交付什么</a><a href="#plans">版本选择</a></nav>
+    </header>
+    <main id="top">
+      <section class="hero">
+        <p class="eyebrow">课程展示 · 组会 · 开题 · 竞赛</p>
+        <h1>老师让你先调研一下？<br><em>把题目变成能讲的 PPT。</em></h1>
+        <p class="lead">不用研究提示词，也不用先想清楚该查什么。粘贴老师原话或输入主题，得到调研框架、PPT逐页内容、演讲者注释和真实来源。</p>
+        <form id="intent-form">
+          <label for="task">老师怎么说的，直接粘贴进来</label>
+          <textarea id="task" maxlength="500" rows="5" placeholder="例如：下周组会介绍一下空间转录组在肿瘤微环境研究中的应用，控制在10分钟"></textarea>
+          <div class="options">
+            <label>使用场合<select id="occasion"><option>课程展示</option><option>组会汇报</option><option>开题调研</option><option>保研/面试</option><option>科研竞赛</option></select></label>
+            <label>汇报时长<select id="duration"><option>5分钟</option><option selected>10分钟</option><option>15分钟</option><option>不确定</option></select></label>
+            <label>完成方式<select id="depth"><option>尽快完成</option><option>深入分析</option></select></label>
+          </div>
+          <button type="submit">先看看系统怎么理解</button>
+          <p id="error" role="alert"></p>
+        </form>
+        <section id="intent-result" class="intent-result" hidden>
+          <span>意图识别</span><h2 id="intent-title"></h2><p id="intent-copy"></p>
+          <button type="button" id="confirm">确认，生成前三页规划</button>
+        </section>
+      </section>
+
+      <section id="deliverable" class="deliverable">
+        <div><p class="eyebrow">不是再给你一篇长文章</p><h2>首版直接交付一套 PPT 内容包</h2></div>
+        <ol>
+          <li><b>总体叙事</b><span>先讲什么、后讲什么，整场汇报回答一个清楚的问题。</span></li>
+          <li><b>逐页内容</b><span>每页标题、正文要点、建议图表和对应来源。</span></li>
+          <li><b>演讲者注释</b><span>切到演讲者模式，可以沿着注释直接讲。</span></li>
+          <li><b>可能追问</b><span>提前准备老师可能问的问题和有依据的回答。</span></li>
+        </ol>
+      </section>
+
+      <section id="plans" class="plans">
+        <article><span>快速版</span><h2>尽快体面地完成</h2><p>适合一般课设、短汇报和陌生主题扫盲。</p><ul><li>意图识别与调研规划</li><li>8—12页PPT内容包</li><li>演讲者注释与核心来源</li></ul><b>测试价 ¥9.9—19.9 / 次</b></article>
+        <article class="featured"><span>深入版</span><h2>重要任务，经得起追问</h2><p>适合研究生初调、开题、保研与竞赛。</p><ul><li>路线比较与反证检查</li><li>完整调研报告与PPT内容包</li><li>独立引用复核与追问清单</li></ul><b>测试价 ¥39.9—79.9 / 次</b></article>
+      </section>
+    </main>
+    <footer>调研与表达辅助工具，不代替实验、原创判断或课程要求。</footer>
+  </body>
+</html>
+

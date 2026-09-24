@@ -1,0 +1,45 @@
+{
+  "version": "0.1",
+  "updated_at": "2026-09-24",
+  "strategy": "critical_nodes_upgrade",
+  "tiers": {
+    "fast": {
+      "intent_and_plan": "reasoning_high",
+      "retrieval_screening": "economy",
+      "content_generation": "economy",
+      "high_risk_verification": "reasoning_high",
+      "ppt_storyboard": "economy"
+    },
+    "deep": {
+      "intent_detection": "reasoning_high",
+      "research_planning": "reasoning_high",
+      "retrieval_screening": "economy",
+      "content_generation": "economy_with_selective_upgrade",
+      "high_risk_verification": "reasoning_high",
+      "ppt_storyboard": "economy_with_structure_review"
+    }
+  },
+  "upgrade_triggers": {
+    "planning": [
+      "ambiguous_short_input",
+      "cross_disciplinary_topic",
+      "multiple_deliverables",
+      "comparison_or_recommendation",
+      "deep_tier"
+    ],
+    "verification": [
+      "safety_or_efficacy_claim",
+      "causal_claim",
+      "precise_number",
+      "source_conflict",
+      "abstract_only_strong_claim",
+      "failed_first_pass"
+    ]
+  },
+  "notes": [
+    "Provider model IDs and prices must be verified before production.",
+    "Deterministic validation should not be delegated to a language model.",
+    "Cost reduction must never weaken citation authenticity."
+  ]
+}
+
