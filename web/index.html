@@ -3,54 +3,74 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="把老师交代的调研题目，变成有来源的报告和PPT逐页方案。" />
-    <title>调研交付台｜从题目到能讲的PPT</title>
+    <meta name="description" content="输入一个生命科学调研主题，得到有来源的报告和 PPT 逐页内容。" />
+    <title>调研交付台｜把题目变成能讲的内容</title>
     <link rel="stylesheet" href="./styles.css" />
     <script src="./app.js" defer></script>
   </head>
   <body>
-    <header>
-      <a class="brand" href="#top">调研交付台 <span>试验版</span></a>
-      <nav><a href="#deliverable">交付什么</a><a href="#plans">版本选择</a></nav>
+    <div class="ambient" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="调研交付台首页"><b>R</b><span>调研交付台<small>Research Delivery</small></span></a>
+      <nav><a href="#workflow">工作方式</a><a href="#deliverable">交付内容</a><a href="#plans">版本</a></nav>
+      <a class="quiet-action" href="#start">开始调研</a>
     </header>
     <main id="top">
-      <section class="hero">
-        <p class="eyebrow">课程展示 · 组会 · 开题 · 竞赛</p>
-        <h1>老师让你先调研一下？<br><em>把题目变成能讲的 PPT。</em></h1>
-        <p class="lead">不用研究提示词，也不用先想清楚该查什么。粘贴老师原话或输入主题，得到调研框架、PPT逐页内容、演讲者注释和真实来源。</p>
-        <form id="intent-form">
-          <label for="task">老师怎么说的，直接粘贴进来</label>
-          <textarea id="task" maxlength="500" rows="5" placeholder="例如：下周组会介绍一下空间转录组在肿瘤微环境研究中的应用，控制在10分钟"></textarea>
-          <div class="options">
-            <label>使用场合<select id="occasion"><option>课程展示</option><option>组会汇报</option><option>开题调研</option><option>保研/面试</option><option>科研竞赛</option></select></label>
-            <label>汇报时长<select id="duration"><option>5分钟</option><option selected>10分钟</option><option>15分钟</option><option>不确定</option></select></label>
-            <label>完成方式<select id="depth"><option>尽快完成</option><option>深入分析</option></select></label>
+      <section class="hero" id="start">
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span>生命科学调研与汇报</p>
+          <h1>你只管给题目。<br /><em>剩下的，我们理清楚。</em></h1>
+          <p class="lead">不用学习提示词，也不用先知道该查什么。输入老师的原话或一个主题，得到可以直接整理进学校模板的报告与 PPT 内容包。</p>
+          <div class="trust-line"><span>真实来源</span><span>逐条核验</span><span>报告与 PPT 同源</span></div>
+        </div>
+        <form id="intent-form" class="command-panel">
+          <div class="panel-head"><span>NEW RESEARCH</span><span class="status-dot">系统就绪</span></div>
+          <label for="task">输入调研主题</label>
+          <textarea id="task" maxlength="500" rows="6" placeholder="例如：CAR-T 用于实体瘤的主要技术路线"></textarea>
+          <div class="examples" aria-label="示例主题">
+            <button type="button" data-example="CRISPR 分子诊断的主要技术路线">CRISPR 诊断</button>
+            <button type="button" data-example="mRNA 药物递送系统的技术路线与局限">mRNA 递送</button>
+            <button type="button" data-example="单细胞测序在肿瘤微环境研究中的应用">单细胞测序</button>
           </div>
-          <button type="submit">先看看系统怎么理解</button>
+          <fieldset class="tier-picker">
+            <legend>选择交付深度</legend>
+            <label><input type="radio" name="tier" value="fast" checked /><span><b>快速版</b><small>快速建立框架，适合一般课设</small></span><strong>¥9.9 起</strong></label>
+            <label><input type="radio" name="tier" value="deep" /><span><b>深入版</b><small>比较、反证与独立核验</small></span><strong>¥15.9 起</strong></label>
+          </fieldset>
           <p id="error" role="alert"></p>
+          <button class="primary" type="submit">让系统先理解题目 <span>→</span></button>
+          <p class="form-note">只有歧义会实质改变结果时，系统才会追问一个问题。</p>
         </form>
-        <section id="intent-result" class="intent-result" hidden>
-          <span>意图识别</span><h2 id="intent-title"></h2><p id="intent-copy"></p>
-          <button type="button" id="confirm">确认，生成前三页规划</button>
-        </section>
       </section>
-
-      <section id="deliverable" class="deliverable">
-        <div><p class="eyebrow">不是再给你一篇长文章</p><h2>首版直接交付一套 PPT 内容包</h2></div>
-        <ol>
-          <li><b>总体叙事</b><span>先讲什么、后讲什么，整场汇报回答一个清楚的问题。</span></li>
-          <li><b>逐页内容</b><span>每页标题、正文要点、建议图表和对应来源。</span></li>
-          <li><b>演讲者注释</b><span>切到演讲者模式，可以沿着注释直接讲。</span></li>
-          <li><b>可能追问</b><span>提前准备老师可能问的问题和有依据的回答。</span></li>
-        </ol>
+      <section id="intent-result" class="intent-drawer" hidden aria-live="polite">
+        <div class="intent-mark">01</div>
+        <div><p class="eyebrow">题目理解</p><h2 id="intent-title"></h2><p id="intent-copy"></p></div>
+        <button type="button" class="primary" id="confirm">确认并查看工作规划 <span>→</span></button>
       </section>
-
-      <section id="plans" class="plans">
-        <article><span>快速版</span><h2>尽快体面地完成</h2><p>适合一般课设、短汇报和陌生主题扫盲。</p><ul><li>意图识别与调研规划</li><li>8—12页PPT内容包</li><li>演讲者注释与核心来源</li></ul><b>测试价 ¥9.9—19.9 / 次</b></article>
-        <article class="featured"><span>深入版</span><h2>重要任务，经得起追问</h2><p>适合研究生初调、开题、保研与竞赛。</p><ul><li>路线比较与反证检查</li><li>完整调研报告与PPT内容包</li><li>独立引用复核与追问清单</li></ul><b>测试价 ¥39.9—79.9 / 次</b></article>
+      <section id="workflow" class="workflow section-shell">
+        <div class="section-intro"><p class="eyebrow">HOW IT WORKS</p><h2>不是把问题扔给模型，<br />而是把调研拆成可检查的工作。</h2></div>
+        <div class="stage-track">
+          <article><span>01</span><h3>理解题目</h3><p>识别范围与关键歧义。多数时候直接继续，不让你填写一堆表单。</p></article>
+          <article><span>02</span><h3>规划与检索</h3><p>先决定要回答什么，再查文献、官方资料和可追溯证据。</p></article>
+          <article><span>03</span><h3>组织交付</h3><p>报告、PPT 逐页内容和演讲者注释使用同一套事实底稿。</p></article>
+          <article><span>04</span><h3>独立核验</h3><p>检查数字、比较、因果和引用范围，不能确认的内容明确降级。</p></article>
+        </div>
+      </section>
+      <section id="deliverable" class="deliverable section-shell">
+        <div class="section-intro"><p class="eyebrow">ONE SOURCE, TWO DELIVERABLES</p><h2>交付的不是一段回答，<br />而是一套能继续使用的内容。</h2></div>
+        <div class="preview-shell">
+          <div class="preview-tabs" role="tablist"><button class="active" data-preview="slides">PPT 内容包</button><button data-preview="report">调研报告</button><button data-preview="sources">来源与核验</button></div>
+          <div class="preview-body" id="preview-body"></div>
+        </div>
+      </section>
+      <section id="plans" class="plans section-shell">
+        <div class="section-intro"><p class="eyebrow">PAY PER DELIVERY</p><h2>不是每个月都要调研，<br />所以按次使用。</h2></div>
+        <div class="plan-grid">
+          <article><p class="plan-label">快速版</p><h3>尽快体面地完成</h3><p>适合一般课设、短汇报和陌生主题扫盲。</p><ul><li>完整调研报告</li><li>PPT 逐页内容与演讲者注释</li><li>技术路线、进展和局限</li><li>核心来源可追溯</li></ul><div class="price"><small>测试价</small><b>¥9.9—19.9</b><span>/ 次</span></div></article>
+          <article class="featured"><div class="recommended">重要任务</div><p class="plan-label">深入版</p><h3>重要工作，经得起追问</h3><p>适合研究生初调、开题和科研竞赛。</p><ul><li>快速版全部内容</li><li>路线比较与适用条件</li><li>反证、冲突与证据边界</li><li>独立引用复核与追问清单</li></ul><div class="price"><small>测试价</small><b>¥15.9—79.9</b><span>/ 次</span></div></article>
+        </div>
       </section>
     </main>
-    <footer>调研与表达辅助工具，不代替实验、原创判断或课程要求。</footer>
+    <footer><div class="brand"><b>R</b><span>调研交付台<small>Research Delivery</small></span></div><p>调研与表达辅助工具，不替代实验、原创判断或课程要求。</p><a href="#top">返回顶部 ↑</a></footer>
   </body>
 </html>
-
