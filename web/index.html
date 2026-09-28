@@ -6,6 +6,7 @@
     <meta name="description" content="输入一个生命科学调研主题，得到有来源的报告和 PPT 逐页内容。" />
     <title>调研交付台｜把题目变成能讲的内容</title>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./mvp.css" />
     <script src="./app.js" defer></script>
   </head>
   <body>
@@ -44,8 +45,12 @@
       </section>
       <section id="intent-result" class="intent-drawer" hidden aria-live="polite">
         <div class="intent-mark">01</div>
-        <div><p class="eyebrow">题目理解</p><h2 id="intent-title"></h2><p id="intent-copy"></p></div>
-        <button type="button" class="primary" id="confirm">确认并查看工作规划 <span>→</span></button>
+        <div><p class="eyebrow">题目理解</p><h2 id="intent-title"></h2><p id="intent-copy"></p><label class="clarification" id="clarification-wrap" hidden>补充一句就可以<input id="clarification" maxlength="300" placeholder="例如：指苹果植物，关注采后保鲜" /></label></div>
+        <button type="button" class="primary" id="confirm">确认并生成工作规划 <span>→</span></button>
+      </section>
+      <section id="task-workspace" class="task-workspace" hidden aria-live="polite">
+        <aside class="task-status"><p class="eyebrow">LIVE TASK</p><h2 id="task-status-title">正在建立调研规划</h2><div class="progress-line"><i></i></div><ol><li class="done">理解题目</li><li class="active">规划调研问题</li><li>检索与证据整理</li><li>报告与 PPT 内容</li><li>独立核验</li></ol><p class="task-hint">深入版规划通常需要 45—90 秒，页面会显示真实阶段，不伪造百分比。</p></aside>
+        <div class="plan-output" id="plan-output"><p class="empty-plan">计划完成后会在这里显示研究范围、关键问题和 PPT 叙事。</p></div>
       </section>
       <section id="workflow" class="workflow section-shell">
         <div class="section-intro"><p class="eyebrow">HOW IT WORKS</p><h2>不是把问题扔给模型，<br />而是把调研拆成可检查的工作。</h2></div>

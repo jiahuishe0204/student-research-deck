@@ -9,7 +9,9 @@ required = [
     "docs/智能工作流与模型路由.md",
     "docs/流量投放与运营.md",
     "config/model-routing.json",
+    "server.py",
     "web/index.html",
+    "web/mvp.css",
     "web/styles.css",
     "web/app.js",
 ]
@@ -32,5 +34,7 @@ for phrase in ["PPT逐页内容", "演讲者注释", "快速版", "深入版"]:
 for removed_field in ['id="occasion"', 'id="duration"']:
     assert removed_field not in home, f"homepage should not require: {removed_field}"
 assert "追问一个问题" in home
+assert "/api/intent" in (ROOT / "web/app.js").read_text()
+assert "/api/plan" in (ROOT / "web/app.js").read_text()
 
 print("project validation passed")
