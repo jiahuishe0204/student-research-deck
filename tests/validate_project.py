@@ -10,6 +10,7 @@ required = [
     "docs/流量投放与运营.md",
     "config/model-routing.json",
     "server.py",
+    "retrieval.py",
     "web/index.html",
     "web/mvp.css",
     "web/styles.css",
@@ -36,5 +37,6 @@ for removed_field in ['id="occasion"', 'id="duration"']:
 assert "追问一个问题" in home
 assert "/api/intent" in (ROOT / "web/app.js").read_text()
 assert "/api/plan" in (ROOT / "web/app.js").read_text()
+assert "/api/search" in (ROOT / "web/app.js").read_text()
 
 print("project validation passed")

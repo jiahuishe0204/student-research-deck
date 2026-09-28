@@ -861,3 +861,12 @@
 - 端到端测试再次发现 `source_plan` 类型漂移，已同时收紧 P2 提示词契约和服务端确定性校验。
 - 已通过真实浏览器完成“输入 CRISPR 主题 → 意图确认 → 快速版规划 → 页面展示”，无前端警告或错误。
 - 当前 MVP 仅运行 P1/P2；P3—P9 检索、证据、报告、PPT 内容和核验尚未接入在线流程。
+
+### 21.3 2026-09-28 公开学术来源接入
+
+- 已接入 PubMed ESearch/EFetch、Europe PMC REST Search 和 Crossref `/works`，首批检索为每源 4 条，任一来源失败时其他来源仍可返回。
+- 记录统一为 source、source_id、PMID、DOI、标题、摘要、作者、期刊、年份、原始链接、访问范围和多源命中列表。
+- 去重顺序为 DOI → PMID → 规范化标题。实测检索“CRISPR molecular diagnostics Cas12 Cas13”获得 11 条去重记录，PubMed 与 Crossref 的同一论文成功合并。
+- 实测中发现 PubMed DOI XML 路径过宽会误取其他 DOI，已改为只读取当前文章的 `PubmedData/ArticleIdList`。
+- DeepSeek 上游偶发返回截断 JSON 或不完整 chunk；本地服务现在只针对可重试的结构/网络失败自动重试一次，并累加 token 用量，不无限重试。
+- 已增加 `docs/公开数据源与边界.md`，记录限速、版权、polite pool、降级和上线前待决策项。

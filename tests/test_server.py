@@ -1,6 +1,7 @@
 import unittest
 
 import server
+import retrieval
 
 
 class ValidationTests(unittest.TestCase):
@@ -38,6 +39,10 @@ class ValidationTests(unittest.TestCase):
         value["questions"] = value["questions"][:2]
         with self.assertRaises(ValueError):
             server.validate_plan(value)
+
+    def test_source_keys_prefer_doi_then_pmid(self):
+        self.assertEqual(retrieval.normalized_key({"doi": "10.1/ABC", "pmid": "123"}), "doi:10.1/abc")
+        self.assertEqual(retrieval.normalized_key({"doi": "", "pmid": "123"}), "pmid:123")
 
     def test_plan_rejects_object_source_plan(self):
         value = {

@@ -1,6 +1,6 @@
 const $=selector=>document.querySelector(selector);
 const form=$('#intent-form'),task=$('#task'),result=$('#intent-result'),title=$('#intent-title'),copy=$('#intent-copy'),error=$('#error'),confirmButton=$('#confirm');
-let currentIntent=null,currentTopic='',currentTier='fast';
+let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast';
 
 const previews={
   slides:`<div class="slide-preview"><div class="slide-list"><button class="active">01 · 问题</button><button>02 · 路线</button><button>03 · 证据</button></div><div class="slide-canvas"><small>01 / RESEARCH QUESTION</small><div><h3>实体瘤为什么仍是 CAR-T 的困难场景？</h3><ul><li>抗原异质性带来逃逸风险</li><li>肿瘤微环境抑制 T 细胞活性</li><li>浸润与持续性仍限制疗效</li></ul></div><small>SOURCES · 03 / 07 / 11</small></div><aside class="speaker-note"><h4>演讲者注释</h4><p>这一页先建立问题，不急着给出路线优劣。讲述时用三个障碍解释后续技术为什么分别从靶点、细胞状态和递送方式入手。</p><span class="source-chip">来源 03</span><span class="source-chip">来源 07</span></aside></div>`,
@@ -36,7 +36,7 @@ confirmButton.addEventListener('click',async()=>{
   if(currentIntent?.need_clarification&&!clarification){$('#clarification').focus();return;}
   setBusy(confirmButton,true,'正在建立规划… <span>·</span>');$('#task-workspace').hidden=false;$('#plan-output').innerHTML='<p class="empty-plan">正在确定研究问题、资料需求和交付结构…</p>';$('#task-status-title').textContent='正在建立调研规划';$('#task-workspace').scrollIntoView({behavior:'smooth',block:'start'});
   try{
-    const response=await request('/api/plan',{topic:currentTopic,tier:currentTier,clarification});renderPlan(response.data,response.usage);
+    const response=await request('/api/plan',{topic:currentTopic,tier:currentTier,clarification});currentPlan=response.data;renderPlan(response.data,response.usage);
     $('#task-status-title').textContent='调研规划已经就绪';document.querySelector('.progress-line i').style.width='100%';
     document.querySelectorAll('.task-status li')[1].className='done';
   }catch(exc){$('#plan-output').innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。你可以返回上方重新提交。</p>`;$('#task-status-title').textContent='规划未能完成';}
@@ -47,5 +47,24 @@ function renderPlan(plan,usage){
   const questions=plan.questions.map(item=>`<div class="question"><b>${escapeHtml(item.question_id)}</b>${escapeHtml(item.question)}</div>`).join('');
   const story=plan.ppt_story_arc.map(item=>`<li>${escapeHtml(typeof item==='string'?item:(item.title||JSON.stringify(item)))}</li>`).join('');
   const sourceCount=Array.isArray(plan.source_plan)?plan.source_plan.length:0;
-  $('#plan-output').innerHTML=`<header><span>${currentTier==='deep'?'DEEP RESEARCH PLAN':'FAST RESEARCH PLAN'}</span><h2>${escapeHtml(currentIntent?.normalized_topic||currentTopic)}</h2><div class="meta"><span>${plan.questions.length} 个研究问题</span><span>${sourceCount} 组来源计划</span><span>${Number(usage?.total_tokens||0).toLocaleString()} tokens</span></div></header><h3>研究范围</h3><p>${escapeHtml(plan.research_scope)}</p><h3>需要回答的问题</h3>${questions}<h3>PPT 叙事顺序</h3><ol>${story}</ol>`;
+  $('#plan-output').innerHTML=`<header><span>${currentTier==='deep'?'DEEP RESEARCH PLAN':'FAST RESEARCH PLAN'}</span><h2>${escapeHtml(currentIntent?.normalized_topic||currentTopic)}</h2><div class="meta"><span>${plan.questions.length} 个研究问题</span><span>${sourceCount} 组来源计划</span><span>${Number(usage?.total_tokens||0).toLocaleString()} tokens</span></div></header><h3>研究范围</h3><p>${escapeHtml(plan.research_scope)}</p><h3>需要回答的问题</h3>${questions}<h3>PPT 叙事顺序</h3><ol>${story}</ol><button class="primary retrieve-button" id="start-retrieval">检索首批真实资料 <span>→</span></button><div id="retrieval-output"></div>`;
+}
+
+function buildSearchQuery(plan){
+  const strings=[];const visit=value=>{if(typeof value==='string'&&/[A-Za-z]{3}/.test(value)&&value.length<90)strings.push(value);else if(Array.isArray(value))value.forEach(visit);else if(value&&typeof value==='object')Object.values(value).forEach(visit);};visit(plan?.search_concepts);const unique=[...new Set(strings)].slice(0,5);return unique.length?unique.map(value=>`"${value.replaceAll('"','')}"`).join(' OR '):currentTopic;
+}
+
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('#start-retrieval');if(!button)return;
+  setBusy(button,true,'正在连接文献数据库… <span>·</span>');
+  const output=$('#retrieval-output');output.innerHTML='<p class="empty-plan">正在检索 PubMed、Europe PMC 和 Crossref，并按 DOI、PMID 去重…</p>';
+  try{const response=await request('/api/search',{topic:currentTopic,query:buildSearchQuery(currentPlan)});renderSources(response.data);document.querySelectorAll('.task-status li')[2].className='active';}
+  catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}</p>`;}
+  finally{setBusy(button,false,'重新检索 <span>↻</span>');}
+});
+
+function renderSources(data){
+  const cards=data.records.map((item,index)=>`<article class="evidence-card"><div><span class="evidence-id">S${String(index+1).padStart(2,'0')}</span><span>${escapeHtml(item.source)} · ${escapeHtml(item.year||'年份未知')}</span></div><h4>${escapeHtml(item.title||'无标题')}</h4><p>${escapeHtml((item.abstract||'暂无摘要').slice(0,260))}${(item.abstract||'').length>260?'…':''}</p><footer><span>${escapeHtml(item.access)}</span><span>${escapeHtml(item.also_found_in.join(' / '))}</span><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">查看原始记录</a></footer></article>`).join('');
+  const failures=data.errors.length?`<p class="source-warning">部分来源暂时失败：${escapeHtml(data.errors.map(item=>item.source).join('、'))}。其他来源结果仍可用。</p>`:'';
+  $('#retrieval-output').innerHTML=`<div class="retrieval-head"><h3>首批真实资料</h3><span>${data.records.length} 条去重记录</span></div><p class="source-notice">来源元数据仅用于调研与引用核验；PubMed 摘要可能受版权保护，请遵守 <a href="https://www.ncbi.nlm.nih.gov/About/disclaimer.html" target="_blank" rel="noopener">NCBI 声明</a>。</p>${failures}${cards||'<p class="empty-plan">没有找到可用记录，需要调整检索式。</p>'}`;
 }

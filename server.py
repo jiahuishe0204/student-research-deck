@@ -2,6 +2,7 @@
 """Local MVP server for the research delivery prototype."""
 
 import argparse
+import http.client
 import json
 import os
 import traceback
@@ -10,6 +11,8 @@ import urllib.request
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from retrieval import search_all
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
@@ -29,40 +32,44 @@ def load_dotenv(path):
 
 def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none"):
     thinking = "disabled" if effort == "none" else "enabled"
-    request_body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {
-                "role": "user",
-                "content": stage_prompt
-                + "\n\n实际输入JSON：\n"
-                + json.dumps(payload, ensure_ascii=False),
-            },
-        ],
-        "stream": False,
-        "max_tokens": 6000,
-        "response_format": {"type": "json_object"},
-        "reasoning_effort": effort,
-        "thinking": {"type": thinking},
-    }
-    request = urllib.request.Request(
-        "https://api.deepseek.com/chat/completions",
-        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
-        method="POST",
-        headers={
-            "Authorization": "Bearer " + api_key,
-            "Content-Type": "application/json",
-            "User-Agent": "research-delivery-local-mvp/0.1",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=300) as response:
-        data = json.loads(response.read().decode("utf-8"))
-    message = data["choices"][0]["message"]
-    content = message.get("content") or ""
-    if not content.strip():
-        raise RuntimeError("模型未返回可用内容")
-    return json.loads(content), data.get("usage", {})
+    base_content = stage_prompt + "\n\n实际输入JSON：\n" + json.dumps(payload, ensure_ascii=False)
+    total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    last_error = None
+    for attempt in range(2):
+        suffix = "" if attempt == 0 else "\n\n上一次输出未形成完整JSON。请压缩描述，确保JSON完整闭合，不得输出JSON之外的文本。"
+        request_body = {
+            "model": model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": base_content + suffix}],
+            "stream": False, "max_tokens": 6000,
+            "response_format": {"type": "json_object"}, "reasoning_effort": effort, "thinking": {"type": thinking},
+        }
+        request = urllib.request.Request(
+            "https://api.deepseek.com/chat/completions",
+            data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"), method="POST",
+            headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json", "User-Agent": "research-delivery-local-mvp/0.2"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_error = exc
+            if attempt == 0:
+                continue
+            raise
+        usage = data.get("usage", {})
+        for key in total_usage:
+            total_usage[key] += int(usage.get(key, 0) or 0)
+        content = data["choices"][0]["message"].get("content") or ""
+        if not content.strip():
+            last_error = RuntimeError("模型未返回可用内容")
+            continue
+        try:
+            parsed = json.loads(content)
+            total_usage["attempts"] = attempt + 1
+            return parsed, total_usage
+        except json.JSONDecodeError as exc:
+            last_error = exc
+    raise last_error
 
 
 def validate_intent(value):
@@ -190,6 +197,15 @@ class AppHandler(SimpleHTTPRequestHandler):
                     effort,
                 )
                 self.send_json(HTTPStatus.OK, {"data": validate_plan(output), "usage": usage})
+                return
+            if self.path == "/api/search":
+                topic = str(body.get("topic", "")).strip()
+                query = str(body.get("query", "")).strip() or topic
+                if not 2 <= len(topic) <= 500 or not 2 <= len(query) <= 1000:
+                    raise ValueError("检索主题或检索式无效")
+                output = search_all(query, per_source=4)
+                output["topic"] = topic
+                self.send_json(HTTPStatus.OK, {"data": output})
                 return
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
         except (ValueError, json.JSONDecodeError) as exc:
