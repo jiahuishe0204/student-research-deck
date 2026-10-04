@@ -19,7 +19,7 @@
 - `docs/智能工作流与模型路由.md`：意图识别、规划、执行、核验的模型分层。
 - `docs/流量投放与运营.md`：渠道、合作方式、实验和指标。
 - `config/model-routing.json`：模型路由的机器可读初稿。
-- `web/`：可交互首页原型，覆盖主题输入、版本选择、单问题澄清和交付预览。
+- `web/`：可交互首页原型，覆盖主题输入、版本选择、单问题澄清和交付预览；`roadmap.html` 是可长期复用的执行与决策版图。
 - `tests/validate_project.py`：结构与关键承诺校验。
 - `tests/run_prompt_smoke.py`：P1/P2 真实 DeepSeek 重复测试。
 - `server.py` 与 `retrieval.py`：本地 API、DeepSeek 调用以及 PubMed / Europe PMC / Crossref 检索与去重。
@@ -32,6 +32,8 @@ python3 server.py
 ```
 
 确保上级目录 `.env` 中已设置 `DEEPSEEK_API_KEY`，然后打开 `http://127.0.0.1:4180`。密钥只在本地服务端读取，不会发送到浏览器。
+
+执行版图可通过首页导航进入，也可以直接打开 `http://127.0.0.1:4180/roadmap.html`。它是静态网页，查看和筛选不会调用模型；阶段内容集中维护在 `web/roadmap-data.js`。
 
 ## 当前状态
 

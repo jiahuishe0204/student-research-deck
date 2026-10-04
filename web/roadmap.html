@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="调研交付台长期执行路线图：目的、路径、优缺点与完成标准。" />
+    <title>执行与决策版图｜调研交付台</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./roadmap.css" />
+    <script src="./roadmap-data.js" defer></script>
+    <script src="./roadmap.js" defer></script>
+  </head>
+  <body class="roadmap-page" id="top">
+    <div class="ambient" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <header class="topbar">
+      <a class="brand" href="./index.html" aria-label="返回调研交付台首页"><b>R</b><span>调研交付台<small>Research Delivery</small></span></a>
+      <nav><a href="./index.html">产品首页</a><a href="#stages">执行阶段</a><a href="#decision">决策顺序</a></nav>
+      <a class="quiet-action" href="https://github.com/jiahuishe0204/student-research-deck" target="_blank" rel="noopener">GitHub</a>
+    </header>
+    <main class="roadmap-main">
+      <section class="roadmap-hero">
+        <div><p class="eyebrow"><span></span>LONG-TERM EXECUTION MAP</p><h1>每一步为什么做，<br /><em>怎样选，做到什么程度。</em></h1><p class="lead">这是一份不依赖 AI 才能打开的本地网页。查看和筛选不会消耗 token；后续只需维护独立数据文件，界面可以长期复用。</p></div>
+        <div class="roadmap-stats"><div><b>7</b><span>总阶段</span></div><div><b>6</b><span>可直接推进</span></div><div><b id="current-stage">S1</b><span>当前阶段</span></div><div><b id="updated-at"></b><span>最后更新</span></div></div>
+      </section>
+      <section class="roadmap-note" id="decision"><b>决策原则</b>可逆工程项直接推进；价格、退款、数据保留和公开部署等会形成用户承诺的事项，在对应阶段由你确认。</section>
+      <div class="stage-filters" id="stage-filters"><button class="active" type="button" data-stage="all">全部阶段</button></div>
+      <section id="stages"><div id="roadmap-stages"></div></section>
+    </main>
+    <footer><div class="brand"><b>R</b><span>调研交付台<small>Research Delivery</small></span></div><p>静态页面本身不调用模型，不产生 token 费用。</p><a href="#top">返回顶部 ↑</a></footer>
+  </body>
+</html>
