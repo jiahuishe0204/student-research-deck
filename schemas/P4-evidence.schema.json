@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+  "required":["evidence_version","source_id","extraction_status","reading_scope","evidence_records","figure_records","no_extractable_reason"],
+  "properties":{
+    "evidence_version":{"type":"string","minLength":1},"source_id":{"type":"string","minLength":1},"extraction_status":{"enum":["extracted","no_extractable_evidence","source_unavailable"]},"reading_scope":{"enum":["full_text","abstract","metadata_only","unavailable"]},
+    "evidence_records":{"type":"array","items":{"type":"object","required":["evidence_id","source_id","question_ids","fact","excerpt","locator","evidence_type","conditions","limitations"],"properties":{"evidence_id":{"type":"string","minLength":1},"source_id":{"type":"string","minLength":1},"question_ids":{"type":"array","items":{"type":"string"}},"fact":{"type":"string","minLength":1},"excerpt":{"type":"string"},"locator":{"type":"string","minLength":1},"evidence_type":{"type":"string","minLength":1},"conditions":{"type":"array","items":{"type":"string"}},"limitations":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}},
+    "figure_records":{"type":"array","items":{"type":"object","required":["figure_id","source_id","caption","locator","supported_claims","reuse_status"],"properties":{"figure_id":{"type":"string","minLength":1},"source_id":{"type":"string","minLength":1},"caption":{"type":"string"},"locator":{"type":"string","minLength":1},"supported_claims":{"type":"array","items":{"type":"string"}},"reuse_status":{"enum":["allowed","citation_only","permission_required","unknown"]}},"additionalProperties":false}},
+    "no_extractable_reason":{"type":["string","null"]}
+  },"additionalProperties":false
+}

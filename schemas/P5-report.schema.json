@@ -1,0 +1,9 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+  "required":["report_version","report_title","report_markdown","used_evidence_ids","figure_recommendations","status","open_issues"],
+  "properties":{
+    "report_version":{"type":"string","minLength":1},"report_title":{"type":"string","minLength":1},"report_markdown":{"type":"string","minLength":1},"used_evidence_ids":{"type":"array","items":{"type":"string"}},
+    "figure_recommendations":{"type":"array","items":{"type":"object","required":["figure_id","placement","purpose","reuse_status"],"properties":{"figure_id":{"type":"string","minLength":1},"placement":{"type":"string","minLength":1},"purpose":{"type":"string","minLength":1},"reuse_status":{"enum":["allowed","citation_only","permission_required","unknown"]}},"additionalProperties":false}},
+    "status":{"enum":["draft","insufficient_evidence"]},"open_issues":{"type":"array","items":{"type":"string"}}
+  },"additionalProperties":false
+}

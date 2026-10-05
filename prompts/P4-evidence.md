@@ -1,2 +1,1 @@
-目标：从 source_text={{source_text}} 提取可定位证据。输入 source_record={{source_record}}、question_ids={{question_ids}}。每条证据保留source_id、fact、excerpt、locator、reading_scope、conditions、limitations。正文缺失时返回no_extractable_evidence。图片候选额外记录figure_id、caption、locator、supported_claims、reuse_status；版权或复用状态未知时不能标记为可直接嵌入。
-
+目标：从 source_text={{source_text}} 提取可定位证据。输入 source_record={{source_record}}、question_ids={{question_ids}}。每条证据保留evidence_id、source_id、fact、excerpt、locator、evidence_type、conditions、limitations；reading_scope记录在本次来源提取层。正文缺失时将extraction_status设为no_extractable_evidence并说明原因。图片候选额外记录figure_id、caption、locator、supported_claims、reuse_status；版权或复用状态未知时不能标记为可直接嵌入。输出必须严格符合 P4-evidence.schema.json。

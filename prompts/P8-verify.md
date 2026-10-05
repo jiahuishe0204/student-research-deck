@@ -1,2 +1,1 @@
-目标：独立核验 claims={{claims}}。依据 evidence_records={{evidence_records}} 和 source_records={{source_records}} 检查对象、谓词、方向、数字、单位、条件、比较基线、时间、阶段和语气。输出source_identity、support_status、issue_codes、explanation、action、revised_claim、valid_evidence_ids。不得用常识补足证据或把企业声明当独立验证。
-
+目标：独立核验 claims={{claims}}。依据 evidence_records={{evidence_records}} 和 source_records={{source_records}} 检查对象、谓词、方向、数字、单位、条件、比较基线、时间、阶段和语气。输出claim_id、source_identity、support_status、issue_codes、explanation、action、revised_claim、valid_evidence_ids及汇总。不得用常识补足证据或把企业声明当独立验证。输出必须严格符合 P8-verify.schema.json。

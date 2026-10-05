@@ -1,6 +1,6 @@
 const $=selector=>document.querySelector(selector);
 const form=$('#intent-form'),task=$('#task'),result=$('#intent-result'),title=$('#intent-title'),copy=$('#intent-copy'),error=$('#error'),confirmButton=$('#confirm');
-let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast';
+let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,taskPaused=false;
 
 const previews={
   slides:`<div class="slide-preview"><div class="slide-list"><button class="active">01 · 问题</button><button>02 · 路线</button><button>03 · 证据</button></div><div class="slide-canvas"><small>01 / RESEARCH QUESTION</small><div><h3>实体瘤为什么仍是 CAR-T 的困难场景？</h3><ul><li>抗原异质性带来逃逸风险</li><li>肿瘤微环境抑制 T 细胞活性</li><li>浸润与持续性仍限制疗效</li></ul></div><small>SOURCES · 03 / 07 / 11</small></div><aside class="speaker-note"><h4>演讲者注释</h4><p>这一页先建立问题，不急着给出路线优劣。讲述时用三个障碍解释后续技术为什么分别从靶点、细胞状态和递送方式入手。</p><span class="source-chip">来源 03</span><span class="source-chip">来源 07</span></aside></div>`,
@@ -12,6 +12,8 @@ function escapeHtml(value){return String(value??'').replace(/[&<>"]/g,char=>({'&
 function showPreview(name){$('#preview-body').innerHTML=previews[name];document.querySelectorAll('.preview-tabs button').forEach(button=>button.classList.toggle('active',button.dataset.preview===name));}
 async function request(path,payload){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.error||'请求失败');return data;}
 function setBusy(button,busy,text){button.disabled=busy;if(text)button.innerHTML=text;}
+async function persistStage(stage,eventType,payload,artifactKind){if(!currentTaskId)return;try{await request(`/api/tasks/${currentTaskId}/events`,{stage,event_type:eventType,payload,artifact_kind:artifactKind||null});}catch(exc){console.warn('任务状态保存失败',exc);}}
+function ensureActive(){if(taskPaused)throw new Error('任务已暂停，已有结果已保存');}
 
 showPreview('slides');
 document.querySelectorAll('[data-preview]').forEach(button=>button.addEventListener('click',()=>showPreview(button.dataset.preview)));
@@ -22,7 +24,9 @@ form.addEventListener('submit',async event=>{
   if(currentTopic.length<2){error.textContent='输入一个调研主题就可以开始。';task.focus();return;}
   error.textContent='';setBusy(form.querySelector('.primary'),true,'正在理解题目… <span>·</span>');result.hidden=true;
   try{
+    const taskResponse=await request('/api/tasks',{topic:currentTopic,tier:currentTier});currentTaskId=taskResponse.data.task_id;
     const response=await request('/api/intent',{topic:currentTopic,tier:currentTier});currentIntent=response.data;
+    await persistStage('P1','intent_completed',currentIntent,'intent');
     title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);
     $('#clarification-wrap').hidden=!currentIntent.need_clarification;$('#clarification').value='';
     confirmButton.innerHTML=currentIntent.need_clarification?'回答后生成工作规划 <span>→</span>':'确认并生成工作规划 <span>→</span>';
@@ -36,7 +40,7 @@ confirmButton.addEventListener('click',async()=>{
   if(currentIntent?.need_clarification&&!clarification){$('#clarification').focus();return;}
   setBusy(confirmButton,true,'正在建立规划… <span>·</span>');$('#task-workspace').hidden=false;$('#plan-output').innerHTML='<p class="empty-plan">正在确定研究问题、资料需求和交付结构…</p>';$('#task-status-title').textContent='正在建立调研规划';$('#task-workspace').scrollIntoView({behavior:'smooth',block:'start'});
   try{
-    const response=await request('/api/plan',{topic:currentTopic,tier:currentTier,clarification});currentPlan=response.data;renderPlan(response.data,response.usage);
+    const response=await request('/api/plan',{topic:currentTopic,tier:currentTier,clarification});currentPlan=response.data;await persistStage('P2','plan_completed',currentPlan,'plan');renderPlan(response.data,response.usage);
     $('#task-status-title').textContent='调研规划已经就绪';document.querySelector('.progress-line i').style.width='100%';
     document.querySelectorAll('.task-status li')[1].className='done';
   }catch(exc){$('#plan-output').innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。你可以返回上方重新提交。</p>`;$('#task-status-title').textContent='规划未能完成';}
@@ -58,7 +62,7 @@ document.addEventListener('click',async event=>{
   const button=event.target.closest('#start-retrieval');if(!button)return;
   setBusy(button,true,'正在连接文献数据库… <span>·</span>');
   const output=$('#retrieval-output');output.innerHTML='<p class="empty-plan">正在检索 PubMed、Europe PMC 和 Crossref，并按 DOI、PMID 去重…</p>';
-  try{const response=await request('/api/search',{topic:currentTopic,query:buildSearchQuery(currentPlan)});renderSources(response.data);document.querySelectorAll('.task-status li')[2].className='active';}
+  try{const response=await request('/api/search',{topic:currentTopic,query:buildSearchQuery(currentPlan)});currentSources=response.data.records;currentScreening=null;currentEvidenceGroups=[];currentReport=null;currentPpt=null;await persistStage('P2','search_completed',response.data,'sources');renderSources(response.data);document.querySelectorAll('.task-status li')[2].className='active';}
   catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}</p>`;}
   finally{setBusy(button,false,'重新检索 <span>↻</span>');}
 });
@@ -66,5 +70,87 @@ document.addEventListener('click',async event=>{
 function renderSources(data){
   const cards=data.records.map((item,index)=>`<article class="evidence-card"><div><span class="evidence-id">S${String(index+1).padStart(2,'0')}</span><span>${escapeHtml(item.source)} · ${escapeHtml(item.year||'年份未知')}</span></div><h4>${escapeHtml(item.title||'无标题')}</h4><p>${escapeHtml((item.abstract||'暂无摘要').slice(0,260))}${(item.abstract||'').length>260?'…':''}</p><footer><span>${escapeHtml(item.access)}</span><span>${escapeHtml(item.also_found_in.join(' / '))}</span><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">查看原始记录</a></footer></article>`).join('');
   const failures=data.errors.length?`<p class="source-warning">部分来源暂时失败：${escapeHtml(data.errors.map(item=>item.source).join('、'))}。其他来源结果仍可用。</p>`:'';
-  $('#retrieval-output').innerHTML=`<div class="retrieval-head"><h3>首批真实资料</h3><span>${data.records.length} 条去重记录</span></div><p class="source-notice">来源元数据仅用于调研与引用核验；PubMed 摘要可能受版权保护，请遵守 <a href="https://www.ncbi.nlm.nih.gov/About/disclaimer.html" target="_blank" rel="noopener">NCBI 声明</a>。</p>${failures}${cards||'<p class="empty-plan">没有找到可用记录，需要调整检索式。</p>'}`;
+  $('#retrieval-output').innerHTML=`<div class="retrieval-head"><h3>首批真实资料</h3><span>${data.records.length} 条去重记录</span></div><p class="source-notice">来源元数据仅用于调研与引用核验；PubMed 摘要可能受版权保护，请遵守 <a href="https://www.ncbi.nlm.nih.gov/About/disclaimer.html" target="_blank" rel="noopener">NCBI 声明</a>。</p>${failures}${cards||'<p class="empty-plan">没有找到可用记录，需要调整检索式。</p>'}${data.records.length?'<button class="primary screen-button" id="start-screening">筛选真正有用的资料 <span>→</span></button><div id="screening-output"></div>':''}`;
 }
+
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('#start-screening');if(!button)return;
+  setBusy(button,true,'正在判断相关性与证据类型… <span>·</span>');
+  const output=$('#screening-output');output.innerHTML='<p class="empty-plan">系统只判断当前候选，不会凭空新增来源…</p>';
+  try{const response=await request('/api/screen',{topic:currentTopic,tier:currentTier,plan:currentPlan,candidates:currentSources});currentScreening=response.data;await persistStage('P3','screening_completed',currentScreening,'screening');renderScreening(response.data,response.usage);}
+  catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}</p>`;}
+  finally{setBusy(button,false,'重新筛选 <span>↻</span>');}
+});
+
+function renderScreening(data,usage){
+  const rows=data.decisions.map(item=>`<article class="screen-row ${escapeHtml(item.status)}"><div><b>${escapeHtml(item.status.toUpperCase())}</b><span>${escapeHtml(item.source_id)}</span><span>${escapeHtml(item.evidence_type)}</span><span>${Math.round(Number(item.relevance_score)*100)}%</span></div><p>${escapeHtml(item.reason)}</p><small>${escapeHtml(item.intended_uses.join(' · ')||'未指定用途')}</small></article>`).join('');
+  $('#screening-output').innerHTML=`<div class="retrieval-head"><h3>相关性筛选</h3><span>保留 ${data.summary.keep_count} · 备选 ${data.summary.reserve_count} · 剔除 ${data.summary.drop_count}</span></div>${rows}<p class="source-notice">本阶段使用 ${Number(usage?.total_tokens||0).toLocaleString()} tokens；只对保留资料提取证据。</p>${data.summary.keep_count?'<button class="primary extract-button" id="start-evidence">生成可核验的证据底稿 <span>→</span></button>':'<p class="source-warning">没有资料达到保留标准，需要调整检索式。</p>'}<div id="evidence-output"></div>`;
+}
+
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('#start-evidence');if(!button||!currentScreening)return;
+  const kept=currentScreening.decisions.filter(item=>item.status==='keep');
+  setBusy(button,true,`正在提取 0 / ${kept.length}… <span>·</span>`);
+  const output=$('#evidence-output');const records=[];let tokens=0;
+  try{
+    for(let index=0;index<kept.length;index+=1){ensureActive();
+      setBusy(button,true,`正在提取 ${index+1} / ${kept.length}… <span>·</span>`);
+      const decision=kept[index],source=currentSources.find(item=>item.source_id===decision.source_id);
+      if(!source)throw new Error(`找不到来源 ${decision.source_id}`);
+      const response=await request('/api/evidence',{source_record:source,question_ids:decision.question_ids});records.push(response.data);tokens+=Number(response.usage?.total_tokens||0);
+      output.innerHTML=`<p class="empty-plan">已完成 ${records.length} / ${kept.length} 个来源…</p>`;
+    }
+    currentEvidenceGroups=records;await persistStage('P4','evidence_completed',{groups:records},'evidence');renderEvidence(records,tokens);document.querySelector('.progress-line i').style.width='55%';
+  }catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。已完成的 ${records.length} 个来源未被伪装成全部完成。</p>`;}
+  finally{setBusy(button,false,'重新生成证据底稿 <span>↻</span>');}
+});
+
+function renderEvidence(groups,tokens){
+  const evidence=groups.flatMap(group=>group.evidence_records);const unavailable=groups.filter(group=>group.extraction_status!=='extracted');
+  const cards=evidence.map(item=>`<article class="evidence-record"><div><b>${escapeHtml(item.evidence_id)}</b><span>${escapeHtml(item.source_id)}</span><span>${escapeHtml(item.locator)}</span></div><h4>${escapeHtml(item.fact)}</h4>${item.excerpt?`<blockquote>${escapeHtml(item.excerpt)}</blockquote>`:''}<p><b>条件</b> ${escapeHtml(item.conditions.join('；')||'未说明')}</p><p><b>局限</b> ${escapeHtml(item.limitations.join('；')||'未说明')}</p></article>`).join('');
+  $('#evidence-output').innerHTML=`<div class="retrieval-head"><h3>证据底稿</h3><span>${evidence.length} 条证据 · ${unavailable.length} 个不可提取来源</span></div>${cards||'<p class="source-warning">当前保留资料没有可提取证据，不能继续硬写报告。</p>'}<p class="source-notice">本阶段使用 ${tokens.toLocaleString()} tokens。每条证据都保留来源、定位、适用条件和局限。</p>${evidence.length?'<button class="primary deliver-button" id="start-deliverables">生成报告与 PPT 内容包 <span>→</span></button>':''}<div id="deliverables-output"></div>`;
+}
+
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('#start-deliverables');if(!button)return;
+  const evidenceRecords=currentEvidenceGroups.flatMap(group=>group.evidence_records);const figureRecords=currentEvidenceGroups.flatMap(group=>group.figure_records);
+  const output=$('#deliverables-output');setBusy(button,true,'正在生成调研报告… <span>·</span>');
+  try{
+    const reportResponse=await request('/api/report',{intent:currentIntent,plan:currentPlan,evidence_records:evidenceRecords,tier:currentTier});ensureActive();
+    setBusy(button,true,'正在编排 PPT 内容… <span>·</span>');
+    const pptResponse=await request('/api/ppt',{intent:currentIntent,report:reportResponse.data,evidence_records:evidenceRecords,figure_records:figureRecords,constraints:{language:'zh-CN',format:'storyboard_with_speaker_notes'}});
+    currentReport=reportResponse.data;await persistStage('P5','report_completed',currentReport,'report');currentPpt=pptResponse.data;await persistStage('P6','ppt_completed',currentPpt,'ppt');renderDeliverables(currentReport,currentPpt,Number(reportResponse.usage?.total_tokens||0)+Number(pptResponse.usage?.total_tokens||0));
+    document.querySelectorAll('.task-status li')[2].className='done';document.querySelectorAll('.task-status li')[3].className='active';document.querySelector('.progress-line i').style.width='72%';$('#task-status-title').textContent='报告与 PPT 内容包已生成';
+  }catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。证据底稿仍然保留，可以重试本阶段。</p>`;}
+  finally{setBusy(button,false,'重新生成报告与 PPT <span>↻</span>');}
+});
+
+function renderDeliverables(report,ppt,tokens){
+  const pages=ppt.pages.map(page=>`<article class="ppt-page"><div><b>${escapeHtml(page.page_id)}</b><span>${escapeHtml(page.evidence_ids.join(' · ')||'无外部事实')}</span></div><h4>${escapeHtml(page.title)}</h4><ul>${page.on_slide_text.map(item=>`<li>${escapeHtml(item)}</li>`).join('')}</ul><details><summary>演讲者注释</summary><p>${escapeHtml(page.speaker_notes)}</p></details></article>`).join('');
+  $('#deliverables-output').innerHTML=`<div class="retrieval-head"><h3>${escapeHtml(report.report_title)}</h3><span>${ppt.pages.length} 页内容</span></div><details class="report-result" open><summary>完整调研报告</summary><pre>${escapeHtml(report.report_markdown)}</pre></details><div class="ppt-result"><h3>PPT 逐页内容</h3>${pages}</div><p class="source-notice">报告与 PPT 共用证据编号；本阶段使用 ${tokens.toLocaleString()} tokens。当前输出是内容包，不是 .pptx 文件。</p><button class="primary verify-button" id="start-verification">独立核验并生成终稿 <span>→</span></button><div id="verification-output"></div>`;
+}
+
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('#start-verification');if(!button||!currentReport||!currentPpt)return;
+  const evidenceRecords=currentEvidenceGroups.flatMap(group=>group.evidence_records);const evidenceIds=evidenceRecords.map(item=>item.evidence_id);const sourceIds=[...new Set(evidenceRecords.map(item=>item.source_id))];
+  const output=$('#verification-output');setBusy(button,true,'正在拆分事实声明… <span>·</span>');
+  try{
+    const claimsResponse=await request('/api/claims',{report:currentReport,ppt:currentPpt,evidence_ids:evidenceIds});ensureActive();
+    setBusy(button,true,'正在独立核验引用… <span>·</span>');
+    await persistStage('P7','claims_completed',claimsResponse.data,'claims');const verifyResponse=await request('/api/verify',{claims:claimsResponse.data,evidence_records:evidenceRecords,source_records:currentSources,tier:currentTier});ensureActive();
+    setBusy(button,true,'正在同步修订终稿… <span>·</span>');
+    await persistStage('P8','verification_completed',verifyResponse.data,'verification');const finalResponse=await request('/api/final',{verification_results:verifyResponse.data,draft_report:currentReport,draft_ppt:currentPpt,claim_ids:claimsResponse.data.claims.map(item=>item.claim_id),source_ids:sourceIds,evidence_ids:evidenceIds,evidence_version:'1.0'});await persistStage('P9','final_completed',finalResponse.data,'final_delivery');await request(`/api/tasks/${currentTaskId}/complete`,{});
+    renderVerification(verifyResponse.data,finalResponse.data,{claims:Number(claimsResponse.usage?.total_tokens||0),verify:Number(verifyResponse.usage?.total_tokens||0),final:Number(finalResponse.usage?.total_tokens||0),route:verifyResponse.route});
+    document.querySelectorAll('.task-status li')[3].className='done';document.querySelectorAll('.task-status li')[4].className='done';document.querySelector('.progress-line i').style.width='100%';$('#task-status-title').textContent='可核验终稿已经完成';
+  }catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。草稿仍保留，核验失败不会伪装成终稿。</p>`;}
+  finally{setBusy(button,false,'重新核验终稿 <span>↻</span>');}
+});
+
+function renderVerification(verification,finalDelivery,meta){
+  const summary=verification.summary;const totalTokens=meta.claims+meta.verify+meta.final;
+  const changes=finalDelivery.change_log.map(item=>`<li><b>${escapeHtml(item.claim_id)}</b> · ${escapeHtml(item.action)} · ${escapeHtml(item.reason)}</li>`).join('');
+  $('#verification-output').innerHTML=`<div class="verification-summary"><div><b>${summary.supported}</b><span>支持</span></div><div><b>${summary.partially_supported}</b><span>部分支持</span></div><div><b>${summary.unsupported}</b><span>不支持</span></div><div><b>${summary.cannot_determine}</b><span>无法判断</span></div></div><details class="report-result" open><summary>核验后的最终报告</summary><pre>${escapeHtml(finalDelivery.final_report.markdown)}</pre></details><details class="report-result"><summary>修订记录</summary><ul class="change-log">${changes||'<li>没有需要修订的声明</li>'}</ul></details><a class="export-link" href="/api/tasks/${encodeURIComponent(currentTaskId)}/export.md">下载 Markdown 报告</a><p class="source-notice">核验路由：${escapeHtml(meta.route?.model||'unknown')}（${escapeHtml(meta.route?.reason||'')}）；P7—P9 共使用 ${totalTokens.toLocaleString()} tokens。</p>`;
+}
+
+$('#cancel-task').addEventListener('click',async()=>{if(!currentTaskId)return;await request(`/api/tasks/${currentTaskId}/cancel`,{});taskPaused=true;$('#cancel-task').hidden=true;$('#resume-task').hidden=false;$('#task-status-title').textContent='任务已暂停，已有结果已保存';});
+$('#resume-task').addEventListener('click',async()=>{if(!currentTaskId)return;await request(`/api/tasks/${currentTaskId}/resume`,{});taskPaused=false;$('#resume-task').hidden=true;$('#cancel-task').hidden=false;$('#task-status-title').textContent='任务已恢复，可以从当前阶段继续';});

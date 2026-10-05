@@ -1,0 +1,9 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+  "required":["verification_version","results","summary"],
+  "properties":{
+    "verification_version":{"type":"string","minLength":1},
+    "results":{"type":"array","items":{"type":"object","required":["claim_id","source_identity","support_status","issue_codes","explanation","action","revised_claim","valid_evidence_ids"],"properties":{"claim_id":{"type":"string","minLength":1},"source_identity":{"type":"object","required":["matched","source_ids"],"properties":{"matched":{"type":"boolean"},"source_ids":{"type":"array","items":{"type":"string"}}},"additionalProperties":false},"support_status":{"enum":["supported","partially_supported","unsupported","cannot_determine"]},"issue_codes":{"type":"array","items":{"enum":["source_mismatch","scope_overreach","causal_overreach","number_mismatch","unit_mismatch","condition_missing","baseline_missing","time_mismatch","stage_mismatch","tone_overstatement","citation_missing","evidence_missing","none"]}},"explanation":{"type":"string","minLength":1},"action":{"enum":["keep","revise","remove","mark_unverified"]},"revised_claim":{"type":["string","null"]},"valid_evidence_ids":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}},
+    "summary":{"type":"object","required":["supported","partially_supported","unsupported","cannot_determine","high_risk_remaining"],"properties":{"supported":{"type":"integer","minimum":0},"partially_supported":{"type":"integer","minimum":0},"unsupported":{"type":"integer","minimum":0},"cannot_determine":{"type":"integer","minimum":0},"high_risk_remaining":{"type":"integer","minimum":0}},"additionalProperties":false}
+  },"additionalProperties":false
+}

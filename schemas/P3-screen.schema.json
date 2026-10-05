@@ -1,0 +1,11 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+  "required":["screening_version","topic","decisions","summary"],
+  "properties":{
+    "screening_version":{"type":"string","minLength":1},"topic":{"type":"string","minLength":1},
+    "decisions":{"type":"array","items":{"type":"object","required":["source_id","status","question_ids","intended_uses","reason","priority","relevance_score","evidence_type","flags"],"properties":{
+      "source_id":{"type":"string","minLength":1},"status":{"enum":["keep","reserve","drop"]},"question_ids":{"type":"array","items":{"type":"string"}},"intended_uses":{"type":"array","items":{"type":"string"}},"reason":{"type":"string","minLength":1},"priority":{"enum":["high","medium","low"]},"relevance_score":{"type":"number","minimum":0,"maximum":1},"evidence_type":{"enum":["systematic_review","meta_analysis","randomized_trial","cohort","case_control","cross_sectional","case_report","animal","in_vitro","methods","official","patent","other","unknown"]},"flags":{"type":"array","items":{"type":"string"}}
+    },"additionalProperties":false}},
+    "summary":{"type":"object","required":["candidate_count","keep_count","reserve_count","drop_count","open_issues"],"properties":{"candidate_count":{"type":"integer","minimum":0},"keep_count":{"type":"integer","minimum":0},"reserve_count":{"type":"integer","minimum":0},"drop_count":{"type":"integer","minimum":0},"open_issues":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}
+  },"additionalProperties":false
+}

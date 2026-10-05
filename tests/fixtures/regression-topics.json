@@ -1,0 +1,10 @@
+{
+  "version":"1.0",
+  "topics":[
+    {"id":"crispr","topic":"CRISPR分子诊断的主要技术路线","focus":"技术路线与证据边界"},
+    {"id":"mrna","topic":"mRNA药物递送系统的主要路线","focus":"递送材料与适用条件"},
+    {"id":"microbiome-aging","topic":"肠道菌群与衰老的研究证据","focus":"相关性与因果边界"},
+    {"id":"single-cell-tme","topic":"单细胞技术研究肿瘤微环境","focus":"方法路线与样本限制"},
+    {"id":"synbio-fermentation","topic":"合成生物学发酵生产的技术路线","focus":"工程路线与放大限制"}
+  ]
+}
