@@ -107,10 +107,31 @@ class WorkflowServiceTests(unittest.TestCase):
         ppt = {"deck_title": "deck", "storyline": "story", "pages": [{"page_id": str(index)} for index in range(4)]}
         output, usage, metadata = service.extract_claims({}, ppt, ["EV-1"], "fast")
 
-        self.assertEqual(calls, ["report", "ppt_pages_1_3", "ppt_pages_4_4"])
-        self.assertEqual([item["claim_id"] for item in output["claims"]], ["CLM-0001", "CLM-0002", "CLM-0003"])
-        self.assertEqual(usage["total_tokens"], 6)
-        self.assertEqual(metadata["batches"], 3)
+        self.assertEqual(calls, ["report", "ppt_page_1", "ppt_page_2", "ppt_page_3", "ppt_page_4"])
+        self.assertEqual([item["claim_id"] for item in output["claims"]], ["CLM-0001", "CLM-0002", "CLM-0003", "CLM-0004", "CLM-0005"])
+        self.assertEqual(usage["total_tokens"], 10)
+        self.assertEqual(metadata["batches"], 5)
+
+    def test_extract_claims_chunks_long_report_before_model_call(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P7": "claims"})
+        calls = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            calls.append((payload["batch_label"], len(payload["report"].get("report_markdown", ""))))
+            claim = {
+                "claim_id": "temporary", "location_type": "report_section", "section_or_page_id": "S1",
+                "original_text": "text", "atomic_claim": "claim " + str(len(calls)), "claim_type": "other",
+                "cited_evidence_ids": ["EV-1"], "risk_level": "low",
+            }
+            return {"claim_set_version": "1", "claims": [claim], "extraction_notes": []}, {"total_tokens": 1}, {}
+
+        service.generate = generate
+        report = {"report_markdown": ("paragraph\n" * 1200)}
+        service.extract_claims(report, {"pages": []}, ["EV-1"], "fast")
+
+        self.assertGreater(len(calls), 1)
+        self.assertTrue(all(size <= 1200 for _, size in calls))
+        self.assertTrue(all(label.startswith("report_part_") for label, _ in calls))
 
     def test_verify_claims_deduplicates_then_expands_results(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
@@ -138,6 +159,27 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(metadata["unique_claims"], 1)
         self.assertEqual(metadata["claims"], 2)
         self.assertEqual(metadata["reason"], "high_risk_upgrade")
+
+    def test_deterministic_final_applies_revision_without_model_tokens(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claims = [{
+            "claim_id": "CL-1", "location_type": "report_section", "section_or_page_id": "S1",
+            "original_text": "能够治愈疾病。", "atomic_claim": "能够治愈疾病", "claim_type": "efficacy",
+            "cited_evidence_ids": ["EV-1"], "risk_level": "high",
+        }]
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "研究观察到潜在改善。", "explanation": "证据仅支持相关性",
+        }]}
+        report = {"report_title": "报告", "report_markdown": "结果显示能够治愈疾病。", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "汇报", "storyline": "证据", "pages": [{"page_id": "P1", "title": "结论", "on_slide_text": ["谨慎解释"], "speaker_notes": "", "evidence_ids": ["EV-1"]}]}
+
+        output, usage = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
+
+        self.assertIn("研究观察到潜在改善", output["final_report"]["markdown"])
+        self.assertNotIn("能够治愈", output["final_report"]["markdown"])
+        self.assertEqual(output["change_log"][0]["action"], "revised")
+        self.assertEqual(usage["total_tokens"], 0)
 
 
 if __name__ == "__main__":

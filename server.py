@@ -259,11 +259,17 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage, "route": metadata})
                 return
             if path == "/api/final":
-                output, usage = self.server.workflow.assemble_final(
-                    body.get("verification_results"), body.get("draft_report"), body.get("draft_ppt"),
-                    body.get("claim_ids"), body.get("source_ids"), body.get("evidence_ids"),
-                    body.get("evidence_version", "1.0"), body.get("tier", "fast"),
-                )
+                if isinstance(body.get("claims"), list):
+                    output, usage = self.server.workflow.assemble_final_deterministic(
+                        body.get("verification_results"), body.get("draft_report"), body.get("draft_ppt"),
+                        body.get("claims"), body.get("source_ids"), body.get("evidence_ids"), body.get("evidence_version", "1.0"),
+                    )
+                else:
+                    output, usage = self.server.workflow.assemble_final(
+                        body.get("verification_results"), body.get("draft_report"), body.get("draft_ppt"),
+                        body.get("claim_ids"), body.get("source_ids"), body.get("evidence_ids"),
+                        body.get("evidence_version", "1.0"), body.get("tier", "fast"),
+                    )
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})

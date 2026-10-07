@@ -1,5 +1,6 @@
 """Application service that binds stages to prompts, routes, and model calls."""
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -18,6 +19,7 @@ def add_usage(total, partial):
 
 
 class WorkflowService:
+    CLAIMS_PER_BATCH_LIMIT = 6
     def __init__(self, api_key, model_router, system_prompt, stage_prompts, model_client=deepseek_json):
         self.api_key = api_key
         self.model_router = model_router
@@ -73,13 +75,37 @@ class WorkflowService:
             raise ValueError(error)
         return values
 
+    @staticmethod
+    def _text_chunks(text, limit=1200):
+        text = str(text or "")
+        if not text:
+            return [""]
+        chunks, current = [], ""
+        for paragraph in text.splitlines(keepends=True):
+            while len(paragraph) > limit:
+                if current:
+                    chunks.append(current)
+                    current = ""
+                chunks.append(paragraph[:limit])
+                paragraph = paragraph[limit:]
+            if current and len(current) + len(paragraph) > limit:
+                chunks.append(current)
+                current = ""
+            current += paragraph
+        if current or not chunks:
+            chunks.append(current)
+        return chunks
+
     def create_intent(self, topic, tier="fast"):
         topic = str(topic or "").strip()
         tier = self._tier(tier)
         if not 2 <= len(topic) <= 500:
             raise ValueError("请输入 2—500 字的主题并选择有效版本")
-        output, usage, _ = self.generate("P1", tier, {"topic": topic, "tier": tier, "runtime_config": {"language": "zh-CN"}})
-        return validate_intent(output), usage
+        output, usage, _ = self.generate(
+            "P1", tier, {"topic": topic, "tier": tier, "runtime_config": {"language": "zh-CN"}},
+            validate_intent, max_attempts=3,
+        )
+        return output, usage
 
     def create_plan(self, topic, clarification="", tier="fast"):
         topic = str(topic or "").strip()
@@ -88,12 +114,14 @@ class WorkflowService:
         if not 2 <= len(topic) <= 500:
             raise ValueError("规划输入无效")
         normalized = topic + (("；用户澄清：" + clarification) if clarification else "")
-        output, usage, _ = self.generate("P2", tier, {
-            "intent": {"domain": "life_science", "normalized_topic": normalized, "tier": tier, "need_clarification": False},
-            "tier": tier, "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
-            "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
-        })
-        return validate_plan(output), usage
+        output, usage, _ = self.generate(
+            "P2", tier, {
+                "intent": {"domain": "life_science", "normalized_topic": normalized, "tier": tier, "need_clarification": False},
+                "tier": tier, "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
+                "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
+            }, validate_plan, max_tokens=8000, max_attempts=3,
+        )
+        return output, usage
 
     def screen_sources(self, topic, plan, candidates, tier="fast"):
         topic = str(topic or "").strip()
@@ -174,19 +202,111 @@ class WorkflowService:
         )
         return output, usage
 
+    def assemble_final_deterministic(self, verification, report, ppt, claims, source_ids, evidence_ids, evidence_version="1.0"):
+        """Apply verified edits without asking the model to reproduce the full delivery."""
+        claim_ids = self._ids(claims, "claim_id", "最终装配声明编号缺失或重复")
+        results = {item["claim_id"]: item for item in verification.get("results", [])}
+        if set(results) != set(claim_ids):
+            raise ValueError("最终装配必须包含全部声明的核验结果")
+        markdown = str(report.get("report_markdown", ""))
+        pages = copy.deepcopy(ppt.get("pages", []))
+        pages_by_id = {page.get("page_id"): page for page in pages}
+        original_markdown = markdown
+        original_pages = copy.deepcopy(pages_by_id)
+        open_issues = list(report.get("open_issues", []))
+        change_log = []
+        action_names = {"keep": "kept", "revise": "revised", "remove": "removed", "mark_unverified": "marked_unverified"}
+
+        def replace_once(text, original, replacement):
+            candidates = [original, original.rstrip("。；;，,"), original.strip()]
+            for candidate in dict.fromkeys(item for item in candidates if item):
+                if candidate in text:
+                    return text.replace(candidate, replacement, 1), True
+            return text, False
+
+        for claim in claims:
+            result = results[claim["claim_id"]]
+            action = result["action"]
+            change_log.append({"claim_id": claim["claim_id"], "action": action_names[action], "reason": result["explanation"]})
+            if action == "keep":
+                continue
+            original = claim["original_text"]
+            replacement = result.get("revised_claim") or ""
+            if action == "mark_unverified":
+                replacement = (replacement or original) + "（未核实）"
+            located = False
+            if claim["location_type"] == "report_section":
+                markdown, located = replace_once(markdown, original, replacement)
+                if not located and claim["section_or_page_id"].startswith("open_issues_"):
+                    open_issues.append(replacement)
+                    located = True
+            else:
+                page = pages_by_id.get(claim["section_or_page_id"])
+                if page:
+                    field = "speaker_notes" if claim["location_type"] == "ppt_speaker_note" else "on_slide_text"
+                    if field == "speaker_notes":
+                        page[field], located = replace_once(page.get(field, ""), original, replacement)
+                    else:
+                        for index, line in enumerate(page.get(field, [])):
+                            page[field][index], located = replace_once(line, original, replacement)
+                            if located:
+                                break
+            if not located:
+                originally_located = False
+                if claim["location_type"] == "report_section":
+                    _, originally_located = replace_once(original_markdown, original, "")
+                else:
+                    original_page = original_pages.get(claim["section_or_page_id"], {})
+                    original_text = original_page.get("speaker_notes", "") if claim["location_type"] == "ppt_speaker_note" else "\n".join(original_page.get("on_slide_text", []))
+                    _, originally_located = replace_once(original_text, original, "")
+                if originally_located:
+                    if replacement and claim["location_type"] == "report_section":
+                        markdown += "\n\n核验修订：%s" % replacement
+                    elif replacement and page and claim["location_type"] == "ppt_speaker_note":
+                        page["speaker_notes"] = (page.get("speaker_notes", "") + " 核验修订：" + replacement).strip()
+                    elif replacement and page:
+                        page.setdefault("on_slide_text", []).append("核验修订：" + replacement)
+                    located = True
+                if not located:
+                    raise ValueError("无法在交付物中定位声明 %s，拒绝生成未落实核验结论的终稿" % claim["claim_id"])
+
+        final_pages = [{key: page.get(key) for key in ("page_id", "title", "on_slide_text", "speaker_notes", "evidence_ids")} for page in pages]
+        output = {
+            "delivery_version": "P9-deterministic-1.0", "evidence_version": str(evidence_version),
+            "final_report": {"title": report.get("report_title", "调研报告"), "markdown": markdown, "used_evidence_ids": list(report.get("used_evidence_ids", evidence_ids))},
+            "final_ppt": {"deck_title": ppt.get("deck_title", "调研汇报"), "storyline": ppt.get("storyline", "证据驱动的研究综述"), "pages": final_pages},
+            "verification_note": "已按独立核验结果确定性应用保留、降级、删除和未核实标记。",
+            "open_issues": list(dict.fromkeys(item for item in open_issues if item)),
+            "source_ids": list(source_ids), "evidence_ids": list(evidence_ids), "change_log": change_log,
+        }
+        return validate_final(output, claim_ids, source_ids, evidence_ids, verification), {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
+
     def extract_claims(self, report, ppt, evidence_ids, tier):
-        batches = [(report, {"deck_title": ppt.get("deck_title", ""), "storyline": "", "pages": []}, "report")]
+        report_chunks = self._text_chunks(report.get("report_markdown", ""))
+        batches = []
+        for index, chunk in enumerate(report_chunks, 1):
+            partial_report = dict(report)
+            partial_report["report_markdown"] = chunk
+            label = "report" if len(report_chunks) == 1 else "report_part_%d_%d" % (index, len(report_chunks))
+            batches.append((partial_report, {"deck_title": ppt.get("deck_title", ""), "storyline": "", "pages": []}, label))
         pages = ppt.get("pages", [])
-        for index in range(0, len(pages), 3):
-            label = "ppt_pages_%d_%d" % (index + 1, min(index + 3, len(pages)))
-            batches.append(({}, {"deck_title": ppt.get("deck_title", ""), "storyline": ppt.get("storyline", ""), "pages": pages[index:index + 3]}, label))
+        for index, page in enumerate(pages, 1):
+            label = "ppt_page_%d" % index
+            batches.append(({}, {"deck_title": ppt.get("deck_title", ""), "storyline": ppt.get("storyline", ""), "pages": [page]}, label))
         merged_claims, merged_notes = [], []
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
+
+        def validate_batch(value):
+            checked = validate_claims(value, evidence_ids)
+            if len(checked["claims"]) > self.CLAIMS_PER_BATCH_LIMIT:
+                raise ValueError("单批声明超过 %d 条上限" % self.CLAIMS_PER_BATCH_LIMIT)
+            return checked
+
         for batch_report, batch_ppt, label in batches:
             partial, partial_usage, _ = self.generate(
                 "P7", tier,
                 {"report": batch_report, "ppt_package": batch_ppt, "evidence_ids": evidence_ids, "batch_label": label, "output_contract": load_contract("P7")},
-                lambda value: validate_claims(value, evidence_ids), max_tokens=8000,
+                validate_batch, max_tokens=4000, max_attempts=3,
             )
             merged_claims.extend(partial["claims"])
             merged_notes.extend("%s: %s" % (label, note) for note in partial["extraction_notes"])

@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 import urllib.request
 
-from run_live_regression import ACTIVE_TASK, LOCAL_OPENER, persist, post, set_auth
+from run_live_regression import (
+    ACTIVE_TASK, LOCAL_OPENER, MAX_VERIFICATION_CLAIMS, persist, post, query_from_plan, set_auth,
+)
 
 
 def get(base, path, timeout=60):
@@ -31,25 +33,67 @@ def merge_verification(results, claims):
 def resume(base, task_id, task_token):
     set_auth(task_id, task_token)
     task = get(base, "/api/tasks/%s" % task_id)["data"]
-    intent, plan = artifact(task, "intent"), artifact(task, "plan")
-    sources = artifact(task, "sources")["records"]
-    groups = artifact(task, "evidence")["groups"]
+    intent = artifact(task, "intent")
+    if intent is None:
+        print("[%s] resume P1" % task["topic"], flush=True)
+        intent = post(base, "/api/intent", {"topic": task["topic"], "tier": task["tier"]})["data"]
+        persist(base, task_id, "P1", "intent_completed", intent, "intent")
+    plan = artifact(task, "plan")
+    if plan is None:
+        print("[%s] resume P2" % task["topic"], flush=True)
+        clarification = intent.get("scope_hint", "") if intent.get("need_clarification") else ""
+        plan = post(base, "/api/plan", {"topic": task["topic"], "tier": task["tier"], "clarification": clarification})["data"]
+        persist(base, task_id, "P2", "plan_completed", plan, "plan")
+    source_artifact = artifact(task, "sources")
+    if source_artifact is None:
+        print("[%s] resume retrieval" % task["topic"], flush=True)
+        source_artifact = post(base, "/api/search", {"topic": task["topic"], "query": query_from_plan(plan, task["topic"])})["data"]
+        source_artifact["records"] = source_artifact["records"][:8]
+        if not source_artifact["records"]:
+            raise RuntimeError("%s returned no sources" % task["topic"])
+        persist(base, task_id, "P2", "search_completed", source_artifact, "sources")
+    sources = source_artifact["records"]
+    screening = artifact(task, "screening")
+    if screening is None:
+        print("[%s] resume P3" % task["topic"], flush=True)
+        screening = post(base, "/api/screen", {"topic": task["topic"], "tier": task["tier"], "plan": plan, "candidates": sources})["data"]
+        persist(base, task_id, "P3", "screening_completed", screening, "screening")
+    evidence_artifact = artifact(task, "evidence")
+    if evidence_artifact is None:
+        print("[%s] resume P4" % task["topic"], flush=True)
+        groups = []
+        for decision in (item for item in screening["decisions"] if item["status"] == "keep"):
+            source = next(item for item in sources if item["source_id"] == decision["source_id"])
+            groups.append(post(base, "/api/evidence", {"source_record": source, "question_ids": decision["question_ids"], "tier": task["tier"]})["data"])
+        if not any(group["evidence_records"] for group in groups):
+            raise RuntimeError("%s produced no extractable evidence" % task["topic"])
+        persist(base, task_id, "P4", "evidence_completed", {"groups": groups}, "evidence")
+    else:
+        groups = evidence_artifact["groups"]
     evidence_records = [item for group in groups for item in group["evidence_records"]]
     figure_records = [item for group in groups for item in group["figure_records"]]
     evidence_ids = [item["evidence_id"] for item in evidence_records]
     source_ids = sorted({item["source_id"] for item in evidence_records})
     selected_sources = [item for item in sources if item["source_id"] in set(source_ids)]
     report = artifact(task, "report")
+    if report is None:
+        print("[%s] resume P5" % task["topic"], flush=True)
+        report = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "tier": task["tier"]})["data"]
+        persist(base, task_id, "P5", "report_completed", report, "report")
     ppt = artifact(task, "ppt")
     if ppt is None:
         print("[%s] resume P6" % task["topic"], flush=True)
-        ppt = post(base, "/api/ppt", {"intent": intent, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}})["data"]
+        ppt = post(base, "/api/ppt", {"intent": intent, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}, "tier": task["tier"]})["data"]
         persist(base, task_id, "P6", "ppt_completed", ppt, "ppt")
     claims = artifact(task, "claims")
-    if claims is None:
-        print("[%s] resume P7" % task["topic"], flush=True)
-        claims = post(base, "/api/claims", {"report": report, "ppt": ppt, "evidence_ids": evidence_ids})["data"]
-        persist(base, task_id, "P7", "claims_completed", claims, "claims")
+    regenerate_claims = claims is not None and len(claims.get("claims", [])) > MAX_VERIFICATION_CLAIMS
+    if claims is None or regenerate_claims:
+        print("[%s] resume P7%s" % (task["topic"], " (replace over-budget artifact)" if regenerate_claims else ""), flush=True)
+        claims = post(base, "/api/claims", {"report": report, "ppt": ppt, "evidence_ids": evidence_ids, "tier": task["tier"]})["data"]
+        if len(claims.get("claims", [])) > MAX_VERIFICATION_CLAIMS:
+            raise RuntimeError("P7 produced %d claims, exceeding verification budget limit %d" % (len(claims["claims"]), MAX_VERIFICATION_CLAIMS))
+        event_type = "claims_regenerated_over_budget" if regenerate_claims else "claims_completed"
+        persist(base, task_id, "P7", event_type, claims, "claims")
     verification = artifact(task, "verification")
     if verification is None:
         print("[%s] resume P8 (%d claims)" % (task["topic"], len(claims["claims"])), flush=True)
@@ -85,7 +129,7 @@ def resume(base, task_id, task_token):
     final = artifact(task, "final_delivery")
     if final is None:
         print("[%s] resume P9" % task["topic"], flush=True)
-        final = post(base, "/api/final", {"verification_results": verification, "draft_report": report, "draft_ppt": ppt, "claim_ids": [item["claim_id"] for item in claims["claims"]], "source_ids": source_ids, "evidence_ids": evidence_ids, "evidence_version": groups[0]["evidence_version"]})["data"]
+        final = post(base, "/api/final", {"verification_results": verification, "draft_report": report, "draft_ppt": ppt, "claims": claims["claims"], "claim_ids": [item["claim_id"] for item in claims["claims"]], "source_ids": source_ids, "evidence_ids": evidence_ids, "evidence_version": groups[0]["evidence_version"], "tier": task["tier"]})["data"]
         persist(base, task_id, "P9", "final_completed", final, "final_delivery")
     post(base, "/api/tasks/%s/complete" % task_id, {})
     return {"task_id": task_id, "topic": task["topic"], "claim_count": len(claims["claims"]), "page_count": len(final["final_ppt"]["pages"]), "verification_summary": verification["summary"]}

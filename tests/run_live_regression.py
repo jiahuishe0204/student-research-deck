@@ -13,6 +13,7 @@ LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 ACTIVE_TASK = {"id": "", "token": ""}
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_STATE_DIR = ROOT / "data" / "private"
+MAX_VERIFICATION_CLAIMS = 120
 
 
 def set_auth(task_id, token):
@@ -183,6 +184,8 @@ def run_topic(base, topic, tier):
     response = post(base, "/api/claims", {"report": report, "ppt": ppt, "evidence_ids": evidence_ids, "tier": tier})
     claims = response["data"]
     usage["P7"] = response.get("usage", {}).get("total_tokens", 0)
+    if len(claims.get("claims", [])) > MAX_VERIFICATION_CLAIMS:
+        raise RuntimeError("P7 produced %d claims, exceeding verification budget limit %d" % (len(claims["claims"]), MAX_VERIFICATION_CLAIMS))
     persist(base, task_id, "P7", "claims_completed", claims, "claims")
 
     selected_ids = {item["source_id"] for item in evidence_records}
@@ -193,7 +196,7 @@ def run_topic(base, topic, tier):
     persist(base, task_id, "P8", "verification_completed", verification, "verification")
 
     print("[%s] P9 final" % topic, flush=True)
-    response = post(base, "/api/final", {"verification_results": verification, "draft_report": report, "draft_ppt": ppt, "claim_ids": [item["claim_id"] for item in claims["claims"]], "source_ids": sorted(selected_ids), "evidence_ids": evidence_ids, "evidence_version": evidence_groups[0]["evidence_version"], "tier": tier})
+    response = post(base, "/api/final", {"verification_results": verification, "draft_report": report, "draft_ppt": ppt, "claims": claims["claims"], "claim_ids": [item["claim_id"] for item in claims["claims"]], "source_ids": sorted(selected_ids), "evidence_ids": evidence_ids, "evidence_version": evidence_groups[0]["evidence_version"], "tier": tier})
     final = response["data"]
     usage["P9"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P9", "final_completed", final, "final_delivery")
