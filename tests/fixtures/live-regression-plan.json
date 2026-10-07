@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "completed_ids": ["crispr", "microbiome-aging"],
+  "pending_ids": ["single-cell-tme", "mrna", "synbio-fermentation"],
+  "acceptance": {
+    "minimum_candidates": 1,
+    "minimum_kept_sources": 1,
+    "minimum_evidence_records": 1,
+    "minimum_ppt_pages": 1,
+    "maximum_high_risk_remaining": 0,
+    "required_final_status": "completed"
+  }
+}

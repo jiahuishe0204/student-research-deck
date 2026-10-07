@@ -1,6 +1,7 @@
 const $=selector=>document.querySelector(selector);
 const form=$('#intent-form'),task=$('#task'),result=$('#intent-result'),title=$('#intent-title'),copy=$('#intent-copy'),error=$('#error'),confirmButton=$('#confirm');
 let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,currentTaskToken=null,taskPaused=false;
+const taskSessionKey='research-delivery.active-task.v1';
 
 const previews={
   slides:`<div class="slide-preview"><div class="slide-list"><button class="active">01 · 问题</button><button>02 · 路线</button><button>03 · 证据</button></div><div class="slide-canvas"><small>01 / RESEARCH QUESTION</small><div><h3>实体瘤为什么仍是 CAR-T 的困难场景？</h3><ul><li>抗原异质性带来逃逸风险</li><li>肿瘤微环境抑制 T 细胞活性</li><li>浸润与持续性仍限制疗效</li></ul></div><small>SOURCES · 03 / 07 / 11</small></div><aside class="speaker-note"><h4>演讲者注释</h4><p>这一页先建立问题，不急着给出路线优劣。讲述时用三个障碍解释后续技术为什么分别从靶点、细胞状态和递送方式入手。</p><span class="source-chip">来源 03</span><span class="source-chip">来源 07</span></aside></div>`,
@@ -11,6 +12,9 @@ const previews={
 function escapeHtml(value){return String(value??'').replace(/[&<>"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[char]));}
 function showPreview(name){$('#preview-body').innerHTML=previews[name];document.querySelectorAll('.preview-tabs button').forEach(button=>button.classList.toggle('active',button.dataset.preview===name));}
 async function request(path,payload){const headers={'Content-Type':'application/json'};if(currentTaskId&&currentTaskToken){headers['X-Task-ID']=currentTaskId;headers['X-Task-Token']=currentTaskToken;}const response=await fetch(path,{method:'POST',headers,body:JSON.stringify(payload)});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.error||'请求失败');return data;}
+async function fetchCurrentTask(){const response=await fetch(`/api/tasks/${encodeURIComponent(currentTaskId)}`,{headers:{'X-Task-ID':currentTaskId,'X-Task-Token':currentTaskToken}});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.error||'任务恢复失败');return data.data;}
+function saveTaskSession(){if(currentTaskId&&currentTaskToken)sessionStorage.setItem(taskSessionKey,JSON.stringify({taskId:currentTaskId,token:currentTaskToken}));}
+function clearTaskSession(){sessionStorage.removeItem(taskSessionKey);currentTaskId=null;currentTaskToken=null;}
 async function downloadReport(){const response=await fetch(`/api/tasks/${encodeURIComponent(currentTaskId)}/export.md`,{headers:{'X-Task-ID':currentTaskId,'X-Task-Token':currentTaskToken}});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.error||'报告下载失败');}const blob=await response.blob(),link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`${currentTaskId}.md`;link.click();URL.revokeObjectURL(link.href);}
 function setBusy(button,busy,text){button.disabled=busy;if(text)button.innerHTML=text;}
 async function persistStage(stage,eventType,payload,artifactKind){if(!currentTaskId)return;try{await request(`/api/tasks/${currentTaskId}/events`,{stage,event_type:eventType,payload,artifact_kind:artifactKind||null});}catch(exc){console.warn('任务状态保存失败',exc);}}
@@ -25,7 +29,7 @@ form.addEventListener('submit',async event=>{
   if(currentTopic.length<2){error.textContent='输入一个调研主题就可以开始。';task.focus();return;}
   error.textContent='';setBusy(form.querySelector('.primary'),true,'正在理解题目… <span>·</span>');result.hidden=true;
   try{
-    const taskResponse=await request('/api/tasks',{topic:currentTopic,tier:currentTier});currentTaskId=taskResponse.data.task_id;currentTaskToken=taskResponse.data.owner_token;
+    const taskResponse=await request('/api/tasks',{topic:currentTopic,tier:currentTier});currentTaskId=taskResponse.data.task_id;currentTaskToken=taskResponse.data.owner_token;saveTaskSession();
     const response=await request('/api/intent',{topic:currentTopic,tier:currentTier});currentIntent=response.data;
     await persistStage('P1','intent_completed',currentIntent,'intent');
     title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);
@@ -159,3 +163,32 @@ function renderVerification(verification,finalDelivery,meta){
 
 $('#cancel-task').addEventListener('click',async()=>{if(!currentTaskId)return;await request(`/api/tasks/${currentTaskId}/cancel`,{});taskPaused=true;$('#cancel-task').hidden=true;$('#resume-task').hidden=false;$('#task-status-title').textContent='任务已暂停，已有结果已保存';});
 $('#resume-task').addEventListener('click',async()=>{if(!currentTaskId)return;await request(`/api/tasks/${currentTaskId}/resume`,{});taskPaused=false;$('#resume-task').hidden=true;$('#cancel-task').hidden=false;$('#task-status-title').textContent='任务已恢复，可以从当前阶段继续';});
+$('#forget-task').addEventListener('click',()=>{clearTaskSession();location.reload();});
+
+function restoreArtifacts(saved){
+  const artifacts=saved.artifacts||{},read=kind=>artifacts[kind]?.data;
+  currentTopic=saved.topic;currentTier=saved.tier;currentIntent=read('intent');currentPlan=read('plan');currentSources=read('sources')?.records||[];currentScreening=read('screening')||null;currentEvidenceGroups=read('evidence')?.groups||[];currentReport=read('report')||null;currentPpt=read('ppt')||null;
+  task.value=currentTopic;const tierInput=$(`input[name="tier"][value="${currentTier}"]`);if(tierInput)tierInput.checked=true;
+  if(currentIntent){title.textContent=currentIntent.normalized_topic||currentTopic;copy.textContent=currentIntent.confirmation_text||currentIntent.scope_hint||'';result.hidden=false;}
+  if(!currentPlan)return;
+  $('#task-workspace').hidden=false;renderPlan(currentPlan,{});
+  if(currentSources.length)renderSources(read('sources'));
+  if(currentScreening)renderScreening(currentScreening,{});
+  if(currentEvidenceGroups.length)renderEvidence(currentEvidenceGroups,0);
+  if(currentReport&&currentPpt)renderDeliverables(currentReport,currentPpt,0);
+  const verification=read('verification'),finalDelivery=read('final_delivery');
+  if(verification&&finalDelivery)renderVerification(verification,finalDelivery,{claims:0,verify:0,final:0,route:{model:'已保存任务',reason:'从服务端恢复'}});
+  const stageNumber=Number(String(saved.current_stage||'P1').slice(1))||1;document.querySelector('.progress-line i').style.width=`${Math.min(100,Math.max(20,stageNumber*11))}%`;
+  document.querySelectorAll('.task-status li').forEach((item,index)=>{item.className=index<Math.ceil(stageNumber/2)?'done':(index===Math.ceil(stageNumber/2)?'active':'');});
+  taskPaused=saved.status==='cancelled';$('#cancel-task').hidden=taskPaused||saved.status==='completed';$('#resume-task').hidden=!taskPaused;
+  $('#task-status-title').textContent=saved.status==='completed'?'可核验终稿已经完成':(taskPaused?'任务已暂停，已有结果已保存':`已恢复到 ${saved.current_stage||'当前'} 阶段`);
+}
+
+async function restoreTaskSession(){
+  let saved;try{saved=JSON.parse(sessionStorage.getItem(taskSessionKey)||'null');}catch(_exc){clearTaskSession();return;}
+  if(!saved?.taskId||!saved?.token)return;
+  currentTaskId=saved.taskId;currentTaskToken=saved.token;
+  try{restoreArtifacts(await fetchCurrentTask());}catch(exc){console.warn('任务恢复失败',exc);clearTaskSession();}
+}
+
+restoreTaskSession();

@@ -19,6 +19,8 @@ required = [
     "web/mvp.css",
     "web/styles.css",
     "web/app.js",
+    ".github/workflows/ci.yml",
+    "tests/fixtures/live-regression-plan.json",
 ]
 
 for relative in required:
@@ -47,5 +49,11 @@ assert "/api/intent" in app
 assert "/api/plan" in app
 assert "/api/search" in app
 assert "tier:currentTier" in app, "frontend must preserve the selected tier across later stages"
+assert "sessionStorage" in app, "task credentials should survive refresh only within the current tab"
+assert "localStorage" not in app, "task credentials must not persist beyond the browser tab"
+
+workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+for command in ["python -m unittest discover", "python tests/validate_project.py", "python tests/validate_prompt_assets.py"]:
+    assert command in workflow, "CI workflow missing: %s" % command
 
 print("project validation passed")

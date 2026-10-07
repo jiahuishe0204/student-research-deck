@@ -6,9 +6,11 @@ import json
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 ACTIVE_TASK = {"id": "", "token": ""}
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def set_auth(task_id, token):
@@ -61,6 +63,18 @@ def merge_verification(results):
     summary = {status: sum(item["support_status"] == status for item in results) for status in ("supported", "partially_supported", "unsupported", "cannot_determine")}
     summary["high_risk_remaining"] = 0
     return {"verification_version": "P8-resumable-1.0", "results": results, "summary": summary}
+
+
+def acceptance_failures(result, criteria):
+    checks = [
+        (result["candidate_count"] >= criteria["minimum_candidates"], "候选来源不足"),
+        (result["kept_count"] >= criteria["minimum_kept_sources"], "保留来源不足"),
+        (result["evidence_count"] >= criteria["minimum_evidence_records"], "可提取证据不足"),
+        (result["page_count"] >= criteria["minimum_ppt_pages"], "PPT 页数不足"),
+        (result["verification_summary"]["high_risk_remaining"] <= criteria["maximum_high_risk_remaining"], "仍有高风险声明"),
+        (result["final_status"] == criteria["required_final_status"], "任务未完成 P9"),
+    ]
+    return [message for passed, message in checks if not passed]
 
 
 def verify_with_checkpoints(base, task_id, topic, tier, claims, evidence_records, source_records):
@@ -127,7 +141,7 @@ def run_topic(base, topic, tier):
     print("[%s] P4 evidence %d kept sources" % (topic, len(kept)), flush=True)
     for decision in kept:
         source = next(item for item in candidates if item["source_id"] == decision["source_id"])
-        response = post(base, "/api/evidence", {"source_record": source, "question_ids": decision["question_ids"]})
+        response = post(base, "/api/evidence", {"source_record": source, "question_ids": decision["question_ids"], "tier": tier})
         evidence_groups.append(response["data"])
         usage["P4"] = usage.get("P4", 0) + response.get("usage", {}).get("total_tokens", 0)
     evidence_records = [item for group in evidence_groups for item in group["evidence_records"]]
@@ -143,14 +157,14 @@ def run_topic(base, topic, tier):
     persist(base, task_id, "P5", "report_completed", report, "report")
 
     print("[%s] P6 ppt" % topic, flush=True)
-    response = post(base, "/api/ppt", {"intent": intent, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}})
+    response = post(base, "/api/ppt", {"intent": intent, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}, "tier": tier})
     ppt = response["data"]
     usage["P6"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P6", "ppt_completed", ppt, "ppt")
 
     evidence_ids = [item["evidence_id"] for item in evidence_records]
     print("[%s] P7 claims" % topic, flush=True)
-    response = post(base, "/api/claims", {"report": report, "ppt": ppt, "evidence_ids": evidence_ids})
+    response = post(base, "/api/claims", {"report": report, "ppt": ppt, "evidence_ids": evidence_ids, "tier": tier})
     claims = response["data"]
     usage["P7"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P7", "claims_completed", claims, "claims")
@@ -163,7 +177,7 @@ def run_topic(base, topic, tier):
     persist(base, task_id, "P8", "verification_completed", verification, "verification")
 
     print("[%s] P9 final" % topic, flush=True)
-    response = post(base, "/api/final", {"verification_results": verification, "draft_report": report, "draft_ppt": ppt, "claim_ids": [item["claim_id"] for item in claims["claims"]], "source_ids": sorted(selected_ids), "evidence_ids": evidence_ids, "evidence_version": evidence_groups[0]["evidence_version"]})
+    response = post(base, "/api/final", {"verification_results": verification, "draft_report": report, "draft_ppt": ppt, "claim_ids": [item["claim_id"] for item in claims["claims"]], "source_ids": sorted(selected_ids), "evidence_ids": evidence_ids, "evidence_version": evidence_groups[0]["evidence_version"], "tier": tier})
     final = response["data"]
     usage["P9"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P9", "final_completed", final, "final_delivery")
@@ -172,19 +186,32 @@ def run_topic(base, topic, tier):
         "topic": topic, "task_id": task_id, "candidate_count": len(candidates), "kept_count": len(kept),
         "evidence_count": len(evidence_records), "page_count": len(final["final_ppt"]["pages"]),
         "verification_summary": verification["summary"], "usage": usage, "total_tokens": sum(usage.values()),
+        "final_status": "completed",
     }
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("topics", nargs="+")
+    parser.add_argument("topics", nargs="*")
+    parser.add_argument("--pending", action="store_true", help="运行 live-regression-plan.json 中尚未完成的主题")
     parser.add_argument("--base", default="http://127.0.0.1:4180")
     parser.add_argument("--tier", choices=("fast", "deep"), default="fast")
     args = parser.parse_args()
+    regression_plan = json.loads((ROOT / "tests/fixtures/live-regression-plan.json").read_text(encoding="utf-8"))
+    if args.pending:
+        if args.topics:
+            parser.error("--pending 不能和手工主题同时使用")
+        matrix = json.loads((ROOT / "tests/fixtures/regression-topics.json").read_text(encoding="utf-8"))
+        topics_by_id = {item["id"]: item["topic"] for item in matrix["topics"]}
+        args.topics = [topics_by_id[item] for item in regression_plan["pending_ids"]]
+    if not args.topics:
+        parser.error("请提供主题，或使用 --pending")
     results = []
     for topic in args.topics:
         try:
-            results.append({"ok": True, **run_topic(args.base, topic, args.tier)})
+            result = run_topic(args.base, topic, args.tier)
+            failures = acceptance_failures(result, regression_plan["acceptance"])
+            results.append({"ok": not failures, **result, "acceptance_failures": failures})
         except Exception as exc:
             results.append({"ok": False, "topic": topic, "error": str(exc)})
             print("[%s] FAILED: %s" % (topic, exc), flush=True)
