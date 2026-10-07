@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -11,10 +12,23 @@ from pathlib import Path
 LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 ACTIVE_TASK = {"id": "", "token": ""}
 ROOT = Path(__file__).resolve().parents[1]
+PRIVATE_STATE_DIR = ROOT / "data" / "private"
 
 
 def set_auth(task_id, token):
     ACTIVE_TASK.update({"id": task_id, "token": token})
+
+
+def save_resume_state(base, topic, tier, task_id, owner_token):
+    """Persist the one-time task credential locally so interrupted paid runs can resume."""
+    PRIVATE_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    path = PRIVATE_STATE_DIR / ("live-regression-%s.json" % task_id)
+    temporary = path.with_suffix(".tmp")
+    payload = {"version": 1, "base": base, "topic": topic, "tier": tier, "task_id": task_id, "owner_token": owner_token}
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(path)
+    return path
 
 
 def post(base, path, payload, timeout=600):
@@ -109,6 +123,8 @@ def run_topic(base, topic, tier):
     task = post(base, "/api/tasks", {"topic": topic, "tier": tier})["data"]
     task_id = task["task_id"]
     set_auth(task_id, task["owner_token"])
+    state_path = save_resume_state(base, topic, tier, task_id, task["owner_token"])
+    print("[%s] private resume state: %s" % (topic, state_path), flush=True)
     usage = {}
     print("[%s] P1 intent" % topic, flush=True)
     response = post(base, "/api/intent", {"topic": topic, "tier": tier})
@@ -182,6 +198,7 @@ def run_topic(base, topic, tier):
     usage["P9"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P9", "final_completed", final, "final_delivery")
     post(base, "/api/tasks/%s/complete" % task_id, {})
+    state_path.unlink(missing_ok=True)
     return {
         "topic": topic, "task_id": task_id, "candidate_count": len(candidates), "kept_count": len(kept),
         "evidence_count": len(evidence_records), "page_count": len(final["final_ppt"]["pages"]),

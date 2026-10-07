@@ -3,6 +3,7 @@
 
 import argparse
 import json
+from pathlib import Path
 import urllib.request
 
 from run_live_regression import ACTIVE_TASK, LOCAL_OPENER, persist, post, set_auth
@@ -92,14 +93,28 @@ def resume(base, task_id, task_token):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("task_ids", nargs="+")
-    parser.add_argument("--task-token", required=True, help="任务创建时返回的 owner_token")
+    parser.add_argument("task_ids", nargs="*")
+    parser.add_argument("--task-token", help="任务创建时返回的 owner_token")
+    parser.add_argument("--state-file", help="run_live_regression.py 自动保存的私有续跑状态文件")
     parser.add_argument("--base", default="http://127.0.0.1:4180")
     args = parser.parse_args()
+    state_path = None
+    if args.state_file:
+        if args.task_ids or args.task_token:
+            parser.error("--state-file 不能和 task_ids/--task-token 同时使用")
+        state_path = Path(args.state_file).expanduser().resolve()
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        args.task_ids = [state["task_id"]]
+        args.task_token = state["owner_token"]
+        args.base = state.get("base", args.base)
+    elif not args.task_ids or not args.task_token:
+        parser.error("请提供 --state-file，或同时提供 task_ids 和 --task-token")
     results = []
     for task_id in args.task_ids:
         try:
             results.append({"ok": True, **resume(args.base, task_id, args.task_token)})
+            if state_path:
+                state_path.unlink(missing_ok=True)
         except Exception as exc:
             results.append({"ok": False, "task_id": task_id, "error": str(exc)})
             print("[%s] FAILED: %s" % (task_id, exc), flush=True)
