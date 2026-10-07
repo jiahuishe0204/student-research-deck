@@ -24,7 +24,10 @@
 - `tests/validate_project.py`：结构与关键承诺校验。
 - `tests/run_prompt_smoke.py`：P1/P2 真实 DeepSeek 重复测试。
 - `tests/fixtures/regression-topics.json`：五个代表主题的固定回归矩阵；日常执行免费离线契约测试，正式内测前执行真实模型回归。
-- `server.py` 与 `retrieval.py`：本地 API、DeepSeek 调用以及 PubMed / Europe PMC / Crossref 检索与去重。
+- `server.py`：本地 HTTP API 与 P1—P9 流程编排。
+- `model_client.py` 与 `model_routing.py`：可校验重试的 DeepSeek 调用以及配置驱动的模型选择。
+- `workflow_validation.py` 与 `contracts.py`：P1—P9 的跨阶段业务校验和 JSON 结构契约。
+- `retrieval.py` 与 `epo_ops.py`：PubMed / Europe PMC / Crossref / EPO OPS 检索、去重及 EPO 周额度保护。
 - `docs/公开数据源与边界.md`：数据源限速、版权、失败降级与上线边界。
 
 ## 本地预览
@@ -33,10 +36,10 @@
 python3 server.py
 ```
 
-确保上级目录 `.env` 中已设置 `DEEPSEEK_API_KEY`，然后打开 `http://127.0.0.1:4180`。密钥只在本地服务端读取，不会发送到浏览器。
+确保上级目录 `.env` 中已设置 `DEEPSEEK_API_KEY`，然后打开 `http://127.0.0.1:4180`。密钥只在本地服务端读取，不会发送到浏览器。如果使用兼容网关，可在同一文件中设置 `DEEPSEEK_BASE_URL`。
 
 执行版图可通过首页导航进入，也可以直接打开 `http://127.0.0.1:4180/roadmap.html`。它是静态网页，查看和筛选不会调用模型；阶段内容集中维护在 `web/roadmap-data.js`。
 
 ## 当前状态
 
-这是从原“生命科学科研调研工作台”派生的商业化升级项目。已完成产品定义、P1—P9 工作流、增长方案、模型与价格官方核对、P1/P2 小样实测、P3—P9 专用结构协议，以及可从网页真实调用 P1—P9、检索公开学术数据源、生成证据底稿、报告、PPT 内容包并完成独立引用核验的本地 MVP。GitHub 私有远程仓库已经建立；任务持久化、五主题端到端回归、真实支付、PPTX、用户登录和部署尚未接入。
+这是从原“生命科学科研调研工作台”派生的商业化升级项目。已完成产品定义、P1—P9 工作流、任务持久化与归属令牌、公开论文数据源和 EPO OPS 本地接入、证据底稿、报告、PPT 内容包及独立引用核验的本地 MVP。EPO 采用 3 GB 创建者提醒、接近 4 GB 原子预留停止，并由 EPO 官方上限兜底。GitHub 私有远程仓库已经建立；剩余真实主题回归、线上 EPO 强一致计量写入、真实支付、PPTX、完整用户登录和公开部署尚未完成。

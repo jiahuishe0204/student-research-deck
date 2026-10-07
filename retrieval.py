@@ -129,13 +129,18 @@ def normalized_key(record):
     return "title:" + title
 
 
-def search_all(query, per_source=5):
+def search_all(query, per_source=5, epo_client=None, epo_query=None):
     results, errors = [], []
     for name, searcher in (("PubMed", search_pubmed), ("Europe PMC", search_europe_pmc), ("Crossref", search_crossref)):
         try:
             results.extend(searcher(query, per_source))
         except Exception as exc:
             errors.append({"source": name, "error": type(exc).__name__})
+    if epo_client is not None:
+        try:
+            results.extend(epo_client.search(epo_query or query, min(per_source, 3)))
+        except Exception as exc:
+            errors.append({"source": "EPO OPS", "error": type(exc).__name__})
     deduplicated = {}
     for record in results:
         key = normalized_key(record)

@@ -1,0 +1,245 @@
+"""Application service that binds stages to prompts, routes, and model calls."""
+
+import json
+import re
+from pathlib import Path
+
+from contracts import load_contract
+from model_client import deepseek_json
+from workflow_validation import (
+    validate_claims, validate_evidence, validate_final, validate_intent, validate_plan,
+    validate_ppt, validate_report, validate_screen, validate_verification,
+)
+
+
+def add_usage(total, partial):
+    for key in total:
+        total[key] += int(partial.get(key, 0) or 0)
+
+
+class WorkflowService:
+    def __init__(self, api_key, model_router, system_prompt, stage_prompts, model_client=deepseek_json):
+        self.api_key = api_key
+        self.model_router = model_router
+        self.system_prompt = system_prompt
+        self.stage_prompts = dict(stage_prompts)
+        self.model_client = model_client
+
+    @classmethod
+    def from_project(cls, api_key, model_router, root, model_client=deepseek_json):
+        root = Path(root)
+        registry = json.loads((root / "config" / "prompt-stages.json").read_text(encoding="utf-8"))
+        system_prompt = (root / registry["global_prompt"]).read_text(encoding="utf-8")
+        stage_prompts = {}
+        for entry in registry.get("stages", []):
+            stage = entry.get("id")
+            prompt_path = entry.get("prompt")
+            if not stage or not prompt_path or stage in stage_prompts:
+                raise ValueError("提示词阶段注册表无效")
+            stage_prompts[stage] = (root / prompt_path).read_text(encoding="utf-8")
+        return cls(api_key, model_router, system_prompt, stage_prompts, model_client)
+
+    def generate(self, stage, tier, payload, validator=None, *, upgrade=False, max_tokens=6000, max_attempts=2, request_timeout=300):
+        if stage not in self.stage_prompts:
+            raise ValueError("阶段 %s 缺少提示词" % stage)
+        route = self.model_router.for_stage(stage, tier, upgrade=upgrade)
+        output, usage = self.model_client(
+            self.api_key,
+            route["model"],
+            self.system_prompt,
+            self.stage_prompts[stage],
+            payload,
+            route["effort"],
+            validator,
+            max_tokens,
+            max_attempts,
+            request_timeout,
+        )
+        return output, usage, route
+
+    @staticmethod
+    def _tier(value):
+        tier = value or "fast"
+        if tier not in ("fast", "deep"):
+            raise ValueError("版本无效")
+        return tier
+
+    @staticmethod
+    def _ids(records, field, error, *, unique=True):
+        if not isinstance(records, list):
+            raise ValueError(error)
+        values = [str(item.get(field, "")).strip() for item in records if isinstance(item, dict)]
+        if len(values) != len(records) or any(not value for value in values) or (unique and len(values) != len(set(values))):
+            raise ValueError(error)
+        return values
+
+    def create_intent(self, topic, tier="fast"):
+        topic = str(topic or "").strip()
+        tier = self._tier(tier)
+        if not 2 <= len(topic) <= 500:
+            raise ValueError("请输入 2—500 字的主题并选择有效版本")
+        output, usage, _ = self.generate("P1", tier, {"topic": topic, "tier": tier, "runtime_config": {"language": "zh-CN"}})
+        return validate_intent(output), usage
+
+    def create_plan(self, topic, clarification="", tier="fast"):
+        topic = str(topic or "").strip()
+        clarification = str(clarification or "").strip()
+        tier = self._tier(tier)
+        if not 2 <= len(topic) <= 500:
+            raise ValueError("规划输入无效")
+        normalized = topic + (("；用户澄清：" + clarification) if clarification else "")
+        output, usage, _ = self.generate("P2", tier, {
+            "intent": {"domain": "life_science", "normalized_topic": normalized, "tier": tier, "need_clarification": False},
+            "tier": tier, "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
+            "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
+        })
+        return validate_plan(output), usage
+
+    def screen_sources(self, topic, plan, candidates, tier="fast"):
+        topic = str(topic or "").strip()
+        tier = self._tier(tier)
+        if not 2 <= len(topic) <= 500 or not isinstance(plan, dict):
+            raise ValueError("筛选主题或规划无效")
+        if not isinstance(candidates, list) or not 1 <= len(candidates) <= 30:
+            raise ValueError("候选资料数量必须为 1—30 条")
+        candidate_ids = self._ids(candidates, "source_id", "候选资料 source_id 缺失或重复")
+        keep_max = 8 if tier == "deep" else 4
+        keys = ("source_id", "source", "title", "abstract", "year", "access", "url")
+        compact = [{key: item.get(key) for key in keys} for item in candidates]
+        output, usage, _ = self.generate(
+            "P3", tier,
+            {"topic": topic, "plan": plan, "candidate_sources": compact, "limits": {"keep_max": keep_max, "tier": tier}, "output_contract": load_contract("P3")},
+            lambda value: validate_screen(value, candidate_ids, keep_max),
+        )
+        return output, usage
+
+    def extract_evidence(self, source_record, question_ids, tier="fast"):
+        tier = self._tier(tier)
+        if not isinstance(source_record, dict) or not isinstance(question_ids, list):
+            raise ValueError("证据提取输入无效")
+        source_id = str(source_record.get("source_id", "")).strip()
+        source_text = str(source_record.get("abstract", "")).strip()
+        if not source_id:
+            raise ValueError("来源缺少 source_id")
+        if not source_text:
+            output = {"evidence_version": "1.0", "source_id": source_id, "extraction_status": "no_extractable_evidence", "reading_scope": "metadata_only", "evidence_records": [], "figure_records": [], "no_extractable_reason": "当前来源没有可读取摘要或正文"}
+            usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
+            return validate_evidence(output, source_id, source_record.get("access")), usage
+        keys = ("source_id", "source", "title", "authors", "journal", "year", "url", "access")
+        compact = {key: source_record.get(key) for key in keys}
+        output, usage, _ = self.generate(
+            "P4", tier,
+            {"source_record": compact, "source_text": source_text, "question_ids": question_ids, "output_contract": load_contract("P4")},
+            lambda value: validate_evidence(value, source_id, source_record.get("access")),
+        )
+        return output, usage
+
+    def create_report(self, intent, plan, evidence_records, tier="fast"):
+        tier = self._tier(tier)
+        if not isinstance(intent, dict) or not isinstance(plan, dict) or not isinstance(evidence_records, list):
+            raise ValueError("报告生成输入无效")
+        if not 1 <= len(evidence_records) <= 100:
+            raise ValueError("至少需要 1 条且最多处理 100 条证据")
+        evidence_ids = self._ids(evidence_records, "evidence_id", "证据编号缺失或重复")
+        output, usage, _ = self.generate(
+            "P5", tier,
+            {"intent": intent, "plan": plan, "evidence_records": evidence_records, "tier": tier, "output_contract": load_contract("P5")},
+            lambda value: validate_report(value, evidence_ids),
+        )
+        return output, usage
+
+    def create_ppt(self, intent, report, evidence_records, figure_records=None, constraints=None, tier="fast"):
+        tier = self._tier(tier)
+        figure_records = [] if figure_records is None else figure_records
+        constraints = {} if constraints is None else constraints
+        if not isinstance(intent, dict) or not isinstance(report, dict) or not isinstance(evidence_records, list) or not isinstance(figure_records, list) or not isinstance(constraints, dict):
+            raise ValueError("PPT 内容包输入无效")
+        evidence_ids = self._ids(evidence_records, "evidence_id", "PPT 输入包含无效证据编号", unique=False)
+        figure_ids = self._ids(figure_records, "figure_id", "PPT 输入包含无效图片编号", unique=False)
+        output, usage, _ = self.generate(
+            "P6", tier,
+            {"intent": intent, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids, "constraints": constraints, "output_contract": load_contract("P6")},
+            lambda value: validate_ppt(value, evidence_ids, figure_ids),
+        )
+        return output, usage
+
+    def assemble_final(self, verification, report, ppt, claim_ids, source_ids, evidence_ids, evidence_version="1.0", tier="fast"):
+        tier = self._tier(tier)
+        if not all(isinstance(item, list) for item in (claim_ids, source_ids, evidence_ids)) or not all(isinstance(item, dict) for item in (verification, report, ppt)):
+            raise ValueError("最终装配输入无效")
+        output, usage, _ = self.generate(
+            "P9", tier,
+            {"verification_results": verification, "draft_report": report, "draft_ppt": ppt, "claim_ids": claim_ids, "source_ids": source_ids, "evidence_ids": evidence_ids, "evidence_version": str(evidence_version), "output_contract": load_contract("P9")},
+            lambda value: validate_final(value, claim_ids, source_ids, evidence_ids, verification), max_tokens=12000, max_attempts=3,
+        )
+        return output, usage
+
+    def extract_claims(self, report, ppt, evidence_ids, tier):
+        batches = [(report, {"deck_title": ppt.get("deck_title", ""), "storyline": "", "pages": []}, "report")]
+        pages = ppt.get("pages", [])
+        for index in range(0, len(pages), 3):
+            label = "ppt_pages_%d_%d" % (index + 1, min(index + 3, len(pages)))
+            batches.append(({}, {"deck_title": ppt.get("deck_title", ""), "storyline": ppt.get("storyline", ""), "pages": pages[index:index + 3]}, label))
+        merged_claims, merged_notes = [], []
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
+        for batch_report, batch_ppt, label in batches:
+            partial, partial_usage, _ = self.generate(
+                "P7", tier,
+                {"report": batch_report, "ppt_package": batch_ppt, "evidence_ids": evidence_ids, "batch_label": label, "output_contract": load_contract("P7")},
+                lambda value: validate_claims(value, evidence_ids), max_tokens=8000,
+            )
+            merged_claims.extend(partial["claims"])
+            merged_notes.extend("%s: %s" % (label, note) for note in partial["extraction_notes"])
+            add_usage(usage, partial_usage)
+        for index, claim in enumerate(merged_claims, 1):
+            claim["claim_id"] = "CLM-%04d" % index
+        output = {"claim_set_version": "P7-batched-1.0", "claims": merged_claims, "extraction_notes": merged_notes}
+        validate_claims(output, evidence_ids)
+        return output, usage, {"batches": len(batches)}
+
+    def verify_claims(self, claims, evidence_records, source_records, tier):
+        claim_items = [item for item in claims.get("claims", []) if isinstance(item, dict)]
+        if not claim_items:
+            raise ValueError("独立核验至少需要 1 条声明")
+        claim_ids = [item.get("claim_id") for item in claim_items]
+        if any(not claim_id for claim_id in claim_ids) or len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("独立核验声明编号缺失或重复")
+        evidence_ids = [item.get("evidence_id") for item in evidence_records if isinstance(item, dict)]
+        if len(evidence_ids) != len(evidence_records) or any(not evidence_id for evidence_id in evidence_ids):
+            raise ValueError("独立核验证据编号无效")
+        high_risk = any(item.get("risk_level") == "high" for item in claim_items)
+        groups = {}
+        for claim in claim_items:
+            normalized = re.sub(r"\s+", "", claim.get("atomic_claim", "")).strip("。；;，,")
+            key = (normalized, tuple(sorted(claim.get("cited_evidence_ids", []))))
+            groups.setdefault(key, []).append(claim)
+        representatives = [items[0] for items in groups.values()]
+        representative_to_group = {items[0]["claim_id"]: items for items in groups.values()}
+        representative_results = []
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
+        route = None
+        for index in range(0, len(representatives), 12):
+            batch_items = representatives[index:index + 12]
+            batch_ids = [item["claim_id"] for item in batch_items]
+            partial, partial_usage, route = self.generate(
+                "P8", tier,
+                {"claims": {"claim_set_version": claims.get("claim_set_version", ""), "claims": batch_items, "extraction_notes": []}, "evidence_records": evidence_records, "source_records": source_records, "output_contract": load_contract("P8")},
+                lambda value, ids=batch_ids, items=batch_items: validate_verification(value, ids, evidence_ids, items),
+                upgrade=high_risk, max_tokens=8000, max_attempts=3, request_timeout=90,
+            )
+            representative_results.extend(partial["results"])
+            add_usage(usage, partial_usage)
+        results = []
+        for result in representative_results:
+            for claim in representative_to_group[result["claim_id"]]:
+                mapped = dict(result)
+                mapped["claim_id"] = claim["claim_id"]
+                results.append(mapped)
+        result_order = {claim_id: index for index, claim_id in enumerate(claim_ids)}
+        results.sort(key=lambda item: result_order[item["claim_id"]])
+        summary = {status: sum(item["support_status"] == status for item in results) for status in ("supported", "partially_supported", "unsupported", "cannot_determine")}
+        summary["high_risk_remaining"] = 0
+        output = {"verification_version": "P8-batched-1.0", "results": results, "summary": summary}
+        validate_verification(output, claim_ids, evidence_ids, claim_items)
+        metadata = {"model": route["model"], "reason": "high_risk_upgrade" if route["upgraded"] else "configured_tier", "batches": (len(representatives) + 11) // 12, "claims": len(claim_items), "unique_claims": len(representatives)}
+        return output, usage, metadata

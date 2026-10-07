@@ -2,5 +2,6 @@
 .env
 data/*.sqlite3
 data/*.sqlite3-*
+data/private/
 *.log
 __pycache__/

@@ -1,6 +1,6 @@
 const $=selector=>document.querySelector(selector);
 const form=$('#intent-form'),task=$('#task'),result=$('#intent-result'),title=$('#intent-title'),copy=$('#intent-copy'),error=$('#error'),confirmButton=$('#confirm');
-let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,taskPaused=false;
+let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,currentTaskToken=null,taskPaused=false;
 
 const previews={
   slides:`<div class="slide-preview"><div class="slide-list"><button class="active">01 · 问题</button><button>02 · 路线</button><button>03 · 证据</button></div><div class="slide-canvas"><small>01 / RESEARCH QUESTION</small><div><h3>实体瘤为什么仍是 CAR-T 的困难场景？</h3><ul><li>抗原异质性带来逃逸风险</li><li>肿瘤微环境抑制 T 细胞活性</li><li>浸润与持续性仍限制疗效</li></ul></div><small>SOURCES · 03 / 07 / 11</small></div><aside class="speaker-note"><h4>演讲者注释</h4><p>这一页先建立问题，不急着给出路线优劣。讲述时用三个障碍解释后续技术为什么分别从靶点、细胞状态和递送方式入手。</p><span class="source-chip">来源 03</span><span class="source-chip">来源 07</span></aside></div>`,
@@ -10,7 +10,8 @@ const previews={
 
 function escapeHtml(value){return String(value??'').replace(/[&<>"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[char]));}
 function showPreview(name){$('#preview-body').innerHTML=previews[name];document.querySelectorAll('.preview-tabs button').forEach(button=>button.classList.toggle('active',button.dataset.preview===name));}
-async function request(path,payload){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.error||'请求失败');return data;}
+async function request(path,payload){const headers={'Content-Type':'application/json'};if(currentTaskId&&currentTaskToken){headers['X-Task-ID']=currentTaskId;headers['X-Task-Token']=currentTaskToken;}const response=await fetch(path,{method:'POST',headers,body:JSON.stringify(payload)});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.error||'请求失败');return data;}
+async function downloadReport(){const response=await fetch(`/api/tasks/${encodeURIComponent(currentTaskId)}/export.md`,{headers:{'X-Task-ID':currentTaskId,'X-Task-Token':currentTaskToken}});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.error||'报告下载失败');}const blob=await response.blob(),link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`${currentTaskId}.md`;link.click();URL.revokeObjectURL(link.href);}
 function setBusy(button,busy,text){button.disabled=busy;if(text)button.innerHTML=text;}
 async function persistStage(stage,eventType,payload,artifactKind){if(!currentTaskId)return;try{await request(`/api/tasks/${currentTaskId}/events`,{stage,event_type:eventType,payload,artifact_kind:artifactKind||null});}catch(exc){console.warn('任务状态保存失败',exc);}}
 function ensureActive(){if(taskPaused)throw new Error('任务已暂停，已有结果已保存');}
@@ -24,7 +25,7 @@ form.addEventListener('submit',async event=>{
   if(currentTopic.length<2){error.textContent='输入一个调研主题就可以开始。';task.focus();return;}
   error.textContent='';setBusy(form.querySelector('.primary'),true,'正在理解题目… <span>·</span>');result.hidden=true;
   try{
-    const taskResponse=await request('/api/tasks',{topic:currentTopic,tier:currentTier});currentTaskId=taskResponse.data.task_id;
+    const taskResponse=await request('/api/tasks',{topic:currentTopic,tier:currentTier});currentTaskId=taskResponse.data.task_id;currentTaskToken=taskResponse.data.owner_token;
     const response=await request('/api/intent',{topic:currentTopic,tier:currentTier});currentIntent=response.data;
     await persistStage('P1','intent_completed',currentIntent,'intent');
     title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);
@@ -57,12 +58,15 @@ function renderPlan(plan,usage){
 function buildSearchQuery(plan){
   const strings=[];const visit=value=>{if(typeof value==='string'&&/[A-Za-z]{3}/.test(value)&&value.length<90)strings.push(value);else if(Array.isArray(value))value.forEach(visit);else if(value&&typeof value==='object')Object.values(value).forEach(visit);};visit(plan?.search_concepts);const unique=[...new Set(strings)].slice(0,5);return unique.length?unique.map(value=>`"${value.replaceAll('"','')}"`).join(' OR '):currentTopic;
 }
+function buildEpoQuery(plan){
+  const strings=[];const visit=value=>{if(typeof value==='string'&&/[A-Za-z]{3}/.test(value)&&value.length<90)strings.push(value);else if(Array.isArray(value))value.forEach(visit);else if(value&&typeof value==='object')Object.values(value).forEach(visit);};visit(plan?.search_concepts);return [...new Set(strings)].slice(0,3).join(' ');
+}
 
 document.addEventListener('click',async event=>{
   const button=event.target.closest('#start-retrieval');if(!button)return;
   setBusy(button,true,'正在连接文献数据库… <span>·</span>');
   const output=$('#retrieval-output');output.innerHTML='<p class="empty-plan">正在检索 PubMed、Europe PMC 和 Crossref，并按 DOI、PMID 去重…</p>';
-  try{const response=await request('/api/search',{topic:currentTopic,query:buildSearchQuery(currentPlan)});currentSources=response.data.records;currentScreening=null;currentEvidenceGroups=[];currentReport=null;currentPpt=null;await persistStage('P2','search_completed',response.data,'sources');renderSources(response.data);document.querySelectorAll('.task-status li')[2].className='active';}
+  try{const response=await request('/api/search',{topic:currentTopic,query:buildSearchQuery(currentPlan),epo_query:buildEpoQuery(currentPlan)});currentSources=response.data.records;currentScreening=null;currentEvidenceGroups=[];currentReport=null;currentPpt=null;await persistStage('P2','search_completed',response.data,'sources');renderSources(response.data);document.querySelectorAll('.task-status li')[2].className='active';}
   catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}</p>`;}
   finally{setBusy(button,false,'重新检索 <span>↻</span>');}
 });
@@ -97,7 +101,7 @@ document.addEventListener('click',async event=>{
       setBusy(button,true,`正在提取 ${index+1} / ${kept.length}… <span>·</span>`);
       const decision=kept[index],source=currentSources.find(item=>item.source_id===decision.source_id);
       if(!source)throw new Error(`找不到来源 ${decision.source_id}`);
-      const response=await request('/api/evidence',{source_record:source,question_ids:decision.question_ids});records.push(response.data);tokens+=Number(response.usage?.total_tokens||0);
+      const response=await request('/api/evidence',{source_record:source,question_ids:decision.question_ids,tier:currentTier});records.push(response.data);tokens+=Number(response.usage?.total_tokens||0);
       output.innerHTML=`<p class="empty-plan">已完成 ${records.length} / ${kept.length} 个来源…</p>`;
     }
     currentEvidenceGroups=records;await persistStage('P4','evidence_completed',{groups:records},'evidence');renderEvidence(records,tokens);document.querySelector('.progress-line i').style.width='55%';
@@ -118,7 +122,7 @@ document.addEventListener('click',async event=>{
   try{
     const reportResponse=await request('/api/report',{intent:currentIntent,plan:currentPlan,evidence_records:evidenceRecords,tier:currentTier});ensureActive();
     setBusy(button,true,'正在编排 PPT 内容… <span>·</span>');
-    const pptResponse=await request('/api/ppt',{intent:currentIntent,report:reportResponse.data,evidence_records:evidenceRecords,figure_records:figureRecords,constraints:{language:'zh-CN',format:'storyboard_with_speaker_notes'}});
+    const pptResponse=await request('/api/ppt',{intent:currentIntent,report:reportResponse.data,evidence_records:evidenceRecords,figure_records:figureRecords,constraints:{language:'zh-CN',format:'storyboard_with_speaker_notes'},tier:currentTier});
     currentReport=reportResponse.data;await persistStage('P5','report_completed',currentReport,'report');currentPpt=pptResponse.data;await persistStage('P6','ppt_completed',currentPpt,'ppt');renderDeliverables(currentReport,currentPpt,Number(reportResponse.usage?.total_tokens||0)+Number(pptResponse.usage?.total_tokens||0));
     document.querySelectorAll('.task-status li')[2].className='done';document.querySelectorAll('.task-status li')[3].className='active';document.querySelector('.progress-line i').style.width='72%';$('#task-status-title').textContent='报告与 PPT 内容包已生成';
   }catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。证据底稿仍然保留，可以重试本阶段。</p>`;}
@@ -135,11 +139,11 @@ document.addEventListener('click',async event=>{
   const evidenceRecords=currentEvidenceGroups.flatMap(group=>group.evidence_records);const evidenceIds=evidenceRecords.map(item=>item.evidence_id);const sourceIds=[...new Set(evidenceRecords.map(item=>item.source_id))];
   const output=$('#verification-output');setBusy(button,true,'正在拆分事实声明… <span>·</span>');
   try{
-    const claimsResponse=await request('/api/claims',{report:currentReport,ppt:currentPpt,evidence_ids:evidenceIds});ensureActive();
+    const claimsResponse=await request('/api/claims',{report:currentReport,ppt:currentPpt,evidence_ids:evidenceIds,tier:currentTier});ensureActive();
     setBusy(button,true,'正在独立核验引用… <span>·</span>');
     await persistStage('P7','claims_completed',claimsResponse.data,'claims');const verifyResponse=await request('/api/verify',{claims:claimsResponse.data,evidence_records:evidenceRecords,source_records:currentSources,tier:currentTier});ensureActive();
     setBusy(button,true,'正在同步修订终稿… <span>·</span>');
-    await persistStage('P8','verification_completed',verifyResponse.data,'verification');const finalResponse=await request('/api/final',{verification_results:verifyResponse.data,draft_report:currentReport,draft_ppt:currentPpt,claim_ids:claimsResponse.data.claims.map(item=>item.claim_id),source_ids:sourceIds,evidence_ids:evidenceIds,evidence_version:'1.0'});await persistStage('P9','final_completed',finalResponse.data,'final_delivery');await request(`/api/tasks/${currentTaskId}/complete`,{});
+    await persistStage('P8','verification_completed',verifyResponse.data,'verification');const finalResponse=await request('/api/final',{verification_results:verifyResponse.data,draft_report:currentReport,draft_ppt:currentPpt,claim_ids:claimsResponse.data.claims.map(item=>item.claim_id),source_ids:sourceIds,evidence_ids:evidenceIds,evidence_version:'1.0',tier:currentTier});await persistStage('P9','final_completed',finalResponse.data,'final_delivery');await request(`/api/tasks/${currentTaskId}/complete`,{});
     renderVerification(verifyResponse.data,finalResponse.data,{claims:Number(claimsResponse.usage?.total_tokens||0),verify:Number(verifyResponse.usage?.total_tokens||0),final:Number(finalResponse.usage?.total_tokens||0),route:verifyResponse.route});
     document.querySelectorAll('.task-status li')[3].className='done';document.querySelectorAll('.task-status li')[4].className='done';document.querySelector('.progress-line i').style.width='100%';$('#task-status-title').textContent='可核验终稿已经完成';
   }catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。草稿仍保留，核验失败不会伪装成终稿。</p>`;}
@@ -149,7 +153,8 @@ document.addEventListener('click',async event=>{
 function renderVerification(verification,finalDelivery,meta){
   const summary=verification.summary;const totalTokens=meta.claims+meta.verify+meta.final;
   const changes=finalDelivery.change_log.map(item=>`<li><b>${escapeHtml(item.claim_id)}</b> · ${escapeHtml(item.action)} · ${escapeHtml(item.reason)}</li>`).join('');
-  $('#verification-output').innerHTML=`<div class="verification-summary"><div><b>${summary.supported}</b><span>支持</span></div><div><b>${summary.partially_supported}</b><span>部分支持</span></div><div><b>${summary.unsupported}</b><span>不支持</span></div><div><b>${summary.cannot_determine}</b><span>无法判断</span></div></div><details class="report-result" open><summary>核验后的最终报告</summary><pre>${escapeHtml(finalDelivery.final_report.markdown)}</pre></details><details class="report-result"><summary>修订记录</summary><ul class="change-log">${changes||'<li>没有需要修订的声明</li>'}</ul></details><a class="export-link" href="/api/tasks/${encodeURIComponent(currentTaskId)}/export.md">下载 Markdown 报告</a><p class="source-notice">核验路由：${escapeHtml(meta.route?.model||'unknown')}（${escapeHtml(meta.route?.reason||'')}）；P7—P9 共使用 ${totalTokens.toLocaleString()} tokens。</p>`;
+  $('#verification-output').innerHTML=`<div class="verification-summary"><div><b>${summary.supported}</b><span>支持</span></div><div><b>${summary.partially_supported}</b><span>部分支持</span></div><div><b>${summary.unsupported}</b><span>不支持</span></div><div><b>${summary.cannot_determine}</b><span>无法判断</span></div></div><details class="report-result" open><summary>核验后的最终报告</summary><pre>${escapeHtml(finalDelivery.final_report.markdown)}</pre></details><details class="report-result"><summary>修订记录</summary><ul class="change-log">${changes||'<li>没有需要修订的声明</li>'}</ul></details><button class="export-link" id="download-report" type="button">下载 Markdown 报告</button><p class="source-notice">核验路由：${escapeHtml(meta.route?.model||'unknown')}（${escapeHtml(meta.route?.reason||'')}）；P7—P9 共使用 ${totalTokens.toLocaleString()} tokens。</p>`;
+  $('#download-report').addEventListener('click',async event=>{event.currentTarget.disabled=true;try{await downloadReport();}catch(exc){alert(exc.message);}finally{event.currentTarget.disabled=false;}});
 }
 
 $('#cancel-task').addEventListener('click',async()=>{if(!currentTaskId)return;await request(`/api/tasks/${currentTaskId}/cancel`,{});taskPaused=true;$('#cancel-task').hidden=true;$('#resume-task').hidden=false;$('#task-status-title').textContent='任务已暂停，已有结果已保存';});

@@ -1,2 +1,1 @@
-目标：把 verified_report={{report}} 编排为与报告合拍的PPT内容包。输入intent={{intent}}、evidence_records={{evidence_records}}、figure_records={{figure_records}}、explicit_constraints={{constraints}}。页数由可靠内容量和叙事决定，不硬凑。每页包含标题、目的、上屏文字、视觉建议、演讲者注释、evidence_ids和figure_refs。注释不得新增事实；图片必须保留来源、位置、用途和复用状态。输出符合 P6-ppt.schema.json。
-
+目标：把 verified_report={{report}} 编排为与报告合拍的PPT内容包。输入intent={{intent}}、evidence_records={{evidence_records}}、figure_records={{figure_records}}、explicit_constraints={{constraints}}。页数由可靠内容量和叙事决定，不硬凑。每页包含标题、目的、上屏文字、视觉建议、演讲者注释、evidence_ids和figure_refs。注释不得新增事实；图片必须保留来源、位置、用途和复用状态。evidence_ids只能从allowed_evidence_ids逐字选择，figure_id只能从allowed_figure_ids逐字选择；不得改写、缩短或自行构造编号。输出符合 P6-ppt.schema.json。

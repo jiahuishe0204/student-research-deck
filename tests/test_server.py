@@ -1,10 +1,37 @@
 import unittest
+from io import BytesIO
 
 import server
 import retrieval
 
 
 class ValidationTests(unittest.TestCase):
+    def test_rate_limiter_blocks_after_configured_limit(self):
+        limiter = server.RateLimiter(limit=2, window_seconds=60)
+        self.assertTrue(limiter.allow("same-task"))
+        self.assertTrue(limiter.allow("same-task"))
+        self.assertFalse(limiter.allow("same-task"))
+
+    def test_rate_limiter_removes_expired_keys(self):
+        now = [0]
+        limiter = server.RateLimiter(limit=2, window_seconds=10, clock=lambda: now[0])
+        self.assertTrue(limiter.allow("old"))
+        now[0] = 11
+        self.assertTrue(limiter.allow("new"))
+        self.assertNotIn("old", limiter.events)
+
+    def test_request_path_ignores_query_string(self):
+        handler = object.__new__(server.AppHandler)
+        handler.path = "/api/search?trace=1"
+        self.assertEqual(handler.request_path(), "/api/search")
+
+    def test_read_json_rejects_non_object(self):
+        handler = object.__new__(server.AppHandler)
+        handler.headers = {"Content-Length": "2"}
+        handler.rfile = BytesIO(b"[]")
+        with self.assertRaisesRegex(ValueError, "JSON 对象"):
+            handler.read_json()
+
     def test_valid_intent(self):
         value = {
             "domain": "life_science",
@@ -43,6 +70,21 @@ class ValidationTests(unittest.TestCase):
     def test_source_keys_prefer_doi_then_pmid(self):
         self.assertEqual(retrieval.normalized_key({"doi": "10.1/ABC", "pmid": "123"}), "doi:10.1/abc")
         self.assertEqual(retrieval.normalized_key({"doi": "", "pmid": "123"}), "pmid:123")
+
+    def test_search_all_includes_epo_records_when_configured(self):
+        class FakeEPO:
+            def search(self, query, limit):
+                self.query = query
+                return [{"source": "EPO OPS", "source_id": "EPO:EP.1.A1", "patent_id": "EP.1.A1", "pmid": "", "doi": "", "title": "Patent", "abstract": "", "authors": [], "journal": "", "year": "", "url": "https://example.invalid", "access": "patent_bibliographic_metadata"}]
+        epo = FakeEPO()
+        original = (retrieval.search_pubmed, retrieval.search_europe_pmc, retrieval.search_crossref)
+        retrieval.search_pubmed = retrieval.search_europe_pmc = retrieval.search_crossref = lambda query, limit: []
+        try:
+            output = retrieval.search_all('"CRISPR diagnostics" OR "Cas12 detection"', per_source=4, epo_client=epo, epo_query="CRISPR diagnostics Cas12 detection")
+        finally:
+            retrieval.search_pubmed, retrieval.search_europe_pmc, retrieval.search_crossref = original
+        self.assertEqual(output["records"][0]["source_id"], "EPO:EP.1.A1")
+        self.assertEqual(epo.query, "CRISPR diagnostics Cas12 detection")
 
     def test_plan_rejects_object_source_plan(self):
         value = {
@@ -99,6 +141,27 @@ class ValidationTests(unittest.TestCase):
         value = {"verification_version":"1.0","results":[{"claim_id":"CL-1","source_identity":{"matched":True,"source_ids":["SRC-1"]},"support_status":"unsupported","issue_codes":["evidence_missing"],"explanation":"not supported","action":"keep","revised_claim":None,"valid_evidence_ids":[]}],"summary":{"supported":0,"partially_supported":0,"unsupported":1,"cannot_determine":0,"high_risk_remaining":0}}
         with self.assertRaises(ValueError):
             server.validate_verification(value, ["CL-1"], ["EV-1"])
+
+    def test_partial_support_requires_real_revision(self):
+        value = {"verification_version":"1.0","results":[{"claim_id":"CL-1","source_identity":{"matched":True,"source_ids":["SRC-1"]},"support_status":"partially_supported","issue_codes":["tone_overstatement"],"explanation":"too strong","action":"revise","revised_claim":"原句","valid_evidence_ids":["EV-1"]}],"summary":{"supported":0,"partially_supported":1,"unsupported":0,"cannot_determine":0,"high_risk_remaining":0}}
+        claims = [{"claim_id":"CL-1","atomic_claim":"原句"}]
+        with self.assertRaises(ValueError):
+            server.validate_verification(value, ["CL-1"], ["EV-1"], claims)
+
+    def test_final_change_log_must_apply_verification_actions(self):
+        value = {"delivery_version":"1.0","evidence_version":"1.0","final_report":{"title":"title","markdown":"body","used_evidence_ids":["EV-1"]},"final_ppt":{"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","on_slide_text":[],"speaker_notes":"","evidence_ids":["EV-1"]}]},"verification_note":"checked","open_issues":[],"source_ids":["SRC-1"],"evidence_ids":["EV-1"],"change_log":[{"claim_id":"CL-1","action":"kept","reason":"wrong"}]}
+        verification = {"results": [{"claim_id": "CL-1", "action": "remove"}]}
+        with self.assertRaisesRegex(ValueError, "未落实"):
+            server.validate_final(value, ["CL-1"], ["SRC-1"], ["EV-1"], verification)
+
+    def test_workflow_service_is_separate_from_http_handler(self):
+        self.assertFalse(hasattr(server, "deepseek_json"))
+        self.assertTrue(hasattr(server, "WorkflowService"))
+
+    def test_http_handler_does_not_build_stage_contracts_or_generate_directly(self):
+        source = (server.ROOT / "server.py").read_text(encoding="utf-8")
+        self.assertNotIn("load_contract(", source)
+        self.assertNotIn("workflow.generate(", source)
 
 
 if __name__ == "__main__":
