@@ -55,6 +55,7 @@ def main():
     parser.add_argument("--database", default="data/tasks.sqlite3")
     parser.add_argument("--base", default="http://127.0.0.1:4181")
     parser.add_argument("--resume-state")
+    parser.add_argument("--reuse-baseline-for-missing", action="store_true")
     args = parser.parse_args()
 
     task, artifacts = load_baseline(args.database, args.baseline_task_id)
@@ -87,13 +88,23 @@ def main():
     saved_rows = connection.execute("SELECT kind,payload_json FROM artifacts WHERE task_id=? AND kind LIKE 'verification_dynamic_%'", (task_id,)).fetchall()
     saved = {kind: json.loads(payload) for kind, payload in saved_rows}
     results = []
+    baseline_by_claim = {item["claim_id"]: item for item in artifacts["verification"]["results"]}
+    reused_claim_ids = []
     for index, batch in enumerate(dynamic_batches, 1):
         kind = "verification_dynamic_%03d" % index
         if kind not in saved:
-            print("[%s] dynamic P8 batch %d/%d" % (task["topic"], index, len(dynamic_batches)), flush=True)
-            partial_claims = {"claim_set_version": claims["claim_set_version"], "claims": batch, "extraction_notes": []}
-            saved[kind] = post(args.base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": source_records, "tier": task["tier"]})["data"]
-            persist(args.base, task_id, "P8", "verification_batch_completed", saved[kind], kind)
+            if args.reuse_baseline_for_missing:
+                missing_ids = [item["claim_id"] for item in batch]
+                if any(claim_id not in baseline_by_claim for claim_id in missing_ids):
+                    raise ValueError("基线缺少待复用声明")
+                reused_claim_ids.extend(missing_ids)
+                saved[kind] = merge_verification([baseline_by_claim[claim_id] for claim_id in missing_ids])
+                persist(args.base, task_id, "P8", "baseline_verification_reused", saved[kind], kind)
+            else:
+                print("[%s] dynamic P8 batch %d/%d" % (task["topic"], index, len(dynamic_batches)), flush=True)
+                partial_claims = {"claim_set_version": claims["claim_set_version"], "claims": batch, "extraction_notes": []}
+                saved[kind] = post(args.base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": source_records, "tier": task["tier"]})["data"]
+                persist(args.base, task_id, "P8", "verification_batch_completed", saved[kind], kind)
         results.extend(saved[kind]["results"])
     order = {item["claim_id"]: index for index, item in enumerate(claims["claims"])}
     results.sort(key=lambda item: order[item["claim_id"]])
@@ -120,6 +131,7 @@ def main():
         "comparison_task_id": task_id,
         "baseline": metrics(artifacts["final_delivery"], claims, artifacts["verification"]),
         "comparison": metrics(final, claims, verification),
+        "reused_baseline_claims": reused_claim_ids,
     }, ensure_ascii=False), flush=True)
 
 
