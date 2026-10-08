@@ -93,7 +93,8 @@ class WorkflowService:
     def _verification_output_limit(cls, items, evidence_by_id, upgrade):
         complexity = sum(cls._claim_complexity(item, evidence_by_id)[0] for item in items)
         ceiling = 3200 if upgrade else 3800
-        return min(ceiling, max(1200, 650 + len(items) * 220 + complexity * 70))
+        floor = 2200 if upgrade else 1200
+        return min(ceiling, max(floor, 650 + len(items) * 220 + complexity * 70))
 
     def generate(self, stage, tier, payload, validator=None, *, upgrade=False, max_tokens=6000, max_attempts=2, request_timeout=300):
         if stage not in self.stage_prompts:

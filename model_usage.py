@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -52,29 +52,39 @@ class ModelUsageLedger:
 
     def summary(self, task_id):
         with self.connect() as connection:
-            rows = connection.execute("SELECT model,COUNT(*) calls,SUM(completion_tokens) output_tokens,SUM(total_tokens) total_tokens,SUM(reasoning_tokens) reasoning_tokens FROM model_usage WHERE task_id=? GROUP BY model", (task_id,)).fetchall()
+            rows = connection.execute("SELECT model,COUNT(*) calls,SUM(CASE WHEN total_tokens>0 THEN 1 ELSE 0 END) billable_calls,SUM(completion_tokens) output_tokens,SUM(total_tokens) total_tokens,SUM(reasoning_tokens) reasoning_tokens FROM model_usage WHERE task_id=? GROUP BY model", (task_id,)).fetchall()
         return {row["model"]: dict(row) for row in rows}
 
-    def peak_cost_cny(self, task_id):
+    @staticmethod
+    def _is_peak(instant):
+        beijing = instant.astimezone(timezone(timedelta(hours=8)))
+        return beijing.weekday() < 5 and (9 <= beijing.hour < 12 or 14 <= beijing.hour < 18)
+
+    def cost_cny(self, task_id, force_peak=False):
         with self.connect() as connection:
-            rows = connection.execute("SELECT model,prompt_tokens,completion_tokens,cache_hit_tokens,cache_miss_tokens FROM model_usage WHERE task_id=?", (task_id,)).fetchall()
+            rows = connection.execute("SELECT model,prompt_tokens,completion_tokens,cache_hit_tokens,cache_miss_tokens,created_at FROM model_usage WHERE task_id=?", (task_id,)).fetchall()
         total = 0.0
         for row in rows:
             prices = self.PEAK_PRICES_CNY_PER_MILLION.get(row["model"])
             if not prices:
                 continue
+            multiplier = 1.0 if force_peak or self._is_peak(datetime.fromisoformat(row["created_at"])) else 0.5
             hit = int(row["cache_hit_tokens"] or 0)
             miss = int(row["cache_miss_tokens"] or 0)
             miss += max(0, int(row["prompt_tokens"] or 0) - hit - miss)
-            total += (hit * prices["cache_hit"] + miss * prices["cache_miss"] + int(row["completion_tokens"] or 0) * prices["output"]) / 1_000_000
+            total += multiplier * (hit * prices["cache_hit"] + miss * prices["cache_miss"] + int(row["completion_tokens"] or 0) * prices["output"]) / 1_000_000
         return total
+
+    def peak_cost_cny(self, task_id):
+        return self.cost_cny(task_id, force_peak=True)
 
     def guard(self, task_id, model, limits, next_output_tokens=0, next_input_tokens=0):
         cost_limit = float((limits or {}).get("task_max_cost_cny", 0) or 0)
         prices = self.PEAK_PRICES_CNY_PER_MILLION.get(model)
         if cost_limit and prices:
-            reserved_cost = (int(next_input_tokens or 0) * prices["cache_miss"] + int(next_output_tokens or 0) * prices["output"]) / 1_000_000
-            if self.peak_cost_cny(task_id) + reserved_cost > cost_limit:
+            multiplier = 1.0 if self._is_peak(datetime.now(timezone.utc)) else 0.5
+            reserved_cost = multiplier * (int(next_input_tokens or 0) * prices["cache_miss"] + int(next_output_tokens or 0) * prices["output"]) / 1_000_000
+            if self.cost_cny(task_id) + reserved_cost > cost_limit:
                 raise ModelBudgetExceeded("任务下一次请求将超过费用上限 %.3f 元" % cost_limit)
         all_models = self.summary(task_id)
         task_total = sum(int(item.get("total_tokens", 0) or 0) for item in all_models.values())
@@ -86,7 +96,7 @@ class ModelUsageLedger:
             return
         summary = all_models.get(model, {})
         checks = (
-            ("pro_max_calls", int(summary.get("calls", 0)), 1, "Pro 调用次数"),
+            ("pro_max_calls", int(summary.get("billable_calls", 0)), 1, "Pro 付费调用次数"),
             ("pro_max_output_tokens", int(summary.get("output_tokens", 0) or 0), int(next_output_tokens or 0), "Pro 输出 Tokens"),
             ("pro_max_total_tokens", int(summary.get("total_tokens", 0) or 0), 0, "Pro 总 Tokens"),
         )

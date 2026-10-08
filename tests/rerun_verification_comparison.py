@@ -7,7 +7,8 @@ import os
 import sqlite3
 from pathlib import Path
 
-from run_live_regression import post, persist, set_auth, verify_with_checkpoints
+from run_live_regression import merge_verification, post, persist, set_auth
+from workflow_service import WorkflowService
 
 
 def load_baseline(database, task_id):
@@ -49,18 +50,23 @@ def main():
     parser.add_argument("baseline_task_id")
     parser.add_argument("--database", default="data/tasks.sqlite3")
     parser.add_argument("--base", default="http://127.0.0.1:4181")
+    parser.add_argument("--resume-state")
     args = parser.parse_args()
 
     task, artifacts = load_baseline(args.database, args.baseline_task_id)
-    created = post(args.base, "/api/tasks", {"topic": task["topic"], "tier": task["tier"]})["data"]
-    task_id, owner_token = created["task_id"], created["owner_token"]
+    if args.resume_state:
+        state_path = Path(args.resume_state)
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        task_id, owner_token = state["task_id"], state["owner_token"]
+    else:
+        created = post(args.base, "/api/tasks", {"topic": task["topic"], "tier": task["tier"]})["data"]
+        task_id, owner_token = created["task_id"], created["owner_token"]
+        state_path = Path("data/private") / ("verification-comparison-%s.json" % task_id)
+        state_path.write_text(json.dumps({"task_id": task_id, "owner_token": owner_token, "baseline_task_id": args.baseline_task_id}, ensure_ascii=False), encoding="utf-8")
+        os.chmod(state_path, 0o600)
+        for stage, kind in (("P2", "sources"), ("P4", "evidence"), ("P5", "report"), ("P6", "ppt"), ("P7", "claims")):
+            persist(args.base, task_id, stage, "baseline_artifact_reused", artifacts[kind], kind)
     set_auth(task_id, owner_token)
-    state_path = Path("data/private") / ("verification-comparison-%s.json" % task_id)
-    state_path.write_text(json.dumps({"task_id": task_id, "owner_token": owner_token, "baseline_task_id": args.baseline_task_id}, ensure_ascii=False), encoding="utf-8")
-    os.chmod(state_path, 0o600)
-
-    for stage, kind in (("P2", "sources"), ("P4", "evidence"), ("P5", "report"), ("P6", "ppt"), ("P7", "claims")):
-        persist(args.base, task_id, stage, "baseline_artifact_reused", artifacts[kind], kind)
 
     evidence_records = [item for group in artifacts["evidence"]["groups"] for item in group["evidence_records"]]
     evidence_ids = [item["evidence_id"] for item in evidence_records]
@@ -68,7 +74,26 @@ def main():
     source_records = [item for item in artifacts["sources"]["records"] if item["source_id"] in selected_ids]
     claims = artifacts["claims"]
 
-    verification = verify_with_checkpoints(args.base, task_id, task["topic"], task["tier"], claims, evidence_records, source_records)
+    evidence_by_id = {item["evidence_id"]: item for item in evidence_records}
+    strong_types = {"causal", "efficacy", "safety", "approval"}
+    strong = [item for item in claims["claims"] if item.get("claim_type") in strong_types and item.get("risk_level") in ("medium", "high")]
+    standard = [item for item in claims["claims"] if item not in strong]
+    dynamic_batches = WorkflowService._verification_batches(standard, evidence_by_id, False) + WorkflowService._verification_batches(strong, evidence_by_id, True)
+    connection = sqlite3.connect(args.database)
+    saved_rows = connection.execute("SELECT kind,payload_json FROM artifacts WHERE task_id=? AND kind LIKE 'verification_dynamic_%'", (task_id,)).fetchall()
+    saved = {kind: json.loads(payload) for kind, payload in saved_rows}
+    results = []
+    for index, batch in enumerate(dynamic_batches, 1):
+        kind = "verification_dynamic_%03d" % index
+        if kind not in saved:
+            print("[%s] dynamic P8 batch %d/%d" % (task["topic"], index, len(dynamic_batches)), flush=True)
+            partial_claims = {"claim_set_version": claims["claim_set_version"], "claims": batch, "extraction_notes": []}
+            saved[kind] = post(args.base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": source_records, "tier": task["tier"]})["data"]
+            persist(args.base, task_id, "P8", "verification_batch_completed", saved[kind], kind)
+        results.extend(saved[kind]["results"])
+    order = {item["claim_id"]: index for index, item in enumerate(claims["claims"])}
+    results.sort(key=lambda item: order[item["claim_id"]])
+    verification = merge_verification(results)
     persist(args.base, task_id, "P8", "verification_completed", verification, "verification")
     response = post(args.base, "/api/final", {
         "verification_results": verification,
