@@ -125,6 +125,11 @@ def main():
     persist(args.base, task_id, "P9", "final_completed", final, "final_delivery")
     post(args.base, "/api/tasks/%s/complete" % task_id, {})
     state_path.unlink(missing_ok=True)
+    connection = sqlite3.connect(args.database)
+    reused_rows = connection.execute("SELECT payload_json FROM events WHERE task_id=? AND event_type='baseline_verification_reused'", (task_id,)).fetchall()
+    reused_claim_ids = []
+    for (payload_json,) in reused_rows:
+        reused_claim_ids.extend(item["claim_id"] for item in json.loads(payload_json).get("results", []))
 
     print("COMPARISON_RESULT=" + json.dumps({
         "baseline_task_id": args.baseline_task_id,
