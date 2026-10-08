@@ -315,18 +315,25 @@ class WorkflowService:
                     field = "speaker_notes" if claim["location_type"] == "ppt_speaker_note" else "on_slide_text"
                     if field == "speaker_notes":
                         page[field], located = replace_once(page.get(field, ""), original, replacement)
+                        if not located:
+                            for index, line in enumerate(page.get("on_slide_text", [])):
+                                page["on_slide_text"][index], located = replace_once(line, original, replacement)
+                                if located:
+                                    break
                     else:
                         for index, line in enumerate(page.get(field, [])):
                             page[field][index], located = replace_once(line, original, replacement)
                             if located:
                                 break
+                        if not located:
+                            page["speaker_notes"], located = replace_once(page.get("speaker_notes", ""), original, replacement)
             if not located:
                 originally_located = False
                 if claim["location_type"] == "report_section":
                     _, originally_located = replace_once(original_markdown, original, "")
                 else:
                     original_page = original_pages.get(claim["section_or_page_id"], {})
-                    original_text = original_page.get("speaker_notes", "") if claim["location_type"] == "ppt_speaker_note" else "\n".join(original_page.get("on_slide_text", []))
+                    original_text = original_page.get("speaker_notes", "") + "\n" + "\n".join(original_page.get("on_slide_text", []))
                     _, originally_located = replace_once(original_text, original, "")
                 if originally_located:
                     if replacement and claim["location_type"] == "report_section":

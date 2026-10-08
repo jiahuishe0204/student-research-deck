@@ -275,6 +275,27 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertIn("在指定宿主中开发", slide)
         self.assertNotIn("无标记大片段整合平台", slide)
 
+    def test_deterministic_final_recovers_mislabeled_slide_field(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claims = [{
+            "claim_id": "CL-1", "location_type": "ppt_speaker_note", "section_or_page_id": "P1",
+            "original_text": "优化 NADPH 与血红素", "atomic_claim": "优化供应",
+            "claim_type": "mechanism", "cited_evidence_ids": ["EV-1"], "risk_level": "high",
+        }]
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "增强 NADPH 与血红素供应", "explanation": "未直接测量",
+        }]}
+        report = {"report_title": "报告", "report_markdown": "正文", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "汇报", "storyline": "证据", "pages": [{
+            "page_id": "P1", "title": "结论", "on_slide_text": ["过表达相关基因，优化 NADPH 与血红素"],
+            "speaker_notes": "谨慎解释", "evidence_ids": ["EV-1"],
+        }]}
+
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
+
+        self.assertIn("增强 NADPH 与血红素供应", output["final_ppt"]["pages"][0]["on_slide_text"][0])
+
 
 if __name__ == "__main__":
     unittest.main()
