@@ -16,6 +16,7 @@ from pathlib import Path
 
 from epo_ops import EPOClient
 from model_routing import ModelRouter
+from model_usage import ModelUsageLedger
 from retrieval import search_all
 from task_store import TaskStore
 from workflow_validation import (
@@ -152,6 +153,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                     markdown = self.server.task_store.export_markdown(task_id)
                     self.send_text(HTTPStatus.OK, markdown, "text/markdown; charset=utf-8", 'attachment; filename="%s.md"' % task_id)
                     return
+                if len(parts) == 4 and parts[3] == "usage":
+                    self.send_json(HTTPStatus.OK, {"data": self.server.model_usage.summary(task_id)})
+                    return
             except KeyError as exc:
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
                 return
@@ -198,6 +202,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "未配置 DeepSeek API 密钥"})
                 return
             task_id = self.require_task_access()
+            self.server.workflow.set_task_context(task_id)
             if not self.server.rate_limiter.allow("work:" + self.client_address[0] + ":" + task_id):
                 self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "任务调用过于频繁，请稍后再试"})
                 return
@@ -297,7 +302,12 @@ def create_server(host="127.0.0.1", port=4180, api_key=None):
     server.model_router = ModelRouter.from_file()
     server.api_key = api_key if api_key is not None else os.environ.get("DEEPSEEK_API_KEY", "").strip()
     server.epo_client = EPOClient.from_environment(ROOT / "data" / "private" / "epo-usage.sqlite3")
-    server.workflow = WorkflowService.from_project(server.api_key, server.model_router, ROOT)
+    server.model_usage = ModelUsageLedger(ROOT / "data" / "private" / "model-usage.sqlite3")
+    server.workflow = WorkflowService.from_project(server.api_key, server.model_router, ROOT, usage_ledger=server.model_usage, model_limits={
+        "pro_max_calls": int(os.environ.get("MODEL_PRO_MAX_CALLS", "0") or 0),
+        "pro_max_output_tokens": int(os.environ.get("MODEL_PRO_MAX_OUTPUT_TOKENS", "0") or 0),
+        "pro_max_total_tokens": int(os.environ.get("MODEL_PRO_MAX_TOTAL_TOKENS", "0") or 0),
+    })
     return server
 
 

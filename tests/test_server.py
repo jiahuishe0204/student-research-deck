@@ -163,6 +163,12 @@ class ValidationTests(unittest.TestCase):
         self.assertNotIn("load_contract(", source)
         self.assertNotIn("workflow.generate(", source)
 
+    def test_usage_endpoint_is_task_scoped(self):
+        source = (server.ROOT / "server.py").read_text(encoding="utf-8")
+        usage_branch = source.index('parts[3] == "usage"')
+        access_check = source.rfind("self.require_task_access(task_id)", 0, usage_branch)
+        self.assertGreater(access_check, source.index("def do_GET"))
+
 
 if __name__ == "__main__":
     unittest.main()

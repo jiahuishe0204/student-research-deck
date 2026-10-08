@@ -99,18 +99,18 @@ def resume(base, task_id, task_token):
         print("[%s] resume P8 (%d claims)" % (task["topic"], len(claims["claims"])), flush=True)
         saved_cache = {kind: value["data"] for kind, value in task["artifacts"].items()}
 
-        def verify_piece(items, kind):
+        def verify_piece(items, kind, depth=0):
             if kind in saved_cache:
                 return saved_cache[kind]
             try:
                 partial_claims = {"claim_set_version": claims["claim_set_version"], "claims": items, "extraction_notes": []}
                 saved = post(base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": selected_sources, "tier": task["tier"]})["data"]
             except Exception:
-                if len(items) <= 3:
+                if len(items) <= 3 or depth >= 1:
                     raise
                 midpoint = len(items) // 2
-                left = verify_piece(items[:midpoint], kind + "a")
-                right = verify_piece(items[midpoint:], kind + "b")
+                left = verify_piece(items[:midpoint], kind + "a", depth + 1)
+                right = verify_piece(items[midpoint:], kind + "b", depth + 1)
                 saved = merge_verification(left["results"] + right["results"], {"claims": items})
             persist(base, task_id, "P8", "verification_batch_completed", saved, kind)
             saved_cache[kind] = saved

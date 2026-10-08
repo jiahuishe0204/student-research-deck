@@ -7,12 +7,14 @@ import urllib.error
 import urllib.request
 
 
-def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", validator=None, max_tokens=6000, max_attempts=2, request_timeout=300):
+def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", validator=None, max_tokens=6000, max_attempts=2, request_timeout=300, usage_callback=None, before_attempt=None):
     thinking = "disabled" if effort == "none" else "enabled"
     base_content = stage_prompt + "\n\n实际输入JSON：\n" + json.dumps(payload, ensure_ascii=False)
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     last_error = None
     for attempt in range(max_attempts):
+        if before_attempt:
+            before_attempt(attempt + 1)
         suffix = "" if attempt == 0 else "\n\n上一次输出未通过校验：%s。请严格按照 output_contract 修正，确保JSON完整闭合，不得输出JSON之外的文本。" % str(last_error)[:300]
         request_body = {
             "model": model,
@@ -33,7 +35,18 @@ def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", 
         try:
             with urllib.request.urlopen(request, timeout=request_timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if usage_callback:
+                usage_callback(attempt + 1, "http_error", {}, {"status": exc.code})
+            if 400 <= exc.code < 500:
+                raise
+            last_error = exc
+            if attempt + 1 < max_attempts:
+                continue
+            raise
         except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            if usage_callback:
+                usage_callback(attempt + 1, "transport_error", {}, {"error": type(exc).__name__})
             last_error = exc
             if attempt + 1 < max_attempts:
                 continue
@@ -44,13 +57,19 @@ def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", 
         content = data["choices"][0]["message"].get("content") or ""
         if not content.strip():
             last_error = RuntimeError("模型未返回可用内容")
+            if usage_callback:
+                usage_callback(attempt + 1, "empty_output", usage, {})
             continue
         try:
             parsed = json.loads(content)
             if validator:
                 parsed = validator(parsed)
+            if usage_callback:
+                usage_callback(attempt + 1, "accepted", usage, {})
             total_usage["attempts"] = attempt + 1
             return parsed, total_usage
         except (json.JSONDecodeError, ValueError) as exc:
             last_error = exc
+            if usage_callback:
+                usage_callback(attempt + 1, "rejected", usage, {"error": str(exc)[:300]})
     raise last_error

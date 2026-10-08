@@ -30,7 +30,8 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(usage["total_tokens"], 7)
         self.assertTrue(route["upgraded"])
         self.assertEqual(calls[0][:5], ("secret", "P8-fast", "system", "verify", {"claim": 1}))
-        self.assertEqual(calls[0][5:], ("high", validator, 99, 3, 12))
+        self.assertEqual(calls[0][5:10], ("high", validator, 99, 3, 12))
+        self.assertEqual(len(calls[0]), 12)
 
     def test_missing_prompt_is_rejected_before_model_call(self):
         service = WorkflowService("secret", FakeRouter(), "system", {}, lambda *args: None)
@@ -149,7 +150,7 @@ class WorkflowServiceTests(unittest.TestCase):
             return {"results": [result]}, {"total_tokens": 5}, route
 
         service.generate = generate
-        base = {"atomic_claim": "same claim", "cited_evidence_ids": ["EV-1"], "risk_level": "high"}
+        base = {"atomic_claim": "same claim", "cited_evidence_ids": ["EV-1"], "risk_level": "high", "claim_type": "efficacy"}
         claims = {"claim_set_version": "1", "claims": [{**base, "claim_id": "CL-1"}, {**base, "claim_id": "CL-2"}]}
         output, usage, metadata = service.verify_claims(claims, [{"evidence_id": "EV-1"}], [{"source_id": "SRC-1"}], "fast")
 

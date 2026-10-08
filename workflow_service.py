@@ -3,6 +3,7 @@
 import copy
 import json
 import re
+import threading
 from pathlib import Path
 
 from contracts import load_contract
@@ -20,15 +21,18 @@ def add_usage(total, partial):
 
 class WorkflowService:
     CLAIMS_PER_BATCH_LIMIT = 6
-    def __init__(self, api_key, model_router, system_prompt, stage_prompts, model_client=deepseek_json):
+    def __init__(self, api_key, model_router, system_prompt, stage_prompts, model_client=deepseek_json, usage_ledger=None, model_limits=None):
         self.api_key = api_key
         self.model_router = model_router
         self.system_prompt = system_prompt
         self.stage_prompts = dict(stage_prompts)
         self.model_client = model_client
+        self.usage_ledger = usage_ledger
+        self.model_limits = model_limits or {}
+        self._context = threading.local()
 
     @classmethod
-    def from_project(cls, api_key, model_router, root, model_client=deepseek_json):
+    def from_project(cls, api_key, model_router, root, model_client=deepseek_json, usage_ledger=None, model_limits=None):
         root = Path(root)
         registry = json.loads((root / "config" / "prompt-stages.json").read_text(encoding="utf-8"))
         system_prompt = (root / registry["global_prompt"]).read_text(encoding="utf-8")
@@ -39,12 +43,24 @@ class WorkflowService:
             if not stage or not prompt_path or stage in stage_prompts:
                 raise ValueError("提示词阶段注册表无效")
             stage_prompts[stage] = (root / prompt_path).read_text(encoding="utf-8")
-        return cls(api_key, model_router, system_prompt, stage_prompts, model_client)
+        return cls(api_key, model_router, system_prompt, stage_prompts, model_client, usage_ledger, model_limits)
+
+    def set_task_context(self, task_id):
+        self._context.task_id = task_id
 
     def generate(self, stage, tier, payload, validator=None, *, upgrade=False, max_tokens=6000, max_attempts=2, request_timeout=300):
         if stage not in self.stage_prompts:
             raise ValueError("阶段 %s 缺少提示词" % stage)
         route = self.model_router.for_stage(stage, tier, upgrade=upgrade)
+        task_id = getattr(self._context, "task_id", "unassigned")
+
+        def record(attempt, status, usage, detail):
+            if self.usage_ledger:
+                self.usage_ledger.record(task_id, stage, route["model"], route["effort"], attempt, status, usage, detail)
+
+        def guard(attempt):
+            if self.usage_ledger:
+                self.usage_ledger.guard(task_id, route["model"], self.model_limits, max_tokens)
         output, usage = self.model_client(
             self.api_key,
             route["model"],
@@ -56,6 +72,8 @@ class WorkflowService:
             max_tokens,
             max_attempts,
             request_timeout,
+            record,
+            guard,
         )
         return output, usage, route
 
@@ -338,19 +356,20 @@ class WorkflowService:
         representative_to_group = {items[0]["claim_id"]: items for items in groups.values()}
         representative_results = []
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
-        strong_types = {"number", "causal", "efficacy", "safety", "approval", "patent_status"}
-        strong = [item for item in representatives if item.get("risk_level") == "high" or item.get("claim_type") in strong_types]
+        strong_types = {"causal", "efficacy", "safety", "approval"}
+        strong = [item for item in representatives if item.get("claim_type") in strong_types and item.get("risk_level") in ("medium", "high")]
         standard = [item for item in representatives if item not in strong]
         routes = []
         for batch_group, upgrade, label in ((standard, False, "standard"), (strong, True, "high_risk")):
-            for index in range(0, len(batch_group), 12):
-                batch_items = batch_group[index:index + 12]
+            batch_size = 4 if upgrade else 8
+            for index in range(0, len(batch_group), batch_size):
+                batch_items = batch_group[index:index + batch_size]
                 batch_ids = [item["claim_id"] for item in batch_items]
                 partial, partial_usage, route = self.generate(
                     "P8", tier,
                     {"claims": {"claim_set_version": claims.get("claim_set_version", ""), "claims": batch_items, "extraction_notes": []}, "evidence_records": evidence_records, "source_records": source_records, "output_contract": load_contract("P8")},
                     lambda value, ids=batch_ids, items=batch_items: validate_verification(value, ids, evidence_ids, items),
-                    upgrade=upgrade, max_tokens=8000, max_attempts=3, request_timeout=90,
+                    upgrade=upgrade, max_tokens=3000 if upgrade else 3500, max_attempts=2, request_timeout=90,
                 )
                 representative_results.extend(partial["results"])
                 add_usage(usage, partial_usage)

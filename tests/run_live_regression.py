@@ -95,18 +95,18 @@ def acceptance_failures(result, criteria):
 def verify_with_checkpoints(base, task_id, topic, tier, claims, evidence_records, source_records):
     cache = {}
 
-    def verify_piece(items, kind):
+    def verify_piece(items, kind, depth=0):
         if kind in cache:
             return cache[kind]
         try:
             partial_claims = {"claim_set_version": claims["claim_set_version"], "claims": items, "extraction_notes": []}
             saved = post(base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": source_records, "tier": tier})["data"]
         except Exception:
-            if len(items) <= 3:
+            if len(items) <= 3 or depth >= 1:
                 raise
             midpoint = len(items) // 2
-            left = verify_piece(items[:midpoint], kind + "a")
-            right = verify_piece(items[midpoint:], kind + "b")
+            left = verify_piece(items[:midpoint], kind + "a", depth + 1)
+            right = verify_piece(items[midpoint:], kind + "b", depth + 1)
             saved = merge_verification(left["results"] + right["results"])
         persist(base, task_id, "P8", "verification_batch_completed", saved, kind)
         cache[kind] = saved
