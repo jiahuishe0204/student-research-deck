@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 import sys
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +16,13 @@ from model_usage import ModelUsageLedger
 from quality_benchmark import score_ppt_density, score_verification
 from server import load_dotenv
 from workflow_service import WorkflowService
+
+
+class BenchmarkWorkflowService(WorkflowService):
+    @classmethod
+    def _verification_output_limit(cls, items, evidence_by_id, upgrade):
+        value = super()._verification_output_limit(items, evidence_by_id, upgrade)
+        return max(4000, value) if upgrade else value
 
 
 class BenchmarkRouter:
@@ -37,6 +45,10 @@ def artifact(connection, task_id, kind):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--schemes", nargs="+", choices=("flash", "pro_low", "mixed"), default=["flash", "pro_low", "mixed"])
+    parser.add_argument("--cost-limit", type=float, default=0.15)
+    args = parser.parse_args()
     benchmark = json.loads((ROOT / "tests/fixtures/model-quality-benchmark.json").read_text(encoding="utf-8"))
     connection = sqlite3.connect(str(ROOT / "data/tasks.sqlite3"))
     task_id = benchmark["baseline_task_id"]
@@ -57,10 +69,10 @@ def main():
     ledger = ModelUsageLedger(ROOT / "data/private/model-usage.sqlite3")
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     results = {"run_id":run_id,"schemes":{},"ppt_density":{}}
-    for scheme in ("flash", "pro_low", "mixed"):
+    for scheme in args.schemes:
         ledger_id = "BENCH-%s-%s" % (run_id, scheme)
-        service = WorkflowService.from_project(api_key, BenchmarkRouter(scheme), ROOT, usage_ledger=ledger, model_limits={
-            "task_max_cost_cny": 0.15, "task_max_total_tokens": 90000,
+        service = BenchmarkWorkflowService.from_project(api_key, BenchmarkRouter(scheme), ROOT, usage_ledger=ledger, model_limits={
+            "task_max_cost_cny": args.cost_limit, "task_max_total_tokens": 120000,
             "pro_max_calls": 8, "pro_max_output_tokens": 24000, "pro_max_total_tokens": 70000,
         })
         service.set_task_context(ledger_id)
