@@ -11,6 +11,11 @@ class ModelBudgetExceeded(RuntimeError):
 
 
 class ModelUsageLedger:
+    PEAK_PRICES_CNY_PER_MILLION = {
+        "deepseek-flash": {"cache_hit": 0.04, "cache_miss": 2.0, "output": 8.0},
+        "deepseek-v4-flash": {"cache_hit": 0.04, "cache_miss": 2.0, "output": 8.0},
+        "deepseek-v4-pro": {"cache_hit": 0.30, "cache_miss": 9.0, "output": 27.0},
+    }
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,7 +55,27 @@ class ModelUsageLedger:
             rows = connection.execute("SELECT model,COUNT(*) calls,SUM(completion_tokens) output_tokens,SUM(total_tokens) total_tokens,SUM(reasoning_tokens) reasoning_tokens FROM model_usage WHERE task_id=? GROUP BY model", (task_id,)).fetchall()
         return {row["model"]: dict(row) for row in rows}
 
+    def peak_cost_cny(self, task_id):
+        with self.connect() as connection:
+            rows = connection.execute("SELECT model,prompt_tokens,completion_tokens,cache_hit_tokens,cache_miss_tokens FROM model_usage WHERE task_id=?", (task_id,)).fetchall()
+        total = 0.0
+        for row in rows:
+            prices = self.PEAK_PRICES_CNY_PER_MILLION.get(row["model"])
+            if not prices:
+                continue
+            hit = int(row["cache_hit_tokens"] or 0)
+            miss = int(row["cache_miss_tokens"] or 0)
+            miss += max(0, int(row["prompt_tokens"] or 0) - hit - miss)
+            total += (hit * prices["cache_hit"] + miss * prices["cache_miss"] + int(row["completion_tokens"] or 0) * prices["output"]) / 1_000_000
+        return total
+
     def guard(self, task_id, model, limits, next_output_tokens=0, next_input_tokens=0):
+        cost_limit = float((limits or {}).get("task_max_cost_cny", 0) or 0)
+        prices = self.PEAK_PRICES_CNY_PER_MILLION.get(model)
+        if cost_limit and prices:
+            reserved_cost = (int(next_input_tokens or 0) * prices["cache_miss"] + int(next_output_tokens or 0) * prices["output"]) / 1_000_000
+            if self.peak_cost_cny(task_id) + reserved_cost > cost_limit:
+                raise ModelBudgetExceeded("任务下一次请求将超过费用上限 %.3f 元" % cost_limit)
         all_models = self.summary(task_id)
         task_total = sum(int(item.get("total_tokens", 0) or 0) for item in all_models.values())
         task_limit = int((limits or {}).get("task_max_total_tokens", 0) or 0)

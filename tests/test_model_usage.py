@@ -19,6 +19,7 @@ class ModelUsageLedgerTests(unittest.TestCase):
             self.assertEqual(summary["calls"], 2)
             self.assertEqual(summary["output_tokens"], 50)
             self.assertEqual(summary["reasoning_tokens"], 30)
+            self.assertAlmostEqual(ledger.peak_cost_cny("T1"), (40 * 0.30 + 60 * 9.0 + 50 * 27.0) / 1_000_000)
 
     def test_pro_guard_stops_before_next_attempt(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -32,6 +33,8 @@ class ModelUsageLedgerTests(unittest.TestCase):
                 ledger.guard("T1", "deepseek-v4-pro", {"pro_max_total_tokens": 100})
             with self.assertRaisesRegex(ModelBudgetExceeded, "任务下一次"):
                 ledger.guard("T1", "deepseek-flash", {"task_max_total_tokens": 120}, next_input_tokens=10, next_output_tokens=20)
+            with self.assertRaisesRegex(ModelBudgetExceeded, "费用上限"):
+                ledger.guard("T1", "deepseek-v4-pro", {"task_max_cost_cny": 0.001}, next_input_tokens=100, next_output_tokens=100)
             ledger.guard("T1", "deepseek-flash", {"pro_max_output_tokens": 1})
 
 
