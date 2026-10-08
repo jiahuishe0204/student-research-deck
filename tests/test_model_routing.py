@@ -13,10 +13,10 @@ class ModelRouterTests(unittest.TestCase):
         self.assertEqual(self.router.for_stage("P2", "deep")["model"], "deepseek-v4-pro")
         self.assertEqual(self.router.for_stage("P2", "deep")["effort"], "high")
 
-    def test_high_risk_fast_verification_upgrades_to_deep_route(self):
+    def test_high_risk_fast_verification_upgrades_with_bounded_effort(self):
         route = self.router.for_stage("P8", "fast", upgrade=True)
         self.assertEqual(route["model"], "deepseek-v4-pro")
-        self.assertEqual(route["effort"], "high")
+        self.assertEqual(route["effort"], "low")
         self.assertTrue(route["upgraded"])
 
     def test_unknown_stage_or_tier_is_rejected(self):

@@ -3,7 +3,9 @@
 
 import argparse
 import json
+import os
 import sqlite3
+from pathlib import Path
 
 from run_live_regression import post, persist, set_auth, verify_with_checkpoints
 
@@ -53,6 +55,9 @@ def main():
     created = post(args.base, "/api/tasks", {"topic": task["topic"], "tier": task["tier"]})["data"]
     task_id, owner_token = created["task_id"], created["owner_token"]
     set_auth(task_id, owner_token)
+    state_path = Path("data/private") / ("verification-comparison-%s.json" % task_id)
+    state_path.write_text(json.dumps({"task_id": task_id, "owner_token": owner_token, "baseline_task_id": args.baseline_task_id}, ensure_ascii=False), encoding="utf-8")
+    os.chmod(state_path, 0o600)
 
     for stage, kind in (("P2", "sources"), ("P4", "evidence"), ("P5", "report"), ("P6", "ppt"), ("P7", "claims")):
         persist(args.base, task_id, stage, "baseline_artifact_reused", artifacts[kind], kind)
@@ -79,6 +84,7 @@ def main():
     final = response["data"]
     persist(args.base, task_id, "P9", "final_completed", final, "final_delivery")
     post(args.base, "/api/tasks/%s/complete" % task_id, {})
+    state_path.unlink(missing_ok=True)
 
     print("COMPARISON_RESULT=" + json.dumps({
         "baseline_task_id": args.baseline_task_id,

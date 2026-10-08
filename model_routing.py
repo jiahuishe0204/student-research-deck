@@ -48,7 +48,9 @@ class ModelRouter:
         model = entry["model"]
         if upgrade:
             model = entry.get("upgrade_model") or self.config["tiers"]["deep"][capability]["model"]
-            if model == self.config["tiers"]["deep"][capability]["model"]:
+            if entry.get("upgrade_reasoning_effort"):
+                selected = {"thinking": "enabled", "reasoning_effort": entry["upgrade_reasoning_effort"]}
+            elif model == self.config["tiers"]["deep"][capability]["model"]:
                 selected = self.config["tiers"]["deep"][capability]
 
         thinking = selected.get("thinking", "disabled")
