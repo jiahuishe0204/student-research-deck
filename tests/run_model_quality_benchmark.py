@@ -30,7 +30,7 @@ class BenchmarkRouter:
         self.scheme = scheme
 
     def for_stage(self, stage, tier="fast", upgrade=False):
-        if self.scheme == "flash":
+        if self.scheme in ("flash", "enhanced_flash"):
             model, effort = "deepseek-flash", "none"
         elif self.scheme == "pro_low":
             model, effort = "deepseek-v4-pro", "low"
@@ -46,7 +46,7 @@ def artifact(connection, task_id, kind):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--schemes", nargs="+", choices=("flash", "pro_low", "mixed"), default=["flash", "pro_low", "mixed"])
+    parser.add_argument("--schemes", nargs="+", choices=("flash", "enhanced_flash", "pro_low", "mixed"), default=["flash", "pro_low", "mixed"])
     parser.add_argument("--cost-limit", type=float, default=0.15)
     args = parser.parse_args()
     benchmark = json.loads((ROOT / "tests/fixtures/model-quality-benchmark.json").read_text(encoding="utf-8"))

@@ -231,6 +231,23 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(len(output["results"]), 9)
         self.assertEqual(metadata["batches"], 2)
 
+    def test_high_risk_verification_includes_sibling_evidence_from_same_source(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
+        seen = {}
+
+        def generate(stage, tier, payload, validator=None, **options):
+            seen["evidence"] = [item["evidence_id"] for item in payload["evidence_records"]]
+            item = payload["claims"]["claims"][0]
+            result = {"claim_id":item["claim_id"],"source_identity":{"matched":True,"source_ids":["SRC-1"]},"support_status":"supported","issue_codes":["none"],"explanation":"supported","action":"keep","revised_claim":None,"valid_evidence_ids":["EV-2"]}
+            return {"results":[result]}, {"total_tokens":1}, {"model":"pro","upgraded":True}
+
+        service.generate = generate
+        claims = {"claim_set_version":"1","claims":[{"claim_id":"CL-1","atomic_claim":"疗效","cited_evidence_ids":["EV-1"],"risk_level":"high","claim_type":"efficacy"}]}
+        evidence = [{"evidence_id":"EV-1","source_id":"SRC-1"},{"evidence_id":"EV-2","source_id":"SRC-1"},{"evidence_id":"EV-3","source_id":"SRC-2"}]
+        service.verify_claims(claims, evidence, [{"source_id":"SRC-1"},{"source_id":"SRC-2"}], "fast")
+
+        self.assertEqual(set(seen["evidence"]), {"EV-1", "EV-2"})
+
     def test_deterministic_final_applies_revision_without_model_tokens(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})
         claims = [{

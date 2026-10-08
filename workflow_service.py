@@ -426,6 +426,9 @@ class WorkflowService:
             for batch_items in self._verification_batches(batch_group, evidence_by_id, upgrade):
                 batch_ids = [item["claim_id"] for item in batch_items]
                 cited_ids = {evidence_id for item in batch_items for evidence_id in item.get("cited_evidence_ids", [])}
+                if upgrade:
+                    cited_source_ids = {evidence_by_id[evidence_id].get("source_id") for evidence_id in cited_ids if evidence_id in evidence_by_id}
+                    cited_ids.update(evidence_id for evidence_id, evidence in evidence_by_id.items() if evidence.get("source_id") in cited_source_ids)
                 batch_evidence = [evidence_by_id[evidence_id] for evidence_id in cited_ids if evidence_id in evidence_by_id]
                 source_ids = {item.get("source_id") for item in batch_evidence}
                 batch_sources = [source_by_id[source_id] for source_id in source_ids if source_id in source_by_id]
