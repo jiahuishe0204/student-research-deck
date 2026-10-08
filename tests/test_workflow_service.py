@@ -158,7 +158,38 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(usage["total_tokens"], 5)
         self.assertEqual(metadata["unique_claims"], 1)
         self.assertEqual(metadata["claims"], 2)
-        self.assertEqual(metadata["reason"], "high_risk_upgrade")
+        self.assertEqual(metadata["reason"], "risk_split")
+        self.assertEqual(metadata["high_risk_claims"], 1)
+        self.assertEqual(metadata["standard_claims"], 0)
+
+    def test_verify_claims_routes_standard_and_high_risk_separately(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
+        calls = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            batch = payload["claims"]["claims"]
+            calls.append((options["upgrade"], [item["claim_id"] for item in batch]))
+            results = [{
+                "claim_id": item["claim_id"], "source_identity": {"matched": True, "source_ids": ["SRC-1"]},
+                "support_status": "supported", "issue_codes": ["none"], "explanation": "supported",
+                "action": "keep", "revised_claim": None, "valid_evidence_ids": ["EV-1"],
+            } for item in batch]
+            return {"results": results}, {"total_tokens": 5}, {"model": "pro" if options["upgrade"] else "flash", "upgraded": options["upgrade"]}
+
+        service.generate = generate
+        claims = {"claim_set_version": "1", "claims": [
+            {"claim_id": "CL-1", "atomic_claim": "背景事实", "cited_evidence_ids": ["EV-1"], "risk_level": "low", "claim_type": "other"},
+            {"claim_id": "CL-2", "atomic_claim": "疗效事实", "cited_evidence_ids": ["EV-1"], "risk_level": "medium", "claim_type": "efficacy"},
+        ]}
+
+        output, usage, metadata = service.verify_claims(claims, [{"evidence_id": "EV-1"}], [{"source_id": "SRC-1"}], "fast")
+
+        self.assertEqual(calls, [(False, ["CL-1"]), (True, ["CL-2"])])
+        self.assertEqual([item["claim_id"] for item in output["results"]], ["CL-1", "CL-2"])
+        self.assertEqual(metadata["models"], ["flash", "pro"])
+        self.assertEqual(metadata["standard_claims"], 1)
+        self.assertEqual(metadata["high_risk_claims"], 1)
+        self.assertEqual(usage["total_tokens"], 10)
 
     def test_deterministic_final_applies_revision_without_model_tokens(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})

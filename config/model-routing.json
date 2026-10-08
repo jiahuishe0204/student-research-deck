@@ -8,7 +8,7 @@
       "research_planning": {"model":"deepseek-flash","thinking":"enabled","reasoning_effort":"high"},
       "retrieval_screening": {"model":"deepseek-flash","thinking":"disabled"},
       "content_generation": {"model":"deepseek-flash","thinking":"disabled"},
-      "high_risk_verification": {"model":"deepseek-flash","thinking":"enabled","reasoning_effort":"high"},
+      "high_risk_verification": {"model":"deepseek-flash","thinking":"disabled","upgrade_model":"deepseek-v4-pro"},
       "ppt_storyboard": {"model":"deepseek-flash","thinking":"disabled"}
     },
     "deep": {

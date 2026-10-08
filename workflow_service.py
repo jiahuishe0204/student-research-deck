@@ -327,7 +327,6 @@ class WorkflowService:
         evidence_ids = [item.get("evidence_id") for item in evidence_records if isinstance(item, dict)]
         if len(evidence_ids) != len(evidence_records) or any(not evidence_id for evidence_id in evidence_ids):
             raise ValueError("独立核验证据编号无效")
-        high_risk = any(item.get("risk_level") == "high" for item in claim_items)
         groups = {}
         for claim in claim_items:
             normalized = re.sub(r"\s+", "", claim.get("atomic_claim", "")).strip("。；;，,")
@@ -337,18 +336,23 @@ class WorkflowService:
         representative_to_group = {items[0]["claim_id"]: items for items in groups.values()}
         representative_results = []
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
-        route = None
-        for index in range(0, len(representatives), 12):
-            batch_items = representatives[index:index + 12]
-            batch_ids = [item["claim_id"] for item in batch_items]
-            partial, partial_usage, route = self.generate(
-                "P8", tier,
-                {"claims": {"claim_set_version": claims.get("claim_set_version", ""), "claims": batch_items, "extraction_notes": []}, "evidence_records": evidence_records, "source_records": source_records, "output_contract": load_contract("P8")},
-                lambda value, ids=batch_ids, items=batch_items: validate_verification(value, ids, evidence_ids, items),
-                upgrade=high_risk, max_tokens=8000, max_attempts=3, request_timeout=90,
-            )
-            representative_results.extend(partial["results"])
-            add_usage(usage, partial_usage)
+        strong_types = {"number", "causal", "efficacy", "safety", "approval", "patent_status"}
+        strong = [item for item in representatives if item.get("risk_level") == "high" or item.get("claim_type") in strong_types]
+        standard = [item for item in representatives if item not in strong]
+        routes = []
+        for batch_group, upgrade, label in ((standard, False, "standard"), (strong, True, "high_risk")):
+            for index in range(0, len(batch_group), 12):
+                batch_items = batch_group[index:index + 12]
+                batch_ids = [item["claim_id"] for item in batch_items]
+                partial, partial_usage, route = self.generate(
+                    "P8", tier,
+                    {"claims": {"claim_set_version": claims.get("claim_set_version", ""), "claims": batch_items, "extraction_notes": []}, "evidence_records": evidence_records, "source_records": source_records, "output_contract": load_contract("P8")},
+                    lambda value, ids=batch_ids, items=batch_items: validate_verification(value, ids, evidence_ids, items),
+                    upgrade=upgrade, max_tokens=8000, max_attempts=3, request_timeout=90,
+                )
+                representative_results.extend(partial["results"])
+                add_usage(usage, partial_usage)
+                routes.append({"class": label, "model": route["model"], "claims": len(batch_items)})
         results = []
         for result in representative_results:
             for claim in representative_to_group[result["claim_id"]]:
@@ -361,5 +365,9 @@ class WorkflowService:
         summary["high_risk_remaining"] = 0
         output = {"verification_version": "P8-batched-1.0", "results": results, "summary": summary}
         validate_verification(output, claim_ids, evidence_ids, claim_items)
-        metadata = {"model": route["model"], "reason": "high_risk_upgrade" if route["upgraded"] else "configured_tier", "batches": (len(representatives) + 11) // 12, "claims": len(claim_items), "unique_claims": len(representatives)}
+        metadata = {
+            "models": sorted({item["model"] for item in routes}), "reason": "risk_split",
+            "batches": len(routes), "standard_claims": len(standard), "high_risk_claims": len(strong),
+            "claims": len(claim_items), "unique_claims": len(representatives), "routes": routes,
+        }
         return output, usage, metadata
