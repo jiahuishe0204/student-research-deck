@@ -212,6 +212,29 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(output["change_log"][0]["action"], "revised")
         self.assertEqual(usage["total_tokens"], 0)
 
+    def test_deterministic_final_locates_slide_claim_after_label_prefix(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claims = [{
+            "claim_id": "CL-1", "location_type": "ppt_slide", "section_or_page_id": "P1",
+            "original_text": "突破：无标记大片段整合平台", "atomic_claim": "已建立无标记整合平台",
+            "claim_type": "research_stage", "cited_evidence_ids": ["EV-1"], "risk_level": "medium",
+        }]
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "在指定宿主中开发了无标记整合平台。", "explanation": "需要限定宿主",
+        }]}
+        report = {"report_title": "报告", "report_markdown": "正文", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "汇报", "storyline": "证据", "pages": [{
+            "page_id": "P1", "title": "突破", "on_slide_text": ["突破：定向酶工程；无标记大片段整合平台；共定位"],
+            "speaker_notes": "", "evidence_ids": ["EV-1"],
+        }]}
+
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
+
+        slide = output["final_ppt"]["pages"][0]["on_slide_text"][0]
+        self.assertIn("在指定宿主中开发", slide)
+        self.assertNotIn("无标记大片段整合平台", slide)
+
 
 if __name__ == "__main__":
     unittest.main()

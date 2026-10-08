@@ -219,6 +219,8 @@ class WorkflowService:
 
         def replace_once(text, original, replacement):
             candidates = [original, original.rstrip("。；;，,"), original.strip()]
+            if "：" in original and len(original.rsplit("：", 1)[-1].strip()) >= 6:
+                candidates.append(original.rsplit("：", 1)[-1].strip().rstrip("。；;，,"))
             for candidate in dict.fromkeys(item for item in candidates if item):
                 if candidate in text:
                     return text.replace(candidate, replacement, 1), True
