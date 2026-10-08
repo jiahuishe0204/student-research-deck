@@ -192,6 +192,45 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(metadata["high_risk_claims"], 1)
         self.assertEqual(usage["total_tokens"], 10)
 
+    def test_verify_claims_uses_dynamic_batches_and_only_cited_evidence(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
+        calls = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            batch = payload["claims"]["claims"]
+            calls.append({
+                "claims": [item["claim_id"] for item in batch],
+                "evidence": [item["evidence_id"] for item in payload["evidence_records"]],
+                "sources": [item["source_id"] for item in payload["source_records"]],
+                "max_tokens": options["max_tokens"],
+            })
+            results = [{
+                "claim_id": item["claim_id"], "source_identity": {"matched": True, "source_ids": ["SRC-1"]},
+                "support_status": "supported", "issue_codes": ["none"], "explanation": "supported",
+                "action": "keep", "revised_claim": None, "valid_evidence_ids": item["cited_evidence_ids"],
+            } for item in batch]
+            return {"results": results}, {"total_tokens": 1}, {"model": "flash", "upgraded": False}
+
+        service.generate = generate
+        claims = {"claim_set_version": "1", "claims": [{
+            "claim_id": "CL-%d" % index, "atomic_claim": "背景事实%d" % index,
+            "cited_evidence_ids": ["EV-1"], "risk_level": "low", "claim_type": "other",
+        } for index in range(1, 10)]}
+        evidence = [
+            {"evidence_id": "EV-1", "source_id": "SRC-1", "fact": "used"},
+            {"evidence_id": "EV-2", "source_id": "SRC-2", "fact": "must not be sent"},
+        ]
+        sources = [{"source_id": "SRC-1"}, {"source_id": "SRC-2"}]
+
+        output, _, metadata = service.verify_claims(claims, evidence, sources, "fast")
+
+        self.assertEqual([len(item["claims"]) for item in calls], [8, 1])
+        self.assertTrue(all(item["evidence"] == ["EV-1"] for item in calls))
+        self.assertTrue(all(item["sources"] == ["SRC-1"] for item in calls))
+        self.assertLess(calls[1]["max_tokens"], calls[0]["max_tokens"])
+        self.assertEqual(len(output["results"]), 9)
+        self.assertEqual(metadata["batches"], 2)
+
     def test_deterministic_final_applies_revision_without_model_tokens(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})
         claims = [{

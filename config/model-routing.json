@@ -1,6 +1,6 @@
 {
   "version": "0.2",
-  "updated_at": "2026-09-24",
+  "updated_at": "2026-10-08",
   "strategy": "critical_nodes_upgrade",
   "tiers": {
     "fast": {
@@ -31,21 +31,19 @@
     "verification": [
       "safety_or_efficacy_claim",
       "causal_claim",
-      "precise_number",
-      "source_conflict",
-      "abstract_only_strong_claim",
-      "failed_first_pass"
+      "approval_scope_claim",
+      "source_conflict_after_flash"
     ]
   },
   "pricing_snapshot": {
-    "verified_at":"2026-09-24",
+    "verified_at":"2026-10-08",
     "currency":"CNY_per_1M_tokens",
     "peak_hours_beijing":"Mon-Fri 09:00-12:00, 14:00-18:00",
     "deepseek-flash":{"cache_hit_input":{"off_peak":0.02,"peak":0.04},"cache_miss_input":{"off_peak":1.0,"peak":2.0},"output":{"off_peak":4.0,"peak":8.0}},
     "deepseek-v4-pro":{"cache_hit_input":{"off_peak":0.15,"peak":0.30},"cache_miss_input":{"off_peak":4.5,"peak":9.0},"output":{"off_peak":13.5,"peak":27.0}}
   },
   "notes": [
-    "Model IDs and prices were checked against official DeepSeek API documentation on 2026-09-24 and must be rechecked before launch.",
+    "Model IDs and prices were checked against official DeepSeek API documentation on 2026-10-08 and must be rechecked before launch.",
     "Deterministic validation should not be delegated to a language model.",
     "Cost reduction must never weaken citation authenticity."
   ]

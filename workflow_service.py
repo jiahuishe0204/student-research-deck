@@ -48,6 +48,53 @@ class WorkflowService:
     def set_task_context(self, task_id):
         self._context.task_id = task_id
 
+    @staticmethod
+    def _claim_complexity(claim, evidence_by_id):
+        score = 1
+        if claim.get("claim_type") in {"causal", "efficacy", "safety", "approval"}:
+            score += 2
+        score += {"medium": 1, "high": 2}.get(claim.get("risk_level"), 0)
+        cited = claim.get("cited_evidence_ids", [])
+        if len(cited) >= 3:
+            score += 1
+        evidence_chars = sum(len(json.dumps(evidence_by_id.get(item, {}), ensure_ascii=False)) for item in cited)
+        if evidence_chars > 3000:
+            score += 1
+        text = str(claim.get("atomic_claim", ""))
+        if len(re.findall(r"\d+(?:\.\d+)?", text)) >= 2:
+            score += 1
+        return score, evidence_chars
+
+    @classmethod
+    def _verification_batches(cls, items, evidence_by_id, upgrade):
+        max_claims = 4 if upgrade else 8
+        max_complexity = 14 if upgrade else 16
+        max_evidence_chars = 10000 if upgrade else 14000
+        batches, current = [], []
+        complexity_total = evidence_chars_total = 0
+        for item in items:
+            complexity, evidence_chars = cls._claim_complexity(item, evidence_by_id)
+            over_limit = current and (
+                len(current) >= max_claims
+                or complexity_total + complexity > max_complexity
+                or evidence_chars_total + evidence_chars > max_evidence_chars
+            )
+            if over_limit:
+                batches.append(current)
+                current, complexity_total, evidence_chars_total = [], 0, 0
+            current.append(item)
+            complexity_total += complexity
+            evidence_chars_total += evidence_chars
+        if current:
+            batches.append(current)
+        return batches
+
+    @classmethod
+    def _verification_output_limit(cls, items, evidence_by_id, upgrade):
+        complexity = sum(cls._claim_complexity(item, evidence_by_id)[0] for item in items)
+        ceiling = 3200 if upgrade else 3800
+        return min(ceiling, max(1200, 650 + len(items) * 220 + complexity * 70))
+
     def generate(self, stage, tier, payload, validator=None, *, upgrade=False, max_tokens=6000, max_attempts=2, request_timeout=300):
         if stage not in self.stage_prompts:
             raise ValueError("阶段 %s 缺少提示词" % stage)
@@ -347,6 +394,8 @@ class WorkflowService:
         evidence_ids = [item.get("evidence_id") for item in evidence_records if isinstance(item, dict)]
         if len(evidence_ids) != len(evidence_records) or any(not evidence_id for evidence_id in evidence_ids):
             raise ValueError("独立核验证据编号无效")
+        evidence_by_id = {item["evidence_id"]: item for item in evidence_records}
+        source_by_id = {item.get("source_id"): item for item in source_records if isinstance(item, dict) and item.get("source_id")}
         groups = {}
         for claim in claim_items:
             normalized = re.sub(r"\s+", "", claim.get("atomic_claim", "")).strip("。；;，,")
@@ -361,19 +410,22 @@ class WorkflowService:
         standard = [item for item in representatives if item not in strong]
         routes = []
         for batch_group, upgrade, label in ((standard, False, "standard"), (strong, True, "high_risk")):
-            batch_size = 4 if upgrade else 8
-            for index in range(0, len(batch_group), batch_size):
-                batch_items = batch_group[index:index + batch_size]
+            for batch_items in self._verification_batches(batch_group, evidence_by_id, upgrade):
                 batch_ids = [item["claim_id"] for item in batch_items]
+                cited_ids = {evidence_id for item in batch_items for evidence_id in item.get("cited_evidence_ids", [])}
+                batch_evidence = [evidence_by_id[evidence_id] for evidence_id in cited_ids if evidence_id in evidence_by_id]
+                source_ids = {item.get("source_id") for item in batch_evidence}
+                batch_sources = [source_by_id[source_id] for source_id in source_ids if source_id in source_by_id]
+                output_limit = self._verification_output_limit(batch_items, evidence_by_id, upgrade)
                 partial, partial_usage, route = self.generate(
                     "P8", tier,
-                    {"claims": {"claim_set_version": claims.get("claim_set_version", ""), "claims": batch_items, "extraction_notes": []}, "evidence_records": evidence_records, "source_records": source_records, "output_contract": load_contract("P8")},
+                    {"claims": {"claim_set_version": claims.get("claim_set_version", ""), "claims": batch_items, "extraction_notes": []}, "evidence_records": batch_evidence, "source_records": batch_sources, "output_contract": load_contract("P8")},
                     lambda value, ids=batch_ids, items=batch_items: validate_verification(value, ids, evidence_ids, items),
-                    upgrade=upgrade, max_tokens=3000 if upgrade else 3500, max_attempts=2, request_timeout=90,
+                    upgrade=upgrade, max_tokens=output_limit, max_attempts=2, request_timeout=90,
                 )
                 representative_results.extend(partial["results"])
                 add_usage(usage, partial_usage)
-                routes.append({"class": label, "model": route["model"], "claims": len(batch_items)})
+                routes.append({"class": label, "model": route["model"], "claims": len(batch_items), "evidence": len(batch_evidence), "max_output_tokens": output_limit})
         results = []
         for result in representative_results:
             for claim in representative_to_group[result["claim_id"]]:

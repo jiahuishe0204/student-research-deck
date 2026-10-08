@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from model_client import deepseek_json
+from model_client import deepseek_json, parse_json_object
 
 
 class FakeResponse:
@@ -21,6 +21,13 @@ class FakeResponse:
 
 
 class ModelClientTests(unittest.TestCase):
+    def test_parse_json_object_repairs_safe_wrappers(self):
+        self.assertEqual(parse_json_object('```json\n{"ok": true}\n```'), {"ok": True})
+        self.assertEqual(parse_json_object('结果如下：\n{"ok": true}\n完成'), {"ok": True})
+
+    def test_parse_json_object_rejects_truncated_content(self):
+        with self.assertRaises(json.JSONDecodeError):
+            parse_json_object('{"ok": true')
     def test_validation_failure_retries_and_accumulates_usage(self):
         replies = [
             FakeResponse({"choices": [{"message": {"content": '{"ok": false}'}}], "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}),

@@ -7,6 +7,28 @@ import urllib.error
 import urllib.request
 
 
+def parse_json_object(content):
+    """Repair harmless JSON wrappers locally without inventing truncated content."""
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().lower() in ("```", "```json"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        value = json.loads(text[start:end + 1])
+    if not isinstance(value, dict):
+        raise ValueError("模型输出必须是 JSON 对象")
+    return value
+
+
 def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", validator=None, max_tokens=6000, max_attempts=2, request_timeout=300, usage_callback=None, before_attempt=None):
     thinking = "disabled" if effort == "none" else "enabled"
     base_content = stage_prompt + "\n\n实际输入JSON：\n" + json.dumps(payload, ensure_ascii=False)
@@ -61,7 +83,7 @@ def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", 
                 usage_callback(attempt + 1, "empty_output", usage, {})
             continue
         try:
-            parsed = json.loads(content)
+            parsed = parse_json_object(content)
             if validator:
                 parsed = validator(parsed)
             if usage_callback:
