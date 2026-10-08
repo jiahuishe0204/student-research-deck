@@ -296,6 +296,27 @@ class WorkflowServiceTests(unittest.TestCase):
 
         self.assertIn("增强 NADPH 与血红素供应", output["final_ppt"]["pages"][0]["on_slide_text"][0])
 
+    def test_deterministic_final_promotes_verified_visual_note_to_slide(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claims = [{
+            "claim_id": "CL-1", "location_type": "ppt_slide", "section_or_page_id": "P1",
+            "original_text": "底部标注摘要级证据", "atomic_claim": "证据为摘要级",
+            "claim_type": "other", "cited_evidence_ids": ["EV-1"], "risk_level": "medium",
+        }]
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "多数证据为摘要级且统计信息不完整", "explanation": "需要限定范围",
+        }]}
+        report = {"report_title": "报告", "report_markdown": "正文", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "汇报", "storyline": "证据", "pages": [{
+            "page_id": "P1", "title": "结论", "purpose": "总结", "on_slide_text": ["案例"],
+            "visual_suggestion": "三栏卡片，底部标注摘要级证据", "speaker_notes": "谨慎解释", "evidence_ids": ["EV-1"],
+        }]}
+
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
+
+        self.assertIn("核验修订：多数证据为摘要级", output["final_ppt"]["pages"][0]["on_slide_text"][-1])
+
 
 if __name__ == "__main__":
     unittest.main()

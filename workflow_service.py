@@ -333,7 +333,11 @@ class WorkflowService:
                     _, originally_located = replace_once(original_markdown, original, "")
                 else:
                     original_page = original_pages.get(claim["section_or_page_id"], {})
-                    original_text = original_page.get("speaker_notes", "") + "\n" + "\n".join(original_page.get("on_slide_text", []))
+                    original_text = "\n".join([
+                        str(original_page.get("title", "")), str(original_page.get("purpose", "")),
+                        "\n".join(original_page.get("on_slide_text", [])),
+                        str(original_page.get("visual_suggestion", "")), str(original_page.get("speaker_notes", "")),
+                    ])
                     _, originally_located = replace_once(original_text, original, "")
                 if originally_located:
                     if replacement and claim["location_type"] == "report_section":
