@@ -5,7 +5,11 @@ import argparse
 import json
 import os
 import sqlite3
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from run_live_regression import merge_verification, post, persist, set_auth
 from workflow_service import WorkflowService
