@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "baseline_task_id": "TASK-8ac42e4ee030",
+  "claim_ids": ["CLM-0003", "CLM-0008", "CLM-0014", "CLM-0021", "CLM-0045", "CLM-0030", "CLM-0041", "CLM-0060", "CLM-0069", "CLM-0074"],
+  "gold": {
+    "CLM-0003": {"support_status":"partially_supported","action":"revise","required_issue":"causal_overreach","required_evidence":["MED:42343812-E03"],"required_terms":["未直接","P450"]},
+    "CLM-0008": {"support_status":"supported","action":"keep","required_issue":"none","required_evidence":["MED:42788968-E07"],"required_terms":["SrLE","内酯化"]},
+    "CLM-0014": {"support_status":"partially_supported","action":"revise","required_issue":"condition_missing","required_evidence":["MED:42788968-E06"],"required_terms":["过表达","5 L"]},
+    "CLM-0021": {"support_status":"partially_supported","action":"revise","required_issue":"scope_overreach","required_evidence":["MED:42343812-E01","MED:42788968-E06"],"forbidden_evidence_prefixes":["MED:42413621"],"required_terms":["乳酸乳球菌","尚未"]},
+    "CLM-0045": {"support_status":"unsupported","action":"remove","required_issue":"citation_missing","required_evidence":[],"required_terms":["E06","不支持"]},
+    "CLM-0030": {"support_status":"unsupported","action":"remove","required_issue":"scope_overreach","required_evidence":[],"required_terms":["典型","外推"]},
+    "CLM-0041": {"support_status":"partially_supported","action":"revise","required_issue":"causal_overreach","required_evidence":["MED:42343812-E03"],"required_terms":["未直接","水平"]},
+    "CLM-0060": {"support_status":"unsupported","action":"remove","required_issue":"source_mismatch","required_evidence":[],"required_terms":["乳酸乳球菌","不涉及"]},
+    "CLM-0069": {"support_status":"partially_supported","action":"revise","required_issue":"scope_overreach","required_evidence":["MED:42343812-E02","MED:42788968-E03","MED:42413621-E04"],"required_terms":["摘要级","多数"]},
+    "CLM-0074": {"support_status":"cannot_determine","action":"mark_unverified","required_issue":"evidence_missing","required_evidence":[],"required_terms":["所有","无法"]}
+  },
+  "acceptance": {"minimum_score":85,"minimum_status_exact":8,"minimum_action_exact":9,"maximum_critical_errors":0,"maximum_hallucinated_evidence":0},
+  "ppt_density": {"deck_average_max":180,"page_characters_max":220,"bullet_characters_max":80,"bullets_max":5,"speaker_notes_max":350}
+}
