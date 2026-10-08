@@ -26,7 +26,7 @@
 - `tests/fixtures/regression-topics.json`：五个代表主题的固定回归矩阵；日常执行免费离线契约测试，正式内测前执行真实模型回归。
 - `server.py`：本地 HTTP API 与 P1—P9 流程编排。
 - `model_client.py` 与 `model_routing.py`：可校验重试的 DeepSeek 调用以及配置驱动的模型选择。
-- `model_usage.py`：逐次记录模型、阶段、成功/失败和 Tokens；可在下一次 Pro 请求发出前按调用次数或 Tokens 上限停止。运行环境可配置 `MODEL_PRO_MAX_CALLS`、`MODEL_PRO_MAX_OUTPUT_TOKENS`、`MODEL_PRO_MAX_TOTAL_TOKENS`，值为 `0` 表示暂不启用该项上限。
+- `model_usage.py`：逐次记录模型、阶段、成功/失败和 Tokens；可在下一次请求发出前按任务总 Tokens、Pro 调用次数或 Pro Tokens 上限停止。运行环境可配置 `MODEL_TASK_MAX_TOTAL_TOKENS`、`MODEL_PRO_MAX_CALLS`、`MODEL_PRO_MAX_OUTPUT_TOKENS`、`MODEL_PRO_MAX_TOTAL_TOKENS`，值为 `0` 表示暂不启用该项上限。
 - `workflow_validation.py` 与 `contracts.py`：P1—P9 的跨阶段业务校验和 JSON 结构契约。
 - `retrieval.py` 与 `epo_ops.py`：PubMed / Europe PMC / Crossref / EPO OPS 检索、去重及 EPO 周额度保护。
 - `docs/公开数据源与边界.md`：数据源限速、版权、失败降级与上线边界。

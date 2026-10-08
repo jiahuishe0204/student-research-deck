@@ -304,6 +304,7 @@ def create_server(host="127.0.0.1", port=4180, api_key=None):
     server.epo_client = EPOClient.from_environment(ROOT / "data" / "private" / "epo-usage.sqlite3")
     server.model_usage = ModelUsageLedger(ROOT / "data" / "private" / "model-usage.sqlite3")
     server.workflow = WorkflowService.from_project(server.api_key, server.model_router, ROOT, usage_ledger=server.model_usage, model_limits={
+        "task_max_total_tokens": int(os.environ.get("MODEL_TASK_MAX_TOTAL_TOKENS", "0") or 0),
         "pro_max_calls": int(os.environ.get("MODEL_PRO_MAX_CALLS", "0") or 0),
         "pro_max_output_tokens": int(os.environ.get("MODEL_PRO_MAX_OUTPUT_TOKENS", "0") or 0),
         "pro_max_total_tokens": int(os.environ.get("MODEL_PRO_MAX_TOTAL_TOKENS", "0") or 0),

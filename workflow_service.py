@@ -100,6 +100,7 @@ class WorkflowService:
             raise ValueError("阶段 %s 缺少提示词" % stage)
         route = self.model_router.for_stage(stage, tier, upgrade=upgrade)
         task_id = getattr(self._context, "task_id", "unassigned")
+        input_bytes = len((self.system_prompt + self.stage_prompts[stage] + json.dumps(payload, ensure_ascii=False)).encode("utf-8"))
 
         def record(attempt, status, usage, detail):
             if self.usage_ledger:
@@ -107,7 +108,7 @@ class WorkflowService:
 
         def guard(attempt):
             if self.usage_ledger:
-                self.usage_ledger.guard(task_id, route["model"], self.model_limits, max_tokens)
+                self.usage_ledger.guard(task_id, route["model"], self.model_limits, max_tokens, input_bytes)
         output, usage = self.model_client(
             self.api_key,
             route["model"],

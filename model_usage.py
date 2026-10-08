@@ -50,10 +50,16 @@ class ModelUsageLedger:
             rows = connection.execute("SELECT model,COUNT(*) calls,SUM(completion_tokens) output_tokens,SUM(total_tokens) total_tokens,SUM(reasoning_tokens) reasoning_tokens FROM model_usage WHERE task_id=? GROUP BY model", (task_id,)).fetchall()
         return {row["model"]: dict(row) for row in rows}
 
-    def guard(self, task_id, model, limits, next_output_tokens=0):
+    def guard(self, task_id, model, limits, next_output_tokens=0, next_input_tokens=0):
+        all_models = self.summary(task_id)
+        task_total = sum(int(item.get("total_tokens", 0) or 0) for item in all_models.values())
+        task_limit = int((limits or {}).get("task_max_total_tokens", 0) or 0)
+        reservation = int(next_input_tokens or 0) + int(next_output_tokens or 0)
+        if task_limit and task_total + reservation > task_limit:
+            raise ModelBudgetExceeded("任务下一次请求将超过总 Tokens 上限 %d" % task_limit)
         if model != "deepseek-v4-pro":
             return
-        summary = self.summary(task_id).get(model, {})
+        summary = all_models.get(model, {})
         checks = (
             ("pro_max_calls", int(summary.get("calls", 0)), 1, "Pro 调用次数"),
             ("pro_max_output_tokens", int(summary.get("output_tokens", 0) or 0), int(next_output_tokens or 0), "Pro 输出 Tokens"),
