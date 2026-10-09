@@ -475,6 +475,19 @@ class WorkflowService:
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
 
         def validate_batch(value):
+            allowed = set(evidence_ids)
+            removed = []
+            for claim in value.get("claims", []):
+                cited = claim.get("cited_evidence_ids", [])
+                if isinstance(cited, list):
+                    invalid = [item for item in cited if item not in allowed]
+                    if invalid:
+                        removed.extend(invalid)
+                        claim["cited_evidence_ids"] = [item for item in cited if item in allowed]
+            if removed and isinstance(value.get("extraction_notes"), list):
+                value["extraction_notes"].append(
+                    "程序已移除模型生成但输入中不存在的 evidence_id：%s" % ", ".join(sorted(set(removed)))
+                )
             checked = validate_claims(value, evidence_ids)
             if len(checked["claims"]) > self.CLAIMS_PER_BATCH_LIMIT:
                 raise ValueError("单批声明超过 %d 条上限" % self.CLAIMS_PER_BATCH_LIMIT)
@@ -521,6 +534,41 @@ class WorkflowService:
         strong = [item for item in eligible if item.get("claim_id") in set(pro_claim_ids)] if pro_claim_ids is not None else eligible
         standard = [item for item in representatives if item not in strong]
         routes = []
+
+        def normalize_verification(value, batch_items, batch_ids):
+            claims_by_id = {item["claim_id"]: item for item in batch_items}
+            allowed = set(evidence_ids)
+            for result in value.get("results", []):
+                result["valid_evidence_ids"] = [
+                    item for item in result.get("valid_evidence_ids", []) if item in allowed
+                ]
+                status = result.get("support_status")
+                if status == "supported":
+                    result["action"] = "keep"
+                    result["revised_claim"] = None
+                elif status == "unsupported":
+                    result["action"] = "remove"
+                    result["revised_claim"] = None
+                elif status == "cannot_determine":
+                    result["action"] = "mark_unverified"
+                    result["revised_claim"] = None
+                elif status == "partially_supported":
+                    original = claims_by_id.get(result.get("claim_id"), {}).get("atomic_claim", "").strip()
+                    revised = str(result.get("revised_claim") or "").strip()
+                    if result.get("action") != "revise" or not revised or revised == original:
+                        result["support_status"] = "cannot_determine"
+                        result["action"] = "mark_unverified"
+                        result["revised_claim"] = None
+                        explanation = str(result.get("explanation") or "").strip()
+                        result["explanation"] = (explanation + " 程序未获得可用的降级表述，已保守标记为未核实。").strip()
+            value["verification_version"] = str(value.get("verification_version") or "P8-normalized-1.0")
+            value["summary"] = {
+                status: sum(item.get("support_status") == status for item in value.get("results", []))
+                for status in ("supported", "partially_supported", "unsupported", "cannot_determine")
+            }
+            value["summary"]["high_risk_remaining"] = 0
+            return validate_verification(value, batch_ids, evidence_ids, batch_items)
+
         for batch_group, upgrade, label in ((standard, False, "standard"), (strong, True, "high_risk")):
             for batch_items in self._verification_batches(batch_group, evidence_by_id, upgrade):
                 batch_ids = [item["claim_id"] for item in batch_items]
@@ -535,7 +583,7 @@ class WorkflowService:
                 partial, partial_usage, route = self.generate(
                     "P8", tier,
                     {"claims": {"claim_set_version": claims.get("claim_set_version", ""), "claims": batch_items, "extraction_notes": []}, "evidence_records": batch_evidence, "source_records": batch_sources, "output_contract": load_contract("P8")},
-                    lambda value, ids=batch_ids, items=batch_items: validate_verification(value, ids, evidence_ids, items),
+                    lambda value, ids=batch_ids, items=batch_items: normalize_verification(value, items, ids),
                     upgrade=upgrade, max_tokens=output_limit, max_attempts=2, request_timeout=90,
                 )
                 claims_by_id = {item["claim_id"]: item for item in batch_items}

@@ -171,6 +171,24 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertTrue(all(size <= 1200 for _, size in calls))
         self.assertTrue(all(label.startswith("report_part_") for label, _ in calls))
 
+    def test_extract_claims_filters_unknown_evidence_without_paid_retry(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P7": "claims"})
+
+        def generate(stage, tier, payload, validator=None, **options):
+            claim = {
+                "claim_id": "temporary", "location_type": "report_section", "section_or_page_id": "S1",
+                "original_text": "text", "atomic_claim": "claim", "claim_type": "other",
+                "cited_evidence_ids": ["EV-1", "EV-HALLUCINATED"], "risk_level": "low",
+            }
+            output = {"claim_set_version": "1", "claims": [claim], "extraction_notes": []}
+            return validator(output), {"total_tokens": 2}, {}
+
+        service.generate = generate
+        output, _, _ = service.extract_claims({"report_markdown": "text"}, {"pages": []}, ["EV-1"], "fast")
+
+        self.assertEqual(output["claims"][0]["cited_evidence_ids"], ["EV-1"])
+        self.assertIn("EV-HALLUCINATED", output["extraction_notes"][0])
+
     def test_verify_claims_deduplicates_then_expands_results(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
         calls = []
@@ -228,6 +246,32 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(metadata["standard_claims"], 1)
         self.assertEqual(metadata["high_risk_claims"], 1)
         self.assertEqual(usage["total_tokens"], 10)
+
+    def test_verify_claims_normalizes_invalid_actions_without_paid_retry(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
+
+        def generate(stage, tier, payload, validator=None, **options):
+            item = payload["claims"]["claims"][0]
+            result = {
+                "claim_id": item["claim_id"], "source_identity": {"matched": True, "source_ids": ["SRC-1"]},
+                "support_status": "unsupported", "issue_codes": ["scope_overreach"], "explanation": "not supported",
+                "action": "keep", "revised_claim": "should not survive", "valid_evidence_ids": ["EV-1", "EV-X"],
+            }
+            return validator({"results": [result]}), {"total_tokens": 5}, {"model": "flash", "upgraded": False}
+
+        service.generate = generate
+        claims = {"claim_set_version": "1", "claims": [{
+            "claim_id": "CL-1", "atomic_claim": "claim", "cited_evidence_ids": ["EV-1"],
+            "risk_level": "low", "claim_type": "other",
+        }]}
+        output, _, _ = service.verify_claims(
+            claims, [{"evidence_id": "EV-1", "source_id": "SRC-1"}], [{"source_id": "SRC-1"}], "fast"
+        )
+
+        result = output["results"][0]
+        self.assertEqual(result["action"], "remove")
+        self.assertIsNone(result["revised_claim"])
+        self.assertEqual(result["valid_evidence_ids"], ["EV-1"])
 
     def test_verify_claims_uses_dynamic_batches_and_only_cited_evidence(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
