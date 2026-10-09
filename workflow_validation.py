@@ -10,6 +10,12 @@ PPT_DENSITY_LIMITS = {
     "speaker_notes_max": 800,
 }
 
+AUDIT_LANGUAGE = (
+    "证据不足", "未核实", "开放问题", "无法确认", "无法核查",
+    "摘要未提供", "需要进一步查证", "需进一步核实", "没有查到", "没查到",
+)
+LIMITATION_PAGE_TERMS = ("局限", "争议", "研究空白", "证据边界", "不足与展望")
+
 
 def validate_ppt_density(pages):
     for page in pages:
@@ -23,6 +29,27 @@ def validate_ppt_density(pages):
             raise ContractError("PPT 单条上屏文字超过 140 字，已经接近正文段落")
         if len(str(page.get("speaker_notes", ""))) > PPT_DENSITY_LIMITS["speaker_notes_max"]:
             raise ContractError("PPT 单页备注超过 800 字，应拆分讲解任务")
+    return pages
+
+
+def validate_presentation_voice(pages):
+    """Keep internal audit language out of ordinary student-facing speaker notes."""
+    ordinary_pages = []
+    flagged_pages = []
+    for page in pages:
+        title = str(page.get("title", ""))
+        purpose = str(page.get("purpose", ""))
+        if any(term in title or term in purpose for term in LIMITATION_PAGE_TERMS):
+            continue
+        ordinary_pages.append(page)
+        notes = str(page.get("speaker_notes", ""))
+        hits = sum(notes.count(term) for term in AUDIT_LANGUAGE)
+        if hits > 1:
+            raise ContractError("PPT 普通页面讲稿反复使用证据审计措辞，应改为可直接讲述的汇报语言")
+        if hits:
+            flagged_pages.append(page.get("page_id"))
+    if ordinary_pages and len(flagged_pages) / len(ordinary_pages) > 0.2:
+        raise ContractError("PPT 讲稿中过多普通页面暴露内部证据审计语言，应集中到局限页")
     return pages
 
 
@@ -112,6 +139,7 @@ def validate_ppt(value, evidence_ids, figure_ids, source_ids=None):
         if allowed_sources and not {item["source_id"] for item in page["source_citations"]}.issubset(allowed_sources):
             raise ContractError("P6 页面使用了不存在的 source_id")
     validate_ppt_density(value["pages"])
+    validate_presentation_voice(value["pages"])
     return value
 
 
@@ -155,6 +183,7 @@ def validate_final(value, claim_ids, source_ids, evidence_ids, verification=None
     if any(not set(page["evidence_ids"]).issubset(set(evidence_ids)) for page in value["final_ppt"]["pages"]):
         raise ContractError("P9 PPT 使用了不存在的 evidence_id")
     validate_ppt_density(value["final_ppt"]["pages"])
+    validate_presentation_voice(value["final_ppt"]["pages"])
     if any(item["claim_id"] not in set(claim_ids) for item in value["change_log"]):
         raise ContractError("P9 变更记录使用了不存在的 claim_id")
     if verification is not None:

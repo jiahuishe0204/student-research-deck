@@ -1,6 +1,8 @@
 import unittest
 
+from contracts import ContractError
 from quality_benchmark import score_ppt_density, score_verification
+from workflow_validation import validate_presentation_voice
 
 
 class QualityBenchmarkTests(unittest.TestCase):
@@ -17,3 +19,12 @@ class QualityBenchmarkTests(unittest.TestCase):
         result = score_ppt_density(pages, {"deck_average_max":180,"page_characters_max":220,"bullet_characters_max":80,"bullets_max":5,"speaker_notes_max":350})
         self.assertFalse(result["average_pass"])
         self.assertEqual(result["failed_pages"][0]["failures"], ["page_characters", "bullet_length"])
+
+    def test_spoken_notes_reject_repeated_audit_language_on_ordinary_page(self):
+        pages = [{"page_id":"P1","title":"核心机制","purpose":"解释机制","speaker_notes":"这条证据不足，另一条也未核实。"}]
+        with self.assertRaises(ContractError):
+            validate_presentation_voice(pages)
+
+    def test_spoken_notes_allow_caveats_on_dedicated_limitations_page(self):
+        pages = [{"page_id":"P9","title":"研究局限与下一步","purpose":"说明证据边界","speaker_notes":"部分证据不足，临床效果仍未核实。"}]
+        self.assertEqual(validate_presentation_voice(pages), pages)
