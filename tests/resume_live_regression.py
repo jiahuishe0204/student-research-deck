@@ -42,7 +42,7 @@ def resume(base, task_id, task_token):
     if plan is None:
         print("[%s] resume P2" % task["topic"], flush=True)
         clarification = intent.get("scope_hint", "") if intent.get("need_clarification") else ""
-        plan = post(base, "/api/plan", {"topic": task["topic"], "tier": task["tier"], "clarification": clarification})["data"]
+        plan = post(base, "/api/plan", {"topic": task["topic"], "tier": task["tier"], "clarification": clarification, "intent": intent})["data"]
         persist(base, task_id, "P2", "plan_completed", plan, "plan")
     source_artifact = artifact(task, "sources")
     if source_artifact is None:
@@ -83,7 +83,7 @@ def resume(base, task_id, task_token):
     ppt = artifact(task, "ppt")
     if ppt is None:
         print("[%s] resume P6" % task["topic"], flush=True)
-        ppt = post(base, "/api/ppt", {"intent": intent, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}, "tier": task["tier"]})["data"]
+        ppt = post(base, "/api/ppt", {"intent": intent, "plan": plan, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}, "tier": task["tier"]})["data"]
         persist(base, task_id, "P6", "ppt_completed", ppt, "ppt")
     claims = artifact(task, "claims")
     regenerate_claims = claims is not None and len(claims.get("claims", [])) > MAX_VERIFICATION_CLAIMS

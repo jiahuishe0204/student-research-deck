@@ -68,11 +68,27 @@ class WorkflowServiceTests(unittest.TestCase):
             return output, {"total_tokens": 1}, {}
 
         service.generate = generate
-        service.create_plan("主题", "只看临床", "deep")
+        intent = {"domain": "life_science", "normalized_topic": "主题", "scope_hint": "按疾病定义、机制、研究方法和干预证据展开", "tier": "deep", "assumptions": [], "need_clarification": False, "clarification_question": None, "confirmation_text": "确认"}
+        service.create_plan("主题", "只看临床", "deep", intent)
 
         self.assertIn("EPO OPS", captured["available_sources"])
         self.assertIn("只看临床", captured["intent"]["normalized_topic"])
+        self.assertIn("疾病定义", captured["intent"]["scope_hint"])
         self.assertEqual(captured["runtime_config"]["source_limit"], 19)
+
+    def test_ppt_payload_inherits_topic_specific_plan(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
+        captured = {}
+
+        def generate(stage, tier, payload, validator=None, **options):
+            captured.update(payload)
+            return {"deck_title": "deck", "storyline": "story", "pages": []}, {"total_tokens": 1}, {}
+
+        service.generate = generate
+        plan = {"ppt_story_arc": ["定义瓣膜钙化", "机制与研究模型", "干预证据阶段"]}
+        service.create_ppt({}, {}, [{"evidence_id": "EV-1"}], [], {}, "deep", plan)
+
+        self.assertEqual(captured["plan"], plan)
 
     def test_metadata_only_evidence_skips_model_call(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P4": "evidence"})

@@ -211,7 +211,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/plan":
-                output, usage = self.server.workflow.create_plan(body.get("topic"), body.get("clarification"), body.get("tier", "fast"))
+                output, usage = self.server.workflow.create_plan(body.get("topic"), body.get("clarification"), body.get("tier", "fast"), body.get("intent"))
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/search":
@@ -239,7 +239,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             if path == "/api/ppt":
                 output, usage = self.server.workflow.create_ppt(
                     body.get("intent"), body.get("report"), body.get("evidence_records"),
-                    body.get("figure_records", []), body.get("constraints", {}), body.get("tier", "fast"),
+                    body.get("figure_records", []), body.get("constraints", {}), body.get("tier", "fast"), body.get("plan"),
                 )
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return

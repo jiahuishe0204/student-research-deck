@@ -135,7 +135,7 @@ def run_topic(base, topic, tier):
 
     clarification = intent.get("scope_hint", "") if intent.get("need_clarification") else ""
     print("[%s] P2 plan" % topic, flush=True)
-    response = post(base, "/api/plan", {"topic": topic, "tier": tier, "clarification": clarification})
+    response = post(base, "/api/plan", {"topic": topic, "tier": tier, "clarification": clarification, "intent": intent})
     plan = response["data"]
     usage["P2"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P2", "plan_completed", plan, "plan")
@@ -174,7 +174,7 @@ def run_topic(base, topic, tier):
     persist(base, task_id, "P5", "report_completed", report, "report")
 
     print("[%s] P6 ppt" % topic, flush=True)
-    response = post(base, "/api/ppt", {"intent": intent, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}, "tier": tier})
+    response = post(base, "/api/ppt", {"intent": intent, "plan": plan, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}, "tier": tier})
     ppt = response["data"]
     usage["P6"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P6", "ppt_completed", ppt, "ppt")

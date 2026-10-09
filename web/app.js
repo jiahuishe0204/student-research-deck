@@ -45,7 +45,7 @@ confirmButton.addEventListener('click',async()=>{
   if(currentIntent?.need_clarification&&!clarification){$('#clarification').focus();return;}
   setBusy(confirmButton,true,'正在建立规划… <span>·</span>');$('#task-workspace').hidden=false;$('#plan-output').innerHTML='<p class="empty-plan">正在确定研究问题、资料需求和交付结构…</p>';$('#task-status-title').textContent='正在建立调研规划';$('#task-workspace').scrollIntoView({behavior:'smooth',block:'start'});
   try{
-    const response=await request('/api/plan',{topic:currentTopic,tier:currentTier,clarification});currentPlan=response.data;await persistStage('P2','plan_completed',currentPlan,'plan');renderPlan(response.data,response.usage);
+    const response=await request('/api/plan',{topic:currentTopic,tier:currentTier,clarification,intent:currentIntent});currentPlan=response.data;await persistStage('P2','plan_completed',currentPlan,'plan');renderPlan(response.data,response.usage);
     $('#task-status-title').textContent='调研规划已经就绪';document.querySelector('.progress-line i').style.width='100%';
     document.querySelectorAll('.task-status li')[1].className='done';
   }catch(exc){$('#plan-output').innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。你可以返回上方重新提交。</p>`;$('#task-status-title').textContent='规划未能完成';}

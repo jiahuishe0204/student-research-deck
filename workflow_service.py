@@ -198,16 +198,22 @@ class WorkflowService:
         )
         return output, usage
 
-    def create_plan(self, topic, clarification="", tier="fast"):
+    def create_plan(self, topic, clarification="", tier="fast", intent=None):
         topic = str(topic or "").strip()
         clarification = str(clarification or "").strip()
         tier = self._tier(tier)
         if not 2 <= len(topic) <= 500:
             raise ValueError("规划输入无效")
         normalized = topic + (("；用户澄清：" + clarification) if clarification else "")
+        if intent is not None and not isinstance(intent, dict):
+            raise ValueError("规划意图输入无效")
+        planning_intent = dict(intent or {"domain": "life_science", "normalized_topic": normalized, "tier": tier, "need_clarification": False})
+        planning_intent["normalized_topic"] = normalized
+        planning_intent["tier"] = tier
+        planning_intent["need_clarification"] = False
         output, usage, _ = self.generate(
             "P2", tier, {
-                "intent": {"domain": "life_science", "normalized_topic": normalized, "tier": tier, "need_clarification": False},
+                "intent": planning_intent,
                 "tier": tier, "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
                 "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
             }, validate_plan, max_tokens=8000, max_attempts=3,
@@ -267,17 +273,17 @@ class WorkflowService:
         )
         return output, usage
 
-    def create_ppt(self, intent, report, evidence_records, figure_records=None, constraints=None, tier="fast"):
+    def create_ppt(self, intent, report, evidence_records, figure_records=None, constraints=None, tier="fast", plan=None):
         tier = self._tier(tier)
         figure_records = [] if figure_records is None else figure_records
         constraints = {} if constraints is None else constraints
-        if not isinstance(intent, dict) or not isinstance(report, dict) or not isinstance(evidence_records, list) or not isinstance(figure_records, list) or not isinstance(constraints, dict):
+        if not isinstance(intent, dict) or not isinstance(report, dict) or not isinstance(evidence_records, list) or not isinstance(figure_records, list) or not isinstance(constraints, dict) or (plan is not None and not isinstance(plan, dict)):
             raise ValueError("PPT 内容包输入无效")
         evidence_ids = self._ids(evidence_records, "evidence_id", "PPT 输入包含无效证据编号", unique=False)
         figure_ids = self._ids(figure_records, "figure_id", "PPT 输入包含无效图片编号", unique=False)
         output, usage, _ = self.generate(
             "P6", tier,
-            {"intent": intent, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids, "constraints": constraints, "output_contract": load_contract("P6")},
+            {"intent": intent, "plan": plan or {}, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids, "constraints": constraints, "output_contract": load_contract("P6")},
             lambda value: validate_ppt(value, evidence_ids, figure_ids),
         )
         return output, usage
