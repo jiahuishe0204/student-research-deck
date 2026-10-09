@@ -194,7 +194,7 @@ class WorkflowService:
             raise ValueError("请输入 2—500 字的主题并选择有效版本")
         output, usage, _ = self.generate(
             "P1", tier, {"topic": topic, "tier": tier, "runtime_config": {"language": "zh-CN"}},
-            validate_intent, max_attempts=3,
+            validate_intent, max_tokens=1800, max_attempts=2,
         )
         return output, usage
 
@@ -216,7 +216,7 @@ class WorkflowService:
                 "intent": planning_intent,
                 "tier": tier, "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
                 "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
-            }, validate_plan, max_tokens=8000, max_attempts=3,
+            }, validate_plan, max_tokens=6500 if tier == "deep" else 3600, max_attempts=2,
         )
         return output, usage
 

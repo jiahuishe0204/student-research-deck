@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "purpose": "Validate topic-adaptive intent and research planning before setting a production budget.",
+  "cases": [
+    {
+      "id": "disease_intervention",
+      "topic": "心脏瓣膜钙化的机制、研究方法与干预进展",
+      "required_dimensions": ["定义", "临床", "机制", "研究方法", "干预", "证据阶段", "研究空白"],
+      "forbidden_template_terms": ["底盘", "系统架构", "生产放大"]
+    },
+    {
+      "id": "therapy_comparison",
+      "topic": "CAR-T治疗实体瘤的疗效、安全性与技术路线比较",
+      "required_dimensions": ["适应人群", "作用机制", "疗效", "安全性", "比较基线", "临床阶段", "失败原因"],
+      "forbidden_template_terms": ["自然史", "生产放大"]
+    },
+    {
+      "id": "diagnostic_method",
+      "topic": "液体活检用于肿瘤早筛的技术与临床证据",
+      "required_dimensions": ["临床场景", "样本", "金标准", "敏感性", "特异性", "外部验证", "偏倚"],
+      "forbidden_template_terms": ["底盘", "药物疗效"]
+    },
+    {
+      "id": "engineering_platform",
+      "topic": "合成生物学发酵生产平台的工程策略与放大",
+      "required_dimensions": ["需求", "瓶颈", "工程策略", "性能", "稳定性", "发酵过程", "放大"],
+      "forbidden_template_terms": ["适应人群", "随机试验"]
+    }
+  ],
+  "acceptance": {
+    "all_required_dimensions_present": true,
+    "maximum_forbidden_terms": 0,
+    "questions_min": 3,
+    "questions_max": 6,
+    "duplicate_question_max": 0,
+    "generic_outline_reuse_max": 0
+  }
+}

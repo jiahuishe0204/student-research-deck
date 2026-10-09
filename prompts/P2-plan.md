@@ -6,4 +6,14 @@
 
 输出研究范围、排除项、3—6个不重复问题、证据需求、检索概念、来源计划、筛选与停止条件、报告结构、PPT叙事和风险。report_outline与ppt_story_arc必须来自本主题的核心问题和证据类型；每一部分说明它要回答什么，而不是只列通用章节名。快速版覆盖基础框架；深入版增加概念边界、方法学、比较、反证、冲突、适用条件和研究空白。
 
+能力边界与选择规则：
+
+- 本阶段只规划问题和证据，不得预写答案、虚构研究结果、药物名称、数值、论文或监管结论。
+- 先选主研究原型，再只加入完成用户目标所必需的次级模块；必须在research_scope中解释选择理由。
+- questions之间必须互斥且共同覆盖目标，每个问题都应能由明确证据类型回答；不能把“现状、进展、挑战、未来”当作四个空泛问题。
+- evidence_needs要说明需要什么研究设计、对象、测量或比较，而不是只写“论文”“数据”。
+- report_outline与ppt_story_arc可以不同：报告适合完整论证，PPT适合听众理解与现场讲解。不得把报告目录原样复制为PPT目录。
+- 没有证据时应规划如何确认未知，不得把计划语言写成事实结论。
+- 快速版减少问题数量、来源数量和展开深度，但不得降低研究问题定义的质量。
+
 只输出一个 JSON 对象，且只能包含这 10 个键：`research_scope`、`exclusions`、`questions`、`search_concepts`、`source_plan`、`selection_criteria`、`stop_conditions`、`report_outline`、`ppt_story_arc`、`risks`。`exclusions`、`source_plan`、`selection_criteria`、`stop_conditions`、`report_outline`、`ppt_story_arc`、`risks` 必须是数组；`search_concepts` 必须是对象。`source_plan` 每项是一个来源方案，不得用包含“目标来源数”等键的对象代替数组。`questions` 必须有 3—6 项，每项只包含 `question_id`、`question`、`evidence_needs`，其中 `evidence_needs` 是字符串数组。输出必须符合 P2-plan.schema.json。

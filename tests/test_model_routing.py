@@ -9,7 +9,10 @@ class ModelRouterTests(unittest.TestCase):
         cls.router = ModelRouter.from_file()
 
     def test_fast_and_deep_planning_follow_config(self):
-        self.assertEqual(self.router.for_stage("P2", "fast")["model"], "deepseek-flash")
+        self.assertEqual(self.router.for_stage("P1", "fast")["model"], "deepseek-v4-pro")
+        self.assertEqual(self.router.for_stage("P1", "fast")["effort"], "low")
+        self.assertEqual(self.router.for_stage("P2", "fast")["model"], "deepseek-v4-pro")
+        self.assertEqual(self.router.for_stage("P2", "fast")["effort"], "low")
         self.assertEqual(self.router.for_stage("P2", "deep")["model"], "deepseek-v4-pro")
         self.assertEqual(self.router.for_stage("P2", "deep")["effort"], "high")
         self.assertEqual(self.router.for_stage("P1", "deep")["model"], "deepseek-v4-pro")
