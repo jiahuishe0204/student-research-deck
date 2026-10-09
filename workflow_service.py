@@ -216,7 +216,7 @@ class WorkflowService:
                 "intent": planning_intent,
                 "tier": tier, "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
                 "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
-            }, validate_plan, max_tokens=6500 if tier == "deep" else 3600, max_attempts=2,
+            }, validate_plan, max_tokens=7500 if tier == "deep" else 3600, max_attempts=2,
         )
         return output, usage
 
