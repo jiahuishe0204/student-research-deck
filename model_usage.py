@@ -98,7 +98,7 @@ class ModelUsageLedger:
         checks = (
             ("pro_max_calls", int(summary.get("billable_calls", 0)), 1, "Pro 付费调用次数"),
             ("pro_max_output_tokens", int(summary.get("output_tokens", 0) or 0), int(next_output_tokens or 0), "Pro 输出 Tokens"),
-            ("pro_max_total_tokens", int(summary.get("total_tokens", 0) or 0), 0, "Pro 总 Tokens"),
+            ("pro_max_total_tokens", int(summary.get("total_tokens", 0) or 0), reservation, "Pro 总 Tokens"),
         )
         for key, current, reservation, label in checks:
             limit = int((limits or {}).get(key, 0) or 0)

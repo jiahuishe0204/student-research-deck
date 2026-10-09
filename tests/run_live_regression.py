@@ -173,7 +173,8 @@ def run_topic(base, topic, tier):
     persist(base, task_id, "P4", "evidence_completed", {"groups": evidence_groups}, "evidence")
 
     print("[%s] P5 report" % topic, flush=True)
-    response = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "tier": tier})
+    evidence_contexts = [{"source_id": group["source_id"], "reading_scope": group["reading_scope"]} for group in evidence_groups]
+    response = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": evidence_contexts, "tier": tier})
     report = response["data"]
     usage["P5"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P5", "report_completed", report, "report")

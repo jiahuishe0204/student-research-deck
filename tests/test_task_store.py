@@ -61,6 +61,14 @@ class TaskStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "进行中"):
             self.store.record_event(task["task_id"], "P9", "late_write", {})
 
+    def test_completed_final_artifact_allows_metadata_repair(self):
+        task = self.store.create_task("RNA递送", "fast")
+        self.store.record_event(task["task_id"], "P9", "final", {"old": True}, "final_delivery")
+        self.store.set_status(task["task_id"], "completed")
+        repaired = self.store.repair_completed_artifact(task["task_id"], "final_delivery", {"new": True})
+        self.assertEqual(repaired["status"], "completed")
+        self.assertEqual(repaired["artifacts"]["final_delivery"]["data"], {"new": True})
+
     def test_invalid_stage_and_large_payload_are_rejected(self):
         task = self.store.create_task("RNA递送", "fast")
         with self.assertRaisesRegex(ValueError, "阶段"):

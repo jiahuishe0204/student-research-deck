@@ -237,7 +237,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/report":
-                output, usage = self.server.workflow.create_report(body.get("intent"), body.get("plan"), body.get("evidence_records"), body.get("tier", "fast"))
+                output, usage = self.server.workflow.create_report(body.get("intent"), body.get("plan"), body.get("evidence_records"), body.get("tier", "fast"), body.get("evidence_contexts", []))
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/ppt":

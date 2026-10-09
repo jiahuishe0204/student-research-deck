@@ -77,6 +77,8 @@ def search_pubmed(query, limit=5):
             "source": "PubMed", "source_id": "PMID:" + pmid, "pmid": pmid, "doi": doi,
             "title": text_of(data.find("ArticleTitle")), "abstract": abstract,
             "authors": authors, "journal": text_of(data.find("Journal/Title")), "year": year,
+            "volume": text_of(data.find("Journal/JournalIssue/Volume")), "issue": text_of(data.find("Journal/JournalIssue/Issue")),
+            "pages": text_of(data.find("Pagination/MedlinePgn")),
             "url": "https://pubmed.ncbi.nlm.nih.gov/%s/" % pmid, "access": "abstract",
         })
     return records
@@ -99,6 +101,7 @@ def search_europe_pmc(query, limit=5):
             "title": item.get("title", ""), "abstract": item.get("abstractText", ""),
             "authors": [name.strip() for name in item.get("authorString", "").split(",") if name.strip()][:6],
             "journal": item.get("journalTitle", ""), "year": str(item.get("pubYear", "")),
+            "volume": item.get("journalVolume", ""), "issue": item.get("issue", ""), "pages": item.get("pageInfo", ""),
             "url": "https://europepmc.org/article/%s/%s" % (source, ext_id),
             "pmcid": pmcid, "access": "full_text" if item.get("inEPMC") == "Y" and pmcid else "abstract",
         })
@@ -155,6 +158,7 @@ def search_crossref(query, limit=5):
             "source": "Crossref", "source_id": "DOI:" + doi, "pmid": "", "doi": doi,
             "title": (item.get("title") or [""])[0], "abstract": re.sub(r"\s+", " ", abstract).strip(),
             "authors": authors, "journal": (item.get("container-title") or [""])[0], "year": year,
+            "volume": item.get("volume", ""), "issue": item.get("issue", ""), "pages": item.get("page", ""),
             "url": item.get("URL", ""), "access": "metadata",
         })
     return records

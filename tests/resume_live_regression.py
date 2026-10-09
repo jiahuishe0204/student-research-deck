@@ -86,7 +86,8 @@ def resume(base, task_id, task_token):
     report = artifact(task, "report")
     if report is None:
         print("[%s] resume P5" % task["topic"], flush=True)
-        report = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "tier": task["tier"]})["data"]
+        evidence_contexts = [{"source_id": group["source_id"], "reading_scope": group["reading_scope"]} for group in groups]
+        report = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": evidence_contexts, "tier": task["tier"]})["data"]
         persist(base, task_id, "P5", "report_completed", report, "report")
     ppt = artifact(task, "ppt")
     if ppt is None:

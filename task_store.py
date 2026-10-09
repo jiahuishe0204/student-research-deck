@@ -133,6 +133,25 @@ class TaskStore:
             connection.execute("INSERT INTO events(task_id,stage,event_type,payload_json,created_at) VALUES (?,?,?,?,?)", (task_id, task["current_stage"], "status_" + status, "{}", now))
         return self.get_task(task_id)
 
+    def repair_completed_artifact(self, task_id, kind, payload):
+        """Replace deterministic metadata on a completed artifact without reopening paid work."""
+        if kind != "final_delivery" or not isinstance(payload, dict):
+            raise ValueError("只允许修复已完成的最终交付物")
+        encoded = json.dumps(payload, ensure_ascii=False)
+        if len(encoded.encode("utf-8")) > MAX_EVENT_BYTES:
+            raise ValueError("任务事件过大")
+        now = utc_now()
+        with self.connect() as connection:
+            task = connection.execute("SELECT status FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+            if task is None:
+                raise KeyError("任务不存在")
+            if task["status"] != "completed":
+                raise ValueError("只能修复已完成任务")
+            connection.execute("INSERT OR REPLACE INTO artifacts(task_id,kind,payload_json,updated_at) VALUES (?,?,?,?)", (task_id, kind, encoded, now))
+            connection.execute("INSERT INTO events(task_id,stage,event_type,payload_json,created_at) VALUES (?,?,?,?,?)", (task_id, "P9", "quality_metadata_repaired", "{}", now))
+            connection.execute("UPDATE tasks SET updated_at=? WHERE task_id=?", (now, task_id))
+        return self.get_task(task_id)
+
     def get_task(self, task_id):
         with self.connect() as connection:
             task = connection.execute("SELECT task_id,topic,tier,status,current_stage,created_at,updated_at FROM tasks WHERE task_id=?", (task_id,)).fetchone()

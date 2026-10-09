@@ -124,7 +124,7 @@ document.addEventListener('click',async event=>{
   const evidenceRecords=currentEvidenceGroups.flatMap(group=>group.evidence_records);const figureRecords=currentEvidenceGroups.flatMap(group=>group.figure_records);
   const output=$('#deliverables-output');setBusy(button,true,'正在生成调研报告… <span>·</span>');
   try{
-    const reportResponse=await request('/api/report',{intent:currentIntent,plan:currentPlan,evidence_records:evidenceRecords,tier:currentTier});ensureActive();
+    const reportResponse=await request('/api/report',{intent:currentIntent,plan:currentPlan,evidence_records:evidenceRecords,evidence_contexts:currentEvidenceGroups.map(group=>({source_id:group.source_id,reading_scope:group.reading_scope})),tier:currentTier});ensureActive();
     setBusy(button,true,'正在编排 PPT 内容… <span>·</span>');
     const pptResponse=await request('/api/ppt',{intent:currentIntent,report:reportResponse.data,evidence_records:evidenceRecords,figure_records:figureRecords,source_records:currentSources.filter(source=>evidenceRecords.some(evidence=>evidence.source_id===source.source_id)),constraints:{language:'zh-CN',format:'storyboard_with_speaker_notes'},tier:currentTier});
     currentReport=reportResponse.data;await persistStage('P5','report_completed',currentReport,'report');currentPpt=pptResponse.data;await persistStage('P6','ppt_completed',currentPpt,'ppt');renderDeliverables(currentReport,currentPpt,Number(reportResponse.usage?.total_tokens||0)+Number(pptResponse.usage?.total_tokens||0));

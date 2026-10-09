@@ -272,9 +272,15 @@ class WorkflowService:
             {"source_record": compact, "source_text": source_text, "figure_candidates": source_record.get("figure_candidates", []), "question_ids": question_ids, "limits": {"evidence_records_max": 8, "figure_records_max": 4}, "output_contract": load_contract("P4")},
             lambda value: validate_evidence(value, source_id, source_record.get("access"), allowed_figure_ids, 8, 4), max_tokens=4500, max_attempts=2,
         )
+        candidates_by_id = {item.get("figure_id"): item for item in source_record.get("figure_candidates", [])}
+        for figure in output["figure_records"]:
+            candidate = candidates_by_id.get(figure["figure_id"], {})
+            figure_url = str(candidate.get("article_figure_url") or "").strip()
+            if figure_url and figure_url not in figure["locator"]:
+                figure["locator"] = "%s | %s" % (figure["locator"], figure_url)
         return output, usage
 
-    def create_report(self, intent, plan, evidence_records, tier="fast"):
+    def create_report(self, intent, plan, evidence_records, tier="fast", evidence_contexts=None):
         tier = self._tier(tier)
         if not isinstance(intent, dict) or not isinstance(plan, dict) or not isinstance(evidence_records, list):
             raise ValueError("报告生成输入无效")
@@ -283,7 +289,7 @@ class WorkflowService:
         evidence_ids = self._ids(evidence_records, "evidence_id", "证据编号缺失或重复")
         output, usage, _ = self.generate(
             "P5", tier,
-            {"intent": intent, "plan": plan, "evidence_records": evidence_records, "tier": tier, "output_contract": load_contract("P5")},
+            {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": evidence_contexts or [], "tier": tier, "output_contract": load_contract("P5")},
             lambda value: validate_report(value, evidence_ids), max_tokens=7500, max_attempts=2,
         )
         return output, usage
@@ -303,7 +309,30 @@ class WorkflowService:
             {"intent": intent, "plan": plan or {}, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "source_records": source_records, "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids, "allowed_source_ids": source_ids, "constraints": constraints, "output_contract": load_contract("P6")},
             lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids), max_tokens=9000, max_attempts=2,
         )
+        source_by_id = {item.get("source_id"): item for item in source_records}
+        for page in output["pages"]:
+            for citation in page["source_citations"]:
+                source = source_by_id.get(citation["source_id"])
+                if source and source.get("journal"):
+                    citation["short_vancouver"] = self._short_vancouver(source)
+                else:
+                    citation["short_vancouver"] = citation["short_vancouver"].replace(" 信息不完。", "").replace(" 信息不完整。", "")
         return output, usage
+
+    @staticmethod
+    def _short_vancouver(source):
+        authors = source.get("authors") or []
+        first = str(authors[0]).strip() if authors else "Unknown author"
+        author_text = first + (", et al." if len(authors) > 1 else ".")
+        journal = str(source.get("journal") or source.get("source") or "Unknown journal").strip()
+        year = str(source.get("year") or "n.d.").strip()
+        volume = str(source.get("volume") or "").strip()
+        issue = str(source.get("issue") or "").strip()
+        pages = str(source.get("pages") or "").strip()
+        locator = volume + (("(" + issue + ")") if issue else "")
+        if pages:
+            locator += (":" if locator else "") + pages
+        return "%s %s. %s%s." % (author_text, journal, year, (";" + locator) if locator else "")
 
     def assemble_final(self, verification, report, ppt, claim_ids, source_ids, evidence_ids, evidence_version="1.0", tier="fast"):
         tier = self._tier(tier)
@@ -416,7 +445,7 @@ class WorkflowService:
 
         final_pages = [{
             "page_id": page.get("page_id"), "title": page.get("title"), "purpose": page.get("purpose", ""),
-            "on_slide_text": page.get("on_slide_text", []), "visual_suggestion": page.get("visual_suggestion", ""),
+            "on_slide_text": [item for item in page.get("on_slide_text", []) if str(item).strip()], "visual_suggestion": page.get("visual_suggestion", ""),
             "speaker_notes": page.get("speaker_notes", ""), "evidence_ids": page.get("evidence_ids", []),
             "figure_refs": page.get("figure_refs", []), "source_citations": page.get("source_citations", []),
         } for page in pages]
