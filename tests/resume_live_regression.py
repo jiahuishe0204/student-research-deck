@@ -106,29 +106,21 @@ def resume(base, task_id, task_token):
         print("[%s] resume P8 (%d claims)" % (task["topic"], len(claims["claims"])), flush=True)
         saved_cache = {kind: value["data"] for kind, value in task["artifacts"].items()}
 
-        def verify_piece(items, kind, depth=0):
+        def verify_piece(items, kind):
             if kind in saved_cache:
                 return saved_cache[kind]
-            try:
-                partial_claims = {"claim_set_version": claims["claim_set_version"], "claims": items, "extraction_notes": []}
-                saved = post(base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": selected_sources, "tier": task["tier"]})["data"]
-            except Exception:
-                if len(items) <= 3 or depth >= 1:
-                    raise
-                midpoint = len(items) // 2
-                left = verify_piece(items[:midpoint], kind + "a", depth + 1)
-                right = verify_piece(items[midpoint:], kind + "b", depth + 1)
-                saved = merge_verification(left["results"] + right["results"], {"claims": items})
+            partial_claims = {"claim_set_version": claims["claim_set_version"], "claims": items, "extraction_notes": []}
+            saved = post(base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": selected_sources, "tier": task["tier"]})["data"]
             persist(base, task_id, "P8", "verification_batch_completed", saved, kind)
             saved_cache[kind] = saved
             return saved
 
         batch_results = []
-        for index in range(0, len(claims["claims"]), 12):
-            kind = "verification_batch_%03d" % (index // 12 + 1)
-            items = claims["claims"][index:index + 12]
+        for index in range(0, len(claims["claims"]), 4):
+            kind = "verification_batch_%03d" % (index // 4 + 1)
+            items = claims["claims"][index:index + 4]
             if kind not in saved_cache:
-                print("[%s] P8 batch %d/%d" % (task["topic"], index // 12 + 1, (len(claims["claims"]) + 11) // 12), flush=True)
+                print("[%s] P8 batch %d/%d" % (task["topic"], index // 4 + 1, (len(claims["claims"]) + 3) // 4), flush=True)
             saved = verify_piece(items, kind)
             batch_results.extend(saved["results"])
         verification = merge_verification(batch_results, claims)

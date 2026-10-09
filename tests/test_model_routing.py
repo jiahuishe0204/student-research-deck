@@ -19,6 +19,7 @@ class ModelRouterTests(unittest.TestCase):
         self.assertEqual(self.router.for_stage("P1", "deep")["effort"], "low")
         self.assertEqual(self.router.for_stage("P4", "deep")["effort"], "none")
         self.assertEqual(self.router.for_stage("P6", "deep")["effort"], "none")
+        self.assertEqual(self.router.for_stage("P8", "deep")["effort"], "medium")
 
     def test_high_risk_fast_verification_upgrades_with_bounded_effort(self):
         route = self.router.for_stage("P8", "fast", upgrade=True)
