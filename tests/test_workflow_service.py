@@ -248,6 +248,59 @@ class WorkflowServiceTests(unittest.TestCase):
 
         self.assertEqual(set(seen["evidence"]), {"EV-1", "EV-2"})
 
+    def test_verification_fails_closed_when_only_sibling_evidence_supports_claim(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
+
+        def generate(stage, tier, payload, validator=None, **options):
+            item = payload["claims"]["claims"][0]
+            result = {
+                "claim_id": item["claim_id"], "source_identity": {"matched": True, "source_ids": ["SRC-1"]},
+                "support_status": "supported", "issue_codes": ["none"],
+                "explanation": "同源 EV-2 支持该事实", "action": "revise",
+                "revised_claim": "修订后的事实", "valid_evidence_ids": ["EV-2"],
+            }
+            return {"results": [result]}, {"total_tokens": 1}, {"model": "flash", "upgraded": True}
+
+        service.generate = generate
+        claims = {"claim_set_version": "1", "claims": [{
+            "claim_id": "CL-1", "atomic_claim": "高风险结论", "cited_evidence_ids": ["EV-1"],
+            "risk_level": "high", "claim_type": "efficacy",
+        }]}
+        evidence = [{"evidence_id": "EV-1", "source_id": "SRC-1"}, {"evidence_id": "EV-2", "source_id": "SRC-1"}]
+
+        output, _, _ = service.verify_claims(claims, evidence, [{"source_id": "SRC-1"}], "fast")
+        result = output["results"][0]
+
+        self.assertEqual(result["support_status"], "unsupported")
+        self.assertEqual(result["action"], "remove")
+        self.assertEqual(result["valid_evidence_ids"], [])
+        self.assertEqual(result["issue_codes"], ["source_mismatch", "citation_missing"])
+
+    def test_verification_marks_claim_without_current_citation_unverified(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
+
+        def generate(stage, tier, payload, validator=None, **options):
+            item = payload["claims"]["claims"][0]
+            result = {
+                "claim_id": item["claim_id"], "source_identity": {"matched": True, "source_ids": ["SRC-1"]},
+                "support_status": "supported", "issue_codes": ["none"], "explanation": "其他证据支持",
+                "action": "keep", "revised_claim": None, "valid_evidence_ids": ["EV-1"],
+            }
+            return {"results": [result]}, {"total_tokens": 1}, {"model": "flash", "upgraded": False}
+
+        service.generate = generate
+        claims = {"claim_set_version": "1", "claims": [{
+            "claim_id": "CL-1", "atomic_claim": "没有引用的结论", "cited_evidence_ids": [],
+            "risk_level": "low", "claim_type": "other",
+        }]}
+
+        output, _, _ = service.verify_claims(claims, [{"evidence_id": "EV-1", "source_id": "SRC-1"}], [{"source_id": "SRC-1"}], "fast")
+        result = output["results"][0]
+
+        self.assertEqual(result["support_status"], "cannot_determine")
+        self.assertEqual(result["action"], "mark_unverified")
+        self.assertEqual(result["valid_evidence_ids"], [])
+
     def test_deterministic_final_applies_revision_without_model_tokens(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})
         claims = [{
@@ -333,6 +386,31 @@ class WorkflowServiceTests(unittest.TestCase):
         output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
 
         self.assertIn("核验修订：多数证据为摘要级", output["final_ppt"]["pages"][0]["on_slide_text"][-1])
+
+    def test_deterministic_final_moves_long_slide_revision_to_notes(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claims = [{
+            "claim_id": "CL-1", "location_type": "ppt_slide", "section_or_page_id": "P1",
+            "original_text": "原结论", "atomic_claim": "原结论", "claim_type": "efficacy",
+            "cited_evidence_ids": ["EV-1"], "risk_level": "high",
+        }]
+        long_revision = "在指定研究对象、剂量、观察时间和实验条件下观察到有限改善，不能外推至其他人群或解释为已经证明临床疗效。" * 2
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": long_revision, "explanation": "需要完整限定",
+        }]}
+        report = {"report_title": "报告", "report_markdown": "正文", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "汇报", "storyline": "证据", "pages": [{
+            "page_id": "P1", "title": "结论", "on_slide_text": ["原结论"],
+            "speaker_notes": "", "evidence_ids": ["EV-1"],
+        }]}
+
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
+        page = output["final_ppt"]["pages"][0]
+
+        self.assertEqual(page["on_slide_text"], ["该结论已按证据限定，完整修订见备注。"])
+        self.assertIn(long_revision, page["speaker_notes"])
+        self.assertLessEqual(len(page["on_slide_text"][0]), 80)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,35 @@
 from contracts import ContractError, validate_stage_output
 
 
+PPT_DENSITY_LIMITS = {
+    "deck_average_max": 180,
+    "page_characters_max": 220,
+    "bullet_characters_max": 80,
+    "bullets_max": 5,
+    "speaker_notes_max": 350,
+}
+
+
+def validate_ppt_density(pages):
+    total = 0
+    for page in pages:
+        bullets = page.get("on_slide_text", [])
+        characters = sum(len(str(item)) for item in bullets)
+        total += characters
+        if characters > PPT_DENSITY_LIMITS["page_characters_max"]:
+            raise ContractError("PPT 单页上屏文字超过 220 字")
+        if len(bullets) > PPT_DENSITY_LIMITS["bullets_max"]:
+            raise ContractError("PPT 单页要点超过 5 条")
+        if any(len(str(item)) > PPT_DENSITY_LIMITS["bullet_characters_max"] for item in bullets):
+            raise ContractError("PPT 单条上屏文字超过 80 字")
+        if len(str(page.get("speaker_notes", ""))) > PPT_DENSITY_LIMITS["speaker_notes_max"]:
+            raise ContractError("PPT 单页备注超过 350 字")
+    average = total / len(pages) if pages else 0
+    if average > PPT_DENSITY_LIMITS["deck_average_max"]:
+        raise ContractError("PPT 全稿平均上屏文字超过 180 字/页")
+    return pages
+
+
 def validate_intent(value):
     required = {"domain", "normalized_topic", "scope_hint", "tier", "assumptions", "need_clarification", "clarification_question", "confirmation_text"}
     if not isinstance(value, dict) or set(value) != required:
@@ -78,6 +107,7 @@ def validate_ppt(value, evidence_ids, figure_ids):
         for figure in page["figure_refs"]:
             if figure["figure_id"] not in allowed_figures:
                 raise ContractError("P6 页面使用了不存在的 figure_id")
+    validate_ppt_density(value["pages"])
     return value
 
 
@@ -120,6 +150,7 @@ def validate_final(value, claim_ids, source_ids, evidence_ids, verification=None
         raise ContractError("P9 报告使用了不存在的 evidence_id")
     if any(not set(page["evidence_ids"]).issubset(set(evidence_ids)) for page in value["final_ppt"]["pages"]):
         raise ContractError("P9 PPT 使用了不存在的 evidence_id")
+    validate_ppt_density(value["final_ppt"]["pages"])
     if any(item["claim_id"] not in set(claim_ids) for item in value["change_log"]):
         raise ContractError("P9 变更记录使用了不存在的 claim_id")
     if verification is not None:

@@ -132,6 +132,11 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.validate_ppt(value, ["EV-1"], ["FIG-1"])
 
+    def test_ppt_rejects_overlong_slide_text(self):
+        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"purpose","on_slide_text":["字" * 81],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[]}]}
+        with self.assertRaisesRegex(Exception, "单条上屏文字"):
+            server.validate_ppt(value, ["EV-1"], [])
+
     def test_claims_reject_unknown_evidence(self):
         value = {"claim_set_version":"1.0","claims":[{"claim_id":"CL-1","location_type":"report_section","section_or_page_id":"s1","original_text":"text","atomic_claim":"claim","claim_type":"other","cited_evidence_ids":["EV-2"],"risk_level":"low"}],"extraction_notes":[]}
         with self.assertRaises(ValueError):

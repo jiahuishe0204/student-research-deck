@@ -9,6 +9,7 @@ from pathlib import Path
 from contracts import load_contract
 from model_client import deepseek_json
 from workflow_validation import (
+    PPT_DENSITY_LIMITS,
     validate_claims, validate_evidence, validate_final, validate_intent, validate_plan,
     validate_ppt, validate_report, validate_screen, validate_verification,
 )
@@ -47,6 +48,29 @@ class WorkflowService:
 
     def set_task_context(self, task_id):
         self._context.task_id = task_id
+
+    @staticmethod
+    def enforce_current_citation(result, claim):
+        """Fail closed when the model supports a claim only with a different citation."""
+        cited = set(claim.get("cited_evidence_ids", []))
+        valid = set(result.get("valid_evidence_ids", []))
+        if result.get("support_status") not in ("supported", "partially_supported") or cited.intersection(valid):
+            return result
+        checked = dict(result)
+        if cited:
+            checked.update({
+                "support_status": "unsupported", "action": "remove", "revised_claim": None,
+                "valid_evidence_ids": [], "issue_codes": ["source_mismatch", "citation_missing"],
+                "explanation": "当前声明绑定的证据编号不支持该结论；同源其他证据只能作为改正建议，原引用按不支持处理。 " + result.get("explanation", ""),
+            })
+        else:
+            checked.update({
+                "support_status": "cannot_determine", "action": "mark_unverified",
+                "valid_evidence_ids": [], "issue_codes": ["citation_missing", "evidence_missing"],
+                "revised_claim": result.get("revised_claim") or claim.get("atomic_claim"),
+                "explanation": "当前声明没有绑定可核验的证据编号；其他证据只能作为补引建议，原声明先标记未核实。 " + result.get("explanation", ""),
+            })
+        return checked
 
     @staticmethod
     def _claim_complexity(claim, evidence_by_id):
@@ -293,6 +317,17 @@ class WorkflowService:
                     return text.replace(candidate, replacement, 1), True
             return text, False
 
+        def append_verification_note(page, claim_id, replacement):
+            note = "核验修订（%s）：%s" % (claim_id, replacement)
+            page["speaker_notes"] = (str(page.get("speaker_notes", "")).strip() + "\n" + note).strip()
+
+        def slide_replacement(page, index, candidate, replacement, claim_id):
+            other_characters = sum(len(str(line)) for position, line in enumerate(page.get("on_slide_text", [])) if position != index)
+            if len(replacement) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and len(candidate) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and other_characters + len(candidate) <= PPT_DENSITY_LIMITS["page_characters_max"]:
+                return candidate
+            append_verification_note(page, claim_id, replacement)
+            return "该结论已按证据限定，完整修订见备注。"
+
         for claim in claims:
             result = results[claim["claim_id"]]
             action = result["action"]
@@ -322,8 +357,9 @@ class WorkflowService:
                                     break
                     else:
                         for index, line in enumerate(page.get(field, [])):
-                            page[field][index], located = replace_once(line, original, replacement)
+                            candidate, located = replace_once(line, original, replacement)
                             if located:
+                                page[field][index] = slide_replacement(page, index, candidate, replacement, claim["claim_id"])
                                 break
                         if not located:
                             page["speaker_notes"], located = replace_once(page.get("speaker_notes", ""), original, replacement)
@@ -345,7 +381,12 @@ class WorkflowService:
                     elif replacement and page and claim["location_type"] == "ppt_speaker_note":
                         page["speaker_notes"] = (page.get("speaker_notes", "") + " 核验修订：" + replacement).strip()
                     elif replacement and page:
-                        page.setdefault("on_slide_text", []).append("核验修订：" + replacement)
+                        candidate = "核验修订：" + replacement
+                        if len(candidate) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and sum(len(str(line)) for line in page.get("on_slide_text", [])) + len(candidate) <= PPT_DENSITY_LIMITS["page_characters_max"]:
+                            page.setdefault("on_slide_text", []).append(candidate)
+                        else:
+                            page.setdefault("on_slide_text", []).append("该结论已按证据限定，完整修订见备注。")
+                            append_verification_note(page, claim["claim_id"], replacement)
                     located = True
                 if not located:
                     raise ValueError("无法在交付物中定位声明 %s，拒绝生成未落实核验结论的终稿" % claim["claim_id"])
@@ -439,6 +480,8 @@ class WorkflowService:
                     lambda value, ids=batch_ids, items=batch_items: validate_verification(value, ids, evidence_ids, items),
                     upgrade=upgrade, max_tokens=output_limit, max_attempts=2, request_timeout=90,
                 )
+                claims_by_id = {item["claim_id"]: item for item in batch_items}
+                partial["results"] = [self.enforce_current_citation(result, claims_by_id[result["claim_id"]]) for result in partial["results"]]
                 representative_results.extend(partial["results"])
                 add_usage(usage, partial_usage)
                 routes.append({"class": label, "model": route["model"], "claims": len(batch_items), "evidence": len(batch_evidence), "max_output_tokens": output_limit})
