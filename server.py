@@ -16,7 +16,7 @@ from pathlib import Path
 
 from epo_ops import EPOClient
 from model_routing import ModelRouter
-from model_usage import ModelUsageLedger
+from model_usage import ModelBudgetExceeded, ModelUsageLedger
 from retrieval import hydrate_europe_pmc_full_text, search_all
 from task_store import TaskStore
 from workflow_validation import (
@@ -291,6 +291,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         except urllib.error.HTTPError as exc:
             self.send_json(HTTPStatus.BAD_GATEWAY, {"error": "DeepSeek 请求失败", "status": exc.code})
+        except ModelBudgetExceeded as exc:
+            self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "任务预算已停止", "detail": str(exc)})
         except Exception:
             traceback.print_exc()
             self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "生成失败，请稍后重试"})
