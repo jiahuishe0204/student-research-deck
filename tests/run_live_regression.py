@@ -95,28 +95,23 @@ def acceptance_failures(result, criteria):
 def verify_with_checkpoints(base, task_id, topic, tier, claims, evidence_records, source_records):
     cache = {}
 
-    def verify_piece(items, kind, depth=0):
+    def verify_piece(items, kind):
         if kind in cache:
             return cache[kind]
         try:
             partial_claims = {"claim_set_version": claims["claim_set_version"], "claims": items, "extraction_notes": []}
             saved = post(base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": source_records, "tier": tier})["data"]
         except Exception:
-            if len(items) <= 3 or depth >= 1:
-                raise
-            midpoint = len(items) // 2
-            left = verify_piece(items[:midpoint], kind + "a", depth + 1)
-            right = verify_piece(items[midpoint:], kind + "b", depth + 1)
-            saved = merge_verification(left["results"] + right["results"])
+            raise
         persist(base, task_id, "P8", "verification_batch_completed", saved, kind)
         cache[kind] = saved
         return saved
 
     results = []
-    for index in range(0, len(claims["claims"]), 12):
-        print("[%s] P8 batch %d/%d" % (topic, index // 12 + 1, (len(claims["claims"]) + 11) // 12), flush=True)
-        items = claims["claims"][index:index + 12]
-        results.extend(verify_piece(items, "verification_batch_%03d" % (index // 12 + 1))["results"])
+    for index in range(0, len(claims["claims"]), 4):
+        print("[%s] P8 batch %d/%d" % (topic, index // 4 + 1, (len(claims["claims"]) + 3) // 4), flush=True)
+        items = claims["claims"][index:index + 4]
+        results.extend(verify_piece(items, "verification_batch_%03d" % (index // 4 + 1))["results"])
     return merge_verification(results)
 
 
@@ -141,10 +136,10 @@ def run_topic(base, topic, tier):
     persist(base, task_id, "P2", "plan_completed", plan, "plan")
 
     print("[%s] retrieval" % topic, flush=True)
-    sources = post(base, "/api/search", {"topic": topic, "query": query_from_plan(plan, topic)})["data"]
+    sources = post(base, "/api/search", {"topic": topic, "query": query_from_plan(plan, topic), "tier": tier})["data"]
     if not sources["records"]:
         raise RuntimeError("%s returned no sources" % topic)
-    candidates = sources["records"][:8]
+    candidates = sources["records"][:12 if tier == "deep" else 8]
     persist(base, task_id, "P2", "search_completed", {**sources, "records": candidates}, "sources")
 
     print("[%s] P3 screen %d candidates" % (topic, len(candidates)), flush=True)
@@ -174,7 +169,9 @@ def run_topic(base, topic, tier):
     persist(base, task_id, "P5", "report_completed", report, "report")
 
     print("[%s] P6 ppt" % topic, flush=True)
-    response = post(base, "/api/ppt", {"intent": intent, "plan": plan, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}, "tier": tier})
+    selected_ids = {item["source_id"] for item in evidence_records}
+    selected_sources = [item for item in candidates if item["source_id"] in selected_ids]
+    response = post(base, "/api/ppt", {"intent": intent, "plan": plan, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "source_records": selected_sources, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}, "tier": tier})
     ppt = response["data"]
     usage["P6"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P6", "ppt_completed", ppt, "ppt")
@@ -188,8 +185,6 @@ def run_topic(base, topic, tier):
         raise RuntimeError("P7 produced %d claims, exceeding verification budget limit %d" % (len(claims["claims"]), MAX_VERIFICATION_CLAIMS))
     persist(base, task_id, "P7", "claims_completed", claims, "claims")
 
-    selected_ids = {item["source_id"] for item in evidence_records}
-    selected_sources = [item for item in candidates if item["source_id"] in selected_ids]
     print("[%s] P8 verify %d claims" % (topic, len(claims["claims"])), flush=True)
     verification = verify_with_checkpoints(base, task_id, topic, tier, claims, evidence_records, selected_sources)
     usage["P8"] = 0

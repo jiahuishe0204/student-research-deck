@@ -71,7 +71,7 @@ def validate_screen(value, candidate_ids, keep_max=None):
     return value
 
 
-def validate_evidence(value, source_id, source_access=None):
+def validate_evidence(value, source_id, source_access=None, allowed_figure_ids=None):
     validate_stage_output("P4", value)
     if value["source_id"] != source_id:
         raise ContractError("P4 source_id 与输入不一致")
@@ -79,6 +79,8 @@ def validate_evidence(value, source_id, source_access=None):
         raise ContractError("P4 证据引用了其他来源")
     if any(item["source_id"] != source_id for item in value["figure_records"]):
         raise ContractError("P4 图片引用了其他来源")
+    if allowed_figure_ids is not None and not {item["figure_id"] for item in value["figure_records"]}.issubset(set(allowed_figure_ids)):
+        raise ContractError("P4 图片不在原文候选列表中")
     if source_access != "full_text" and value["reading_scope"] == "full_text":
         raise ContractError("P4 未获得全文时不能标记为全文阅读")
     return value
@@ -91,16 +93,19 @@ def validate_report(value, evidence_ids):
     return value
 
 
-def validate_ppt(value, evidence_ids, figure_ids):
+def validate_ppt(value, evidence_ids, figure_ids, source_ids=None):
     validate_stage_output("P6", value)
     allowed_evidence = set(evidence_ids)
     allowed_figures = set(figure_ids)
+    allowed_sources = set(source_ids or [])
     for page in value["pages"]:
         if not set(page["evidence_ids"]).issubset(allowed_evidence):
             raise ContractError("P6 页面使用了不存在的 evidence_id")
         for figure in page["figure_refs"]:
             if figure["figure_id"] not in allowed_figures:
                 raise ContractError("P6 页面使用了不存在的 figure_id")
+        if allowed_sources and not {item["source_id"] for item in page["source_citations"]}.issubset(allowed_sources):
+            raise ContractError("P6 页面使用了不存在的 source_id")
     validate_ppt_density(value["pages"])
     return value
 

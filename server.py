@@ -17,7 +17,7 @@ from pathlib import Path
 from epo_ops import EPOClient
 from model_routing import ModelRouter
 from model_usage import ModelUsageLedger
-from retrieval import search_all
+from retrieval import hydrate_europe_pmc_full_text, search_all
 from task_store import TaskStore
 from workflow_validation import (
     validate_claims,
@@ -218,9 +218,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                 topic = str(body.get("topic", "")).strip()
                 query = str(body.get("query", "")).strip() or topic
                 epo_query = str(body.get("epo_query", "")).strip() or query
+                tier = body.get("tier", "fast")
                 if not 2 <= len(topic) <= 500 or not 2 <= len(query) <= 1000 or len(epo_query) > 500:
                     raise ValueError("检索主题或检索式无效")
-                output = search_all(query, per_source=4, epo_client=self.server.epo_client, epo_query=epo_query)
+                if tier not in ("fast", "deep"):
+                    raise ValueError("检索版本无效")
+                output = search_all(query, per_source=6 if tier == "deep" else 4, epo_client=self.server.epo_client, epo_query=epo_query)
                 output["topic"] = topic
                 self.send_json(HTTPStatus.OK, {"data": output})
                 return
@@ -229,7 +232,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/evidence":
-                output, usage = self.server.workflow.extract_evidence(body.get("source_record"), body.get("question_ids", []), body.get("tier", "fast"))
+                source_record = hydrate_europe_pmc_full_text(body.get("source_record") or {})
+                output, usage = self.server.workflow.extract_evidence(source_record, body.get("question_ids", []), body.get("tier", "fast"))
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/report":
@@ -240,6 +244,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 output, usage = self.server.workflow.create_ppt(
                     body.get("intent"), body.get("report"), body.get("evidence_records"),
                     body.get("figure_records", []), body.get("constraints", {}), body.get("tier", "fast"), body.get("plan"),
+                    body.get("source_records", []),
                 )
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return

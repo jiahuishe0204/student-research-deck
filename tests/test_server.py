@@ -1,5 +1,6 @@
 import unittest
 from io import BytesIO
+from unittest.mock import patch
 
 import server
 import retrieval
@@ -86,6 +87,15 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(output["records"][0]["source_id"], "EPO:EP.1.A1")
         self.assertEqual(epo.query, "CRISPR diagnostics Cas12 detection")
 
+    def test_europe_pmc_full_text_keeps_figure_locator(self):
+        xml = b'<article><body><sec><p>Full text result.</p><fig id="F1"><label>Fig. 1</label><caption><p>Valve calcification pathway.</p></caption></fig></sec></body></article>'
+        record = {"source": "Europe PMC", "source_id": "PMC:123", "pmcid": "PMC123", "access": "full_text"}
+        with patch("retrieval.fetch_url_bytes", return_value=xml):
+            hydrated = retrieval.hydrate_europe_pmc_full_text(record)
+        self.assertIn("Full text result", hydrated["full_text"])
+        self.assertEqual(hydrated["figure_candidates"][0]["locator"], "PMC123, Fig. 1")
+        self.assertIn("/figure/F1", hydrated["figure_candidates"][0]["article_figure_url"])
+
     def test_plan_rejects_object_source_plan(self):
         value = {
             "research_scope": "scope", "exclusions": [],
@@ -128,12 +138,12 @@ class ValidationTests(unittest.TestCase):
             server.validate_report(value, ["EV-1"])
 
     def test_ppt_rejects_unknown_figure(self):
-        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"purpose","on_slide_text":[],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[{"figure_id":"FIG-2","source_id":"SRC-1","locator":"figure 1","intended_use":"show","reuse_status":"unknown"}]}]}
+        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"purpose","on_slide_text":[],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[{"figure_id":"FIG-2","source_id":"SRC-1","locator":"figure 1","intended_use":"show","reuse_status":"unknown"}],"source_citations":[]}]}
         with self.assertRaises(ValueError):
             server.validate_ppt(value, ["EV-1"], ["FIG-1"])
 
     def test_ppt_rejects_overlong_slide_text(self):
-        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"purpose","on_slide_text":["字" * 141],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[]}]}
+        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"purpose","on_slide_text":["字" * 141],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[],"source_citations":[]}]}
         with self.assertRaisesRegex(Exception, "单条上屏文字"):
             server.validate_ppt(value, ["EV-1"], [])
 
@@ -154,7 +164,7 @@ class ValidationTests(unittest.TestCase):
             server.validate_verification(value, ["CL-1"], ["EV-1"], claims)
 
     def test_final_change_log_must_apply_verification_actions(self):
-        value = {"delivery_version":"1.0","evidence_version":"1.0","final_report":{"title":"title","markdown":"body","used_evidence_ids":["EV-1"]},"final_ppt":{"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","on_slide_text":[],"speaker_notes":"","evidence_ids":["EV-1"]}]},"verification_note":"checked","open_issues":[],"source_ids":["SRC-1"],"evidence_ids":["EV-1"],"change_log":[{"claim_id":"CL-1","action":"kept","reason":"wrong"}]}
+        value = {"delivery_version":"1.0","evidence_version":"1.0","final_report":{"title":"title","markdown":"body","used_evidence_ids":["EV-1"]},"final_ppt":{"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"","on_slide_text":[],"visual_suggestion":"","speaker_notes":"","evidence_ids":["EV-1"],"figure_refs":[],"source_citations":[]}]},"verification_note":"checked","open_issues":[],"source_ids":["SRC-1"],"evidence_ids":["EV-1"],"change_log":[{"claim_id":"CL-1","action":"kept","reason":"wrong"}]}
         verification = {"results": [{"claim_id": "CL-1", "action": "remove"}]}
         with self.assertRaisesRegex(ValueError, "未落实"):
             server.validate_final(value, ["CL-1"], ["SRC-1"], ["EV-1"], verification)

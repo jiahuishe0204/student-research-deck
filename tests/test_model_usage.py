@@ -36,6 +36,13 @@ class ModelUsageLedgerTests(unittest.TestCase):
                 ledger.guard("T1", "deepseek-flash", {"task_max_total_tokens": 120}, next_input_tokens=10, next_output_tokens=20)
             with self.assertRaisesRegex(ModelBudgetExceeded, "费用上限"):
                 ledger.guard("T1", "deepseek-v4-pro", {"task_max_cost_cny": 0.001}, next_input_tokens=100, next_output_tokens=100)
+
+    def test_pro_total_tokens_reserves_next_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = ModelUsageLedger(Path(directory) / "usage.sqlite3")
+            ledger.record("T1", "P1", "deepseek-v4-pro", "low", 1, "accepted", {"prompt_tokens": 400, "completion_tokens": 100, "total_tokens": 500})
+            with self.assertRaises(ModelBudgetExceeded):
+                ledger.guard("T1", "deepseek-v4-pro", {"pro_max_total_tokens": 600}, next_input_tokens=80, next_output_tokens=50)
             ledger.guard("T1", "deepseek-flash", {"pro_max_output_tokens": 1})
 
 

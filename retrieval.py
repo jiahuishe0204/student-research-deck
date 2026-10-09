@@ -24,6 +24,12 @@ def fetch_bytes(base, params, timeout=30):
         return response.read()
 
 
+def fetch_url_bytes(url, timeout=30):
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
 def text_of(node):
     return "" if node is None else "".join(node.itertext()).strip()
 
@@ -87,15 +93,49 @@ def search_europe_pmc(query, limit=5):
         ext_id = item.get("id", "")
         pmid = item.get("pmid", "")
         doi = item.get("doi", "")
+        pmcid = item.get("pmcid", "")
         records.append({
             "source": "Europe PMC", "source_id": "%s:%s" % (source, ext_id), "pmid": pmid, "doi": doi,
             "title": item.get("title", ""), "abstract": item.get("abstractText", ""),
             "authors": [name.strip() for name in item.get("authorString", "").split(",") if name.strip()][:6],
             "journal": item.get("journalTitle", ""), "year": str(item.get("pubYear", "")),
             "url": "https://europepmc.org/article/%s/%s" % (source, ext_id),
-            "access": "full_text" if item.get("inEPMC") == "Y" else "abstract",
+            "pmcid": pmcid, "access": "full_text" if item.get("inEPMC") == "Y" and pmcid else "abstract",
         })
     return records
+
+
+def hydrate_europe_pmc_full_text(record, text_limit=24000, figure_limit=12):
+    """Fetch open full text only for a selected Europe PMC source and retain figure locators."""
+    if record.get("source") != "Europe PMC" or not record.get("pmcid"):
+        return dict(record)
+    hydrated = dict(record)
+    pmcid = str(record["pmcid"]).strip()
+    url = "https://www.ebi.ac.uk/europepmc/webservices/rest/%s/fullTextXML" % urllib.parse.quote(pmcid)
+    try:
+        root = ET.fromstring(fetch_url_bytes(url))
+    except Exception as exc:
+        hydrated["full_text_error"] = type(exc).__name__
+        return hydrated
+    body = root.find(".//body")
+    full_text = re.sub(r"\s+", " ", text_of(body)).strip()
+    if full_text:
+        hydrated["full_text"] = full_text[:text_limit]
+        hydrated["access"] = "full_text"
+    figures = []
+    for index, figure in enumerate(root.findall(".//fig")[:figure_limit], 1):
+        figure_id = figure.attrib.get("id") or "fig-%d" % index
+        label = text_of(figure.find("label")) or figure_id
+        caption = re.sub(r"\s+", " ", text_of(figure.find("caption"))).strip()
+        figures.append({
+            "figure_id": "%s:%s" % (record.get("source_id", pmcid), figure_id),
+            "label": label, "caption": caption,
+            "locator": "%s, %s" % (pmcid, label),
+            "article_figure_url": "https://europepmc.org/articles/%s/figure/%s" % (pmcid, figure_id),
+            "reuse_status": "unknown",
+        })
+    hydrated["figure_candidates"] = figures
+    return hydrated
 
 
 def search_crossref(query, limit=5):

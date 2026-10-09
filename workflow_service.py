@@ -234,7 +234,7 @@ class WorkflowService:
         output, usage, _ = self.generate(
             "P3", tier,
             {"topic": topic, "plan": plan, "candidate_sources": compact, "limits": {"keep_max": keep_max, "tier": tier}, "output_contract": load_contract("P3")},
-            lambda value: validate_screen(value, candidate_ids, keep_max),
+            lambda value: validate_screen(value, candidate_ids, keep_max), max_tokens=2500, max_attempts=2,
         )
         return output, usage
 
@@ -243,19 +243,20 @@ class WorkflowService:
         if not isinstance(source_record, dict) or not isinstance(question_ids, list):
             raise ValueError("证据提取输入无效")
         source_id = str(source_record.get("source_id", "")).strip()
-        source_text = str(source_record.get("abstract", "")).strip()
+        source_text = str(source_record.get("full_text") or source_record.get("abstract", "")).strip()
         if not source_id:
             raise ValueError("来源缺少 source_id")
         if not source_text:
             output = {"evidence_version": "1.0", "source_id": source_id, "extraction_status": "no_extractable_evidence", "reading_scope": "metadata_only", "evidence_records": [], "figure_records": [], "no_extractable_reason": "当前来源没有可读取摘要或正文"}
             usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
             return validate_evidence(output, source_id, source_record.get("access")), usage
-        keys = ("source_id", "source", "title", "authors", "journal", "year", "url", "access")
+        keys = ("source_id", "source", "title", "authors", "journal", "year", "url", "access", "pmcid")
         compact = {key: source_record.get(key) for key in keys}
+        allowed_figure_ids = [item.get("figure_id") for item in source_record.get("figure_candidates", []) if item.get("figure_id")]
         output, usage, _ = self.generate(
             "P4", tier,
-            {"source_record": compact, "source_text": source_text, "question_ids": question_ids, "output_contract": load_contract("P4")},
-            lambda value: validate_evidence(value, source_id, source_record.get("access")),
+            {"source_record": compact, "source_text": source_text, "figure_candidates": source_record.get("figure_candidates", []), "question_ids": question_ids, "output_contract": load_contract("P4")},
+            lambda value: validate_evidence(value, source_id, source_record.get("access"), allowed_figure_ids), max_tokens=3000, max_attempts=2,
         )
         return output, usage
 
@@ -273,18 +274,20 @@ class WorkflowService:
         )
         return output, usage
 
-    def create_ppt(self, intent, report, evidence_records, figure_records=None, constraints=None, tier="fast", plan=None):
+    def create_ppt(self, intent, report, evidence_records, figure_records=None, constraints=None, tier="fast", plan=None, source_records=None):
         tier = self._tier(tier)
         figure_records = [] if figure_records is None else figure_records
         constraints = {} if constraints is None else constraints
-        if not isinstance(intent, dict) or not isinstance(report, dict) or not isinstance(evidence_records, list) or not isinstance(figure_records, list) or not isinstance(constraints, dict) or (plan is not None and not isinstance(plan, dict)):
+        source_records = [] if source_records is None else source_records
+        if not isinstance(intent, dict) or not isinstance(report, dict) or not isinstance(evidence_records, list) or not isinstance(figure_records, list) or not isinstance(source_records, list) or not isinstance(constraints, dict) or (plan is not None and not isinstance(plan, dict)):
             raise ValueError("PPT 内容包输入无效")
         evidence_ids = self._ids(evidence_records, "evidence_id", "PPT 输入包含无效证据编号", unique=False)
         figure_ids = self._ids(figure_records, "figure_id", "PPT 输入包含无效图片编号", unique=False)
+        source_ids = self._ids(source_records, "source_id", "PPT 输入包含无效来源编号", unique=False)
         output, usage, _ = self.generate(
             "P6", tier,
-            {"intent": intent, "plan": plan or {}, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids, "constraints": constraints, "output_contract": load_contract("P6")},
-            lambda value: validate_ppt(value, evidence_ids, figure_ids),
+            {"intent": intent, "plan": plan or {}, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "source_records": source_records, "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids, "allowed_source_ids": source_ids, "constraints": constraints, "output_contract": load_contract("P6")},
+            lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids),
         )
         return output, usage
 
@@ -397,7 +400,12 @@ class WorkflowService:
                 if not located:
                     raise ValueError("无法在交付物中定位声明 %s，拒绝生成未落实核验结论的终稿" % claim["claim_id"])
 
-        final_pages = [{key: page.get(key) for key in ("page_id", "title", "on_slide_text", "speaker_notes", "evidence_ids")} for page in pages]
+        final_pages = [{
+            "page_id": page.get("page_id"), "title": page.get("title"), "purpose": page.get("purpose", ""),
+            "on_slide_text": page.get("on_slide_text", []), "visual_suggestion": page.get("visual_suggestion", ""),
+            "speaker_notes": page.get("speaker_notes", ""), "evidence_ids": page.get("evidence_ids", []),
+            "figure_refs": page.get("figure_refs", []), "source_citations": page.get("source_citations", []),
+        } for page in pages]
         output = {
             "delivery_version": "P9-deterministic-1.0", "evidence_version": str(evidence_version),
             "final_report": {"title": report.get("report_title", "调研报告"), "markdown": markdown, "used_evidence_ids": list(report.get("used_evidence_ids", evidence_ids))},

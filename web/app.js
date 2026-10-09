@@ -70,7 +70,7 @@ document.addEventListener('click',async event=>{
   const button=event.target.closest('#start-retrieval');if(!button)return;
   setBusy(button,true,'正在连接文献数据库… <span>·</span>');
   const output=$('#retrieval-output');output.innerHTML='<p class="empty-plan">正在检索 PubMed、Europe PMC 和 Crossref，并按 DOI、PMID 去重…</p>';
-  try{const response=await request('/api/search',{topic:currentTopic,query:buildSearchQuery(currentPlan),epo_query:buildEpoQuery(currentPlan)});currentSources=response.data.records;currentScreening=null;currentEvidenceGroups=[];currentReport=null;currentPpt=null;await persistStage('P2','search_completed',response.data,'sources');renderSources(response.data);document.querySelectorAll('.task-status li')[2].className='active';}
+  try{const response=await request('/api/search',{topic:currentTopic,query:buildSearchQuery(currentPlan),epo_query:buildEpoQuery(currentPlan),tier:currentTier});currentSources=response.data.records;currentScreening=null;currentEvidenceGroups=[];currentReport=null;currentPpt=null;await persistStage('P2','search_completed',response.data,'sources');renderSources(response.data);document.querySelectorAll('.task-status li')[2].className='active';}
   catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}</p>`;}
   finally{setBusy(button,false,'重新检索 <span>↻</span>');}
 });
@@ -126,7 +126,7 @@ document.addEventListener('click',async event=>{
   try{
     const reportResponse=await request('/api/report',{intent:currentIntent,plan:currentPlan,evidence_records:evidenceRecords,tier:currentTier});ensureActive();
     setBusy(button,true,'正在编排 PPT 内容… <span>·</span>');
-    const pptResponse=await request('/api/ppt',{intent:currentIntent,report:reportResponse.data,evidence_records:evidenceRecords,figure_records:figureRecords,constraints:{language:'zh-CN',format:'storyboard_with_speaker_notes'},tier:currentTier});
+    const pptResponse=await request('/api/ppt',{intent:currentIntent,report:reportResponse.data,evidence_records:evidenceRecords,figure_records:figureRecords,source_records:currentSources.filter(source=>evidenceRecords.some(evidence=>evidence.source_id===source.source_id)),constraints:{language:'zh-CN',format:'storyboard_with_speaker_notes'},tier:currentTier});
     currentReport=reportResponse.data;await persistStage('P5','report_completed',currentReport,'report');currentPpt=pptResponse.data;await persistStage('P6','ppt_completed',currentPpt,'ppt');renderDeliverables(currentReport,currentPpt,Number(reportResponse.usage?.total_tokens||0)+Number(pptResponse.usage?.total_tokens||0));
     document.querySelectorAll('.task-status li')[2].className='done';document.querySelectorAll('.task-status li')[3].className='active';document.querySelector('.progress-line i').style.width='72%';$('#task-status-title').textContent='报告与 PPT 内容包已生成';
   }catch(exc){output.innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。证据底稿仍然保留，可以重试本阶段。</p>`;}

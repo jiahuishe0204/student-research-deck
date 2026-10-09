@@ -338,6 +338,22 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(output["change_log"][0]["action"], "revised")
         self.assertEqual(usage["total_tokens"], 0)
 
+    def test_deterministic_final_preserves_visuals_and_citations(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claims = [{"claim_id": "CL-1", "location_type": "ppt_slide", "section_or_page_id": "P1", "original_text": "证据结论", "atomic_claim": "证据结论", "claim_type": "other", "cited_evidence_ids": ["EV-1"], "risk_level": "low"}]
+        verification = {"results": [{"claim_id": "CL-1", "support_status": "supported", "action": "keep", "revised_claim": None, "explanation": "证据一致"}]}
+        report = {"report_title": "报告", "report_markdown": "正文", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        figure = {"figure_id": "FIG-1", "source_id": "SRC-1", "locator": "Fig. 2", "intended_use": "解释机制", "reuse_status": "citation_only"}
+        citation = {"source_id": "SRC-1", "short_vancouver": "Smith J, et al. Example J. 2024;1:1-2."}
+        ppt = {"deck_title": "汇报", "storyline": "证据", "pages": [{"page_id": "P1", "title": "结论", "purpose": "解释机制", "on_slide_text": ["证据结论"], "visual_suggestion": "使用 Fig. 2", "speaker_notes": "", "evidence_ids": ["EV-1"], "figure_refs": [figure], "source_citations": [citation]}]}
+
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
+        page = output["final_ppt"]["pages"][0]
+
+        self.assertEqual(page["figure_refs"], [figure])
+        self.assertEqual(page["source_citations"], [citation])
+        self.assertEqual(page["visual_suggestion"], "使用 Fig. 2")
+
     def test_deterministic_final_locates_slide_claim_after_label_prefix(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})
         claims = [{

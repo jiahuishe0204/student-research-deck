@@ -47,8 +47,8 @@ def resume(base, task_id, task_token):
     source_artifact = artifact(task, "sources")
     if source_artifact is None:
         print("[%s] resume retrieval" % task["topic"], flush=True)
-        source_artifact = post(base, "/api/search", {"topic": task["topic"], "query": query_from_plan(plan, task["topic"])})["data"]
-        source_artifact["records"] = source_artifact["records"][:8]
+        source_artifact = post(base, "/api/search", {"topic": task["topic"], "query": query_from_plan(plan, task["topic"]), "tier": task["tier"]})["data"]
+        source_artifact["records"] = source_artifact["records"][:12 if task["tier"] == "deep" else 8]
         if not source_artifact["records"]:
             raise RuntimeError("%s returned no sources" % task["topic"])
         persist(base, task_id, "P2", "search_completed", source_artifact, "sources")
@@ -83,7 +83,7 @@ def resume(base, task_id, task_token):
     ppt = artifact(task, "ppt")
     if ppt is None:
         print("[%s] resume P6" % task["topic"], flush=True)
-        ppt = post(base, "/api/ppt", {"intent": intent, "plan": plan, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}, "tier": task["tier"]})["data"]
+        ppt = post(base, "/api/ppt", {"intent": intent, "plan": plan, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "source_records": selected_sources, "constraints": {"language": "zh-CN", "format": "storyboard_with_speaker_notes"}, "tier": task["tier"]})["data"]
         persist(base, task_id, "P6", "ppt_completed", ppt, "ppt")
     claims = artifact(task, "claims")
     regenerate_claims = claims is not None and len(claims.get("claims", [])) > MAX_VERIFICATION_CLAIMS
