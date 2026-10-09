@@ -301,7 +301,7 @@ class WorkflowService:
         output, usage, _ = self.generate(
             "P6", tier,
             {"intent": intent, "plan": plan or {}, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "source_records": source_records, "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids, "allowed_source_ids": source_ids, "constraints": constraints, "output_contract": load_contract("P6")},
-            lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids),
+            lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids), max_tokens=9000, max_attempts=2,
         )
         return output, usage
 

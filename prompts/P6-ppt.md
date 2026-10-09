@@ -6,4 +6,4 @@
 
 source_citations 只能引用 allowed_source_ids，根据 source_records 生成页下方可直接使用的 Vancouver 短引用，例如“Smith J, et al. J Am Coll Cardiol. 2024;83:123-135.”。来源元数据不完时不得猜测，用现有字段并在引用中标注“信息不完”。evidence_ids 只能从 allowed_evidence_ids 逐字选择，figure_id 只能从 allowed_figure_ids 逐字选择；不得改写、缩短或自行构造编号。
 
-常规页面建议 3—5 个有层级的要点，数据页可按信息任务适度增加；只有出现接近正文段落的极端堆字时才视为结构失败。注释不得新增事实。输出必须严格符合 P6-ppt.schema.json。
+深入版优先生成 8—12 页，以完整回答研究问题为准，不为凑页数拆分同一结论。常规页面建议 3—5 个有层级的要点，数据页可按信息任务适度增加；只有出现接近正文段落的极端堆字时才视为结构失败。注释不得新增事实。输出必须严格符合 P6-ppt.schema.json。
