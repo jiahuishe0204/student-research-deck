@@ -284,7 +284,7 @@ class WorkflowService:
         output, usage, _ = self.generate(
             "P5", tier,
             {"intent": intent, "plan": plan, "evidence_records": evidence_records, "tier": tier, "output_contract": load_contract("P5")},
-            lambda value: validate_report(value, evidence_ids),
+            lambda value: validate_report(value, evidence_ids), max_tokens=7500, max_attempts=2,
         )
         return output, usage
 
