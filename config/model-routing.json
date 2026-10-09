@@ -16,7 +16,7 @@
       "research_planning": {"model":"deepseek-v4-pro","thinking":"enabled","reasoning_effort":"medium","note":"Medium reasoning leaves enough completion budget for the strict structured research plan while retaining strong-model framing."},
       "retrieval_screening": {"model":"deepseek-flash","thinking":"disabled"},
       "content_generation": {"model":"deepseek-flash","thinking":"disabled","note":"Evidence extraction, report filling and claim extraction use explicit contracts; disabling hidden reasoning preserves the bounded output budget for deliverable JSON.","upgrade_model":"deepseek-v4-pro"},
-      "high_risk_verification": {"model":"deepseek-v4-pro","thinking":"enabled","reasoning_effort":"medium","note":"Medium reasoning preserves space for complete structured verdicts; claim grouping and evidence scoping are handled deterministically."},
+      "high_risk_verification": {"model":"deepseek-v4-pro","thinking":"disabled","note":"The Pro model performs semantic judgment, while deterministic claim grouping, evidence scoping and contract checks preserve the output budget for auditable verdicts."},
       "ppt_storyboard": {"model":"deepseek-flash","thinking":"disabled","note":"The strong-model research plan already defines the story; P6 spends its budget on complete page content, visuals and citations.","structure_review_model":"deepseek-v4-pro"}
     }
   },
