@@ -394,7 +394,7 @@ class WorkflowServiceTests(unittest.TestCase):
             "original_text": "原结论", "atomic_claim": "原结论", "claim_type": "efficacy",
             "cited_evidence_ids": ["EV-1"], "risk_level": "high",
         }]
-        long_revision = "在指定研究对象、剂量、观察时间和实验条件下观察到有限改善，不能外推至其他人群或解释为已经证明临床疗效。" * 2
+        long_revision = "在指定研究对象、剂量、观察时间和实验条件下观察到有限改善，不能外推至其他人群或解释为已经证明临床疗效。" * 4
         verification = {"results": [{
             "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
             "revised_claim": long_revision, "explanation": "需要完整限定",

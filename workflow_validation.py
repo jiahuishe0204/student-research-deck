@@ -4,31 +4,25 @@ from contracts import ContractError, validate_stage_output
 
 
 PPT_DENSITY_LIMITS = {
-    "deck_average_max": 180,
-    "page_characters_max": 220,
-    "bullet_characters_max": 80,
-    "bullets_max": 5,
-    "speaker_notes_max": 350,
+    "page_characters_max": 400,
+    "bullet_characters_max": 140,
+    "bullets_max": 7,
+    "speaker_notes_max": 800,
 }
 
 
 def validate_ppt_density(pages):
-    total = 0
     for page in pages:
         bullets = page.get("on_slide_text", [])
         characters = sum(len(str(item)) for item in bullets)
-        total += characters
         if characters > PPT_DENSITY_LIMITS["page_characters_max"]:
-            raise ContractError("PPT 单页上屏文字超过 220 字")
+            raise ContractError("PPT 页面出现极端文字堆积，超过 400 字")
         if len(bullets) > PPT_DENSITY_LIMITS["bullets_max"]:
-            raise ContractError("PPT 单页要点超过 5 条")
+            raise ContractError("PPT 单页要点超过 7 条，缺少信息层级")
         if any(len(str(item)) > PPT_DENSITY_LIMITS["bullet_characters_max"] for item in bullets):
-            raise ContractError("PPT 单条上屏文字超过 80 字")
+            raise ContractError("PPT 单条上屏文字超过 140 字，已经接近正文段落")
         if len(str(page.get("speaker_notes", ""))) > PPT_DENSITY_LIMITS["speaker_notes_max"]:
-            raise ContractError("PPT 单页备注超过 350 字")
-    average = total / len(pages) if pages else 0
-    if average > PPT_DENSITY_LIMITS["deck_average_max"]:
-        raise ContractError("PPT 全稿平均上屏文字超过 180 字/页")
+            raise ContractError("PPT 单页备注超过 800 字，应拆分讲解任务")
     return pages
 
 

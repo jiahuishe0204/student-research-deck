@@ -133,7 +133,7 @@ class ValidationTests(unittest.TestCase):
             server.validate_ppt(value, ["EV-1"], ["FIG-1"])
 
     def test_ppt_rejects_overlong_slide_text(self):
-        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"purpose","on_slide_text":["字" * 81],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[]}]}
+        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"purpose","on_slide_text":["字" * 141],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[]}]}
         with self.assertRaisesRegex(Exception, "单条上屏文字"):
             server.validate_ppt(value, ["EV-1"], [])
 
