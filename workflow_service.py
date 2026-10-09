@@ -269,8 +269,8 @@ class WorkflowService:
         allowed_figure_ids = [item.get("figure_id") for item in source_record.get("figure_candidates", []) if item.get("figure_id")]
         output, usage, _ = self.generate(
             "P4", tier,
-            {"source_record": compact, "source_text": source_text, "figure_candidates": source_record.get("figure_candidates", []), "question_ids": question_ids, "output_contract": load_contract("P4")},
-            lambda value: validate_evidence(value, source_id, source_record.get("access"), allowed_figure_ids), max_tokens=3000, max_attempts=2,
+            {"source_record": compact, "source_text": source_text, "figure_candidates": source_record.get("figure_candidates", []), "question_ids": question_ids, "limits": {"evidence_records_max": 8, "figure_records_max": 4}, "output_contract": load_contract("P4")},
+            lambda value: validate_evidence(value, source_id, source_record.get("access"), allowed_figure_ids, 8, 4), max_tokens=4500, max_attempts=2,
         )
         return output, usage
 

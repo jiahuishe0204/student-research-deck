@@ -62,9 +62,16 @@ def resume(base, task_id, task_token):
     if evidence_artifact is None:
         print("[%s] resume P4" % task["topic"], flush=True)
         groups = []
-        for decision in (item for item in screening["decisions"] if item["status"] == "keep"):
+        kept_decisions = [item for item in screening["decisions"] if item["status"] == "keep"]
+        for index, decision in enumerate(kept_decisions, 1):
+            saved_group = artifact(task, "evidence_source_%03d" % index)
+            if saved_group is not None:
+                groups.append(saved_group)
+                continue
             source = next(item for item in sources if item["source_id"] == decision["source_id"])
-            groups.append(post(base, "/api/evidence", {"source_record": source, "question_ids": decision["question_ids"], "tier": task["tier"]})["data"])
+            group = post(base, "/api/evidence", {"source_record": source, "question_ids": decision["question_ids"], "tier": task["tier"]})["data"]
+            groups.append(group)
+            persist(base, task_id, "P4", "evidence_source_completed", group, "evidence_source_%03d" % index)
         if not any(group["evidence_records"] for group in groups):
             raise RuntimeError("%s produced no extractable evidence" % task["topic"])
         persist(base, task_id, "P4", "evidence_completed", {"groups": groups}, "evidence")

@@ -151,10 +151,11 @@ def run_topic(base, topic, tier):
     evidence_groups = []
     kept = [item for item in screening["decisions"] if item["status"] == "keep"]
     print("[%s] P4 evidence %d kept sources" % (topic, len(kept)), flush=True)
-    for decision in kept:
+    for index, decision in enumerate(kept, 1):
         source = next(item for item in candidates if item["source_id"] == decision["source_id"])
         response = post(base, "/api/evidence", {"source_record": source, "question_ids": decision["question_ids"], "tier": tier})
         evidence_groups.append(response["data"])
+        persist(base, task_id, "P4", "evidence_source_completed", response["data"], "evidence_source_%03d" % index)
         usage["P4"] = usage.get("P4", 0) + response.get("usage", {}).get("total_tokens", 0)
     evidence_records = [item for group in evidence_groups for item in group["evidence_records"]]
     figure_records = [item for group in evidence_groups for item in group["figure_records"]]

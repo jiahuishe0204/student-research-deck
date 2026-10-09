@@ -72,7 +72,7 @@ def validate_screen(value, candidate_ids, keep_max=None):
     return value
 
 
-def validate_evidence(value, source_id, source_access=None, allowed_figure_ids=None):
+def validate_evidence(value, source_id, source_access=None, allowed_figure_ids=None, evidence_max=None, figure_max=None):
     validate_stage_output("P4", value)
     if value["source_id"] != source_id:
         raise ContractError("P4 source_id 与输入不一致")
@@ -82,6 +82,10 @@ def validate_evidence(value, source_id, source_access=None, allowed_figure_ids=N
         raise ContractError("P4 图片引用了其他来源")
     if allowed_figure_ids is not None and not {item["figure_id"] for item in value["figure_records"]}.issubset(set(allowed_figure_ids)):
         raise ContractError("P4 图片不在原文候选列表中")
+    if evidence_max is not None and len(value["evidence_records"]) > evidence_max:
+        raise ContractError("P4 证据条目超过上限")
+    if figure_max is not None and len(value["figure_records"]) > figure_max:
+        raise ContractError("P4 图片条目超过上限")
     if source_access != "full_text" and value["reading_scope"] == "full_text":
         raise ContractError("P4 未获得全文时不能标记为全文阅读")
     return value
