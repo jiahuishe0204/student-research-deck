@@ -12,6 +12,27 @@ class FakeRouter:
 
 
 class WorkflowServiceTests(unittest.TestCase):
+    def test_screen_sources_batches_and_applies_global_keep_limit(self):
+        calls = []
+
+        def client(*args):
+            payload = args[4]
+            calls.append(payload)
+            decisions = [{"source_id": item["source_id"], "status": "keep", "question_ids": ["Q1"], "intended_uses": ["overview"], "reason": "relevant", "priority": "high", "relevance_score": 0.9, "evidence_type": "systematic_review", "flags": []} for item in payload["candidate_sources"]]
+            return {"screening_version": "1.0", "topic": payload["topic"], "decisions": decisions, "summary": {"candidate_count": 0, "keep_count": 0, "reserve_count": 0, "drop_count": 0, "open_issues": []}}, {"total_tokens": 10}
+
+        service = WorkflowService("secret", FakeRouter(), "system", {"P3": "screen"}, client)
+        candidates = [{"source_id": "SRC-%d" % index, "source": "PubMed", "title": "t", "abstract": "a", "year": "2024", "access": "abstract", "url": "u"} for index in range(9)]
+        plan = {"research_scope": "scope", "questions": [], "source_plan": [], "selection_criteria": []}
+
+        output, usage = service.screen_sources("topic", plan, candidates, "fast")
+
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(output["summary"]["candidate_count"], 9)
+        self.assertEqual(output["summary"]["keep_count"], 4)
+        self.assertEqual(output["summary"]["reserve_count"], 5)
+        self.assertEqual(usage["total_tokens"], 30)
+
     def test_generate_binds_prompt_route_and_client_options(self):
         calls = []
 

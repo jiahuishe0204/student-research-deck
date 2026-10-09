@@ -232,13 +232,25 @@ class WorkflowService:
         keys = ("source_id", "source", "title", "abstract", "year", "access", "url")
         compact = [{key: item.get(key) for key in keys} for item in candidates]
         compact_plan = {key: plan.get(key) for key in ("research_scope", "questions", "source_plan", "selection_criteria")}
-        screening_output_limit = min(4500, 900 + len(candidates) * 300)
-        output, usage, _ = self.generate(
-            "P3", tier,
-            {"topic": topic, "plan": compact_plan, "candidate_sources": compact, "limits": {"keep_max": keep_max, "tier": tier}, "output_contract": load_contract("P3")},
-            lambda value: validate_screen(value, candidate_ids, keep_max), max_tokens=screening_output_limit, max_attempts=2,
-        )
-        return output, usage
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
+        decisions, open_issues = [], []
+        for offset in range(0, len(compact), 4):
+            batch = compact[offset:offset + 4]
+            batch_ids = [item["source_id"] for item in batch]
+            partial, partial_usage, _ = self.generate(
+                "P3", tier,
+                {"topic": topic, "plan": compact_plan, "candidate_sources": batch, "limits": {"keep_max": len(batch), "tier": tier}, "output_contract": load_contract("P3")},
+                lambda value, ids=batch_ids: validate_screen(value, ids, len(ids)), max_tokens=2100, max_attempts=2,
+            )
+            decisions.extend(partial["decisions"])
+            open_issues.extend(partial["summary"].get("open_issues", []))
+            add_usage(usage, partial_usage)
+        kept = sorted((item for item in decisions if item["status"] == "keep"), key=lambda item: (item.get("relevance_score", 0), item.get("priority") == "high"), reverse=True)
+        for item in kept[keep_max:]:
+            item["status"] = "reserve"
+            item["reason"] = (item.get("reason", "") + " 全局保留上限由程序降为备选。").strip()
+        output = {"screening_version": "P3-batched-1.0", "topic": topic, "decisions": decisions, "summary": {"candidate_count": len(candidate_ids), "keep_count": 0, "reserve_count": 0, "drop_count": 0, "open_issues": list(dict.fromkeys(open_issues))}}
+        return validate_screen(output, candidate_ids, keep_max), usage
 
     def extract_evidence(self, source_record, question_ids, tier="fast"):
         tier = self._tier(tier)
