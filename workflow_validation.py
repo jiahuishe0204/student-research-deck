@@ -64,8 +64,9 @@ def validate_screen(value, candidate_ids, keep_max=None):
         raise ContractError("P3 必须且只能判断本次全部候选资料")
     counts = {status: sum(item["status"] == status for item in decisions) for status in ("keep", "reserve", "drop")}
     summary = value["summary"]
-    if summary["candidate_count"] != len(candidate_ids) or any(summary[status + "_count"] != count for status, count in counts.items()):
-        raise ContractError("P3 汇总数量与逐条判断不一致")
+    summary["candidate_count"] = len(candidate_ids)
+    for status, count in counts.items():
+        summary[status + "_count"] = count
     if keep_max is not None and counts["keep"] > keep_max:
         raise ContractError("P3 保留数量超过本版本预算")
     return value

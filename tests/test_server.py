@@ -115,6 +115,17 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.validate_screen(value, ["SRC-1"])
 
+    def test_screen_recomputes_summary_without_model_retry(self):
+        value = {
+            "screening_version": "1.0", "topic": "topic",
+            "decisions": [{"source_id": "SRC-1", "status": "keep", "question_ids": ["Q1"], "intended_uses": ["overview"], "reason": "relevant", "priority": "high", "relevance_score": 0.9, "evidence_type": "systematic_review", "flags": []}],
+            "summary": {"candidate_count": 99, "keep_count": 0, "reserve_count": 7, "drop_count": 4, "open_issues": []},
+        }
+        result = server.validate_screen(value, ["SRC-1"], keep_max=1)
+        self.assertEqual(result["summary"]["candidate_count"], 1)
+        self.assertEqual(result["summary"]["keep_count"], 1)
+        self.assertEqual(result["summary"]["reserve_count"], 0)
+
     def test_evidence_rejects_cross_source_record(self):
         value = {
             "evidence_version": "1.0", "source_id": "SRC-1", "extraction_status": "extracted", "reading_scope": "abstract",

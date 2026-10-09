@@ -231,9 +231,10 @@ class WorkflowService:
         keep_max = 8 if tier == "deep" else 4
         keys = ("source_id", "source", "title", "abstract", "year", "access", "url")
         compact = [{key: item.get(key) for key in keys} for item in candidates]
+        compact_plan = {key: plan.get(key) for key in ("research_scope", "questions", "source_plan", "selection_criteria")}
         output, usage, _ = self.generate(
             "P3", tier,
-            {"topic": topic, "plan": plan, "candidate_sources": compact, "limits": {"keep_max": keep_max, "tier": tier}, "output_contract": load_contract("P3")},
+            {"topic": topic, "plan": compact_plan, "candidate_sources": compact, "limits": {"keep_max": keep_max, "tier": tier}, "output_contract": load_contract("P3")},
             lambda value: validate_screen(value, candidate_ids, keep_max), max_tokens=2500, max_attempts=2,
         )
         return output, usage
