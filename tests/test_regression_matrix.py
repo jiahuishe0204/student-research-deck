@@ -5,12 +5,18 @@ from pathlib import Path
 
 from contracts import load_contract
 from task_store import TaskStore
-from tests.run_live_regression import acceptance_failures
+from tests.run_live_regression import acceptance_failures, select_pro_claim_ids
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class RegressionMatrixTests(unittest.TestCase):
+    def test_pro_verification_is_limited_to_ten_priority_claims(self):
+        claims = {"claims": [{"claim_id": "C%d" % index, "claim_type": "approval" if index == 11 else "causal", "risk_level": "high", "cited_evidence_ids": ["E1"]} for index in range(12)]}
+        selected = select_pro_claim_ids(claims)
+        self.assertEqual(len(selected), 10)
+        self.assertIn("C11", selected)
+
     def test_live_plan_tracks_exactly_three_remaining_topics(self):
         topics = json.loads((ROOT / "tests/fixtures/regression-topics.json").read_text(encoding="utf-8"))["topics"]
         plan = json.loads((ROOT / "tests/fixtures/live-regression-plan.json").read_text(encoding="utf-8"))

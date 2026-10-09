@@ -265,7 +265,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 tier = body.get("tier", "fast")
                 if not isinstance(claims, dict) or not isinstance(evidence_records, list) or not isinstance(source_records, list) or tier not in ("fast", "deep"):
                     raise ValueError("独立核验输入无效")
-                output, usage, metadata = self.server.workflow.verify_claims(claims, evidence_records, source_records, tier)
+                output, usage, metadata = self.server.workflow.verify_claims(claims, evidence_records, source_records, tier, body.get("pro_claim_ids"))
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage, "route": metadata})
                 return
             if path == "/api/final":

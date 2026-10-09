@@ -16,6 +16,14 @@ PRIVATE_STATE_DIR = ROOT / "data" / "private"
 MAX_VERIFICATION_CLAIMS = 120
 
 
+def select_pro_claim_ids(claims, limit=10):
+    type_priority = {"approval": 4, "safety": 3, "efficacy": 2, "causal": 1}
+    risk_priority = {"high": 2, "medium": 1, "low": 0}
+    eligible = [item for item in claims.get("claims", []) if item.get("claim_type") in type_priority and item.get("risk_level") in ("medium", "high")]
+    ranked = sorted(eligible, key=lambda item: (risk_priority[item["risk_level"]], type_priority[item["claim_type"]], len(item.get("cited_evidence_ids", []))), reverse=True)
+    return [item["claim_id"] for item in ranked[:limit]]
+
+
 def set_auth(task_id, token):
     ACTIVE_TASK.update({"id": task_id, "token": token})
 
@@ -94,13 +102,14 @@ def acceptance_failures(result, criteria):
 
 def verify_with_checkpoints(base, task_id, topic, tier, claims, evidence_records, source_records):
     cache = {}
+    pro_claim_ids = select_pro_claim_ids(claims)
 
     def verify_piece(items, kind):
         if kind in cache:
             return cache[kind]
         try:
             partial_claims = {"claim_set_version": claims["claim_set_version"], "claims": items, "extraction_notes": []}
-            saved = post(base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": source_records, "tier": tier})["data"]
+            saved = post(base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": source_records, "pro_claim_ids": pro_claim_ids, "tier": tier})["data"]
         except Exception:
             raise
         persist(base, task_id, "P8", "verification_batch_completed", saved, kind)

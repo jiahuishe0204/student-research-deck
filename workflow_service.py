@@ -466,7 +466,7 @@ class WorkflowService:
         validate_claims(output, evidence_ids)
         return output, usage, {"batches": len(batches)}
 
-    def verify_claims(self, claims, evidence_records, source_records, tier):
+    def verify_claims(self, claims, evidence_records, source_records, tier, pro_claim_ids=None):
         claim_items = [item for item in claims.get("claims", []) if isinstance(item, dict)]
         if not claim_items:
             raise ValueError("独立核验至少需要 1 条声明")
@@ -488,7 +488,8 @@ class WorkflowService:
         representative_results = []
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
         strong_types = {"causal", "efficacy", "safety", "approval"}
-        strong = [item for item in representatives if item.get("claim_type") in strong_types and item.get("risk_level") in ("medium", "high")]
+        eligible = [item for item in representatives if item.get("claim_type") in strong_types and item.get("risk_level") in ("medium", "high")]
+        strong = [item for item in eligible if item.get("claim_id") in set(pro_claim_ids)] if pro_claim_ids is not None else eligible
         standard = [item for item in representatives if item not in strong]
         routes = []
         for batch_group, upgrade, label in ((standard, False, "standard"), (strong, True, "high_risk")):

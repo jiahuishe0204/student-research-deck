@@ -7,7 +7,8 @@ from pathlib import Path
 import urllib.request
 
 from run_live_regression import (
-    ACTIVE_TASK, LOCAL_OPENER, MAX_VERIFICATION_CLAIMS, persist, post, query_from_plan, set_auth,
+    ACTIVE_TASK, LOCAL_OPENER, MAX_VERIFICATION_CLAIMS, persist, post, query_from_plan,
+    select_pro_claim_ids, set_auth,
 )
 
 
@@ -105,12 +106,13 @@ def resume(base, task_id, task_token):
     if verification is None:
         print("[%s] resume P8 (%d claims)" % (task["topic"], len(claims["claims"])), flush=True)
         saved_cache = {kind: value["data"] for kind, value in task["artifacts"].items()}
+        pro_claim_ids = select_pro_claim_ids(claims)
 
         def verify_piece(items, kind):
             if kind in saved_cache:
                 return saved_cache[kind]
             partial_claims = {"claim_set_version": claims["claim_set_version"], "claims": items, "extraction_notes": []}
-            saved = post(base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": selected_sources, "tier": task["tier"]})["data"]
+            saved = post(base, "/api/verify", {"claims": partial_claims, "evidence_records": evidence_records, "source_records": selected_sources, "pro_claim_ids": pro_claim_ids, "tier": task["tier"]})["data"]
             persist(base, task_id, "P8", "verification_batch_completed", saved, kind)
             saved_cache[kind] = saved
             return saved
