@@ -33,6 +33,26 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(output["summary"]["reserve_count"], 5)
         self.assertEqual(usage["total_tokens"], 30)
 
+    def test_screen_sources_drops_harmless_notes_without_retry(self):
+        calls = []
+
+        def client(*args):
+            calls.append(args)
+            source = args[4]["candidate_sources"][0]
+            return {
+                "screening_version":"1", "topic":"topic", "screening_notes":"解释文字",
+                "decisions":[{"source_id":source["source_id"], "status":"keep", "question_ids":["Q1"], "intended_uses":["overview"], "reason":"relevant", "priority":"high", "relevance_score":0.9, "evidence_type":"cohort", "flags":[]}],
+                "summary":{"candidate_count":1, "keep_count":1, "reserve_count":0, "drop_count":0, "open_issues":[]},
+            }, {"total_tokens":10}
+
+        service = WorkflowService("secret", FakeRouter(), "system", {"P3":"screen"}, client)
+        candidates = [{"source_id":"SRC-1", "source":"PubMed", "title":"t", "abstract":"a", "year":"2024", "access":"abstract", "url":"u"}]
+        plan = {"research_scope":"scope", "questions":[], "source_plan":[], "selection_criteria":[]}
+        output, _ = service.screen_sources("topic", plan, candidates, "deep")
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(output["summary"]["keep_count"], 1)
+
     def test_generate_binds_prompt_route_and_client_options(self):
         calls = []
 

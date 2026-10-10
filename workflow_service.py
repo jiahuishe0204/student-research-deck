@@ -216,7 +216,7 @@ class WorkflowService:
                 "intent": planning_intent,
                 "tier": tier, "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
                 "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
-            }, validate_plan, max_tokens=8500 if tier == "deep" else 3600, max_attempts=2,
+            }, validate_plan, max_tokens=6000 if tier == "deep" else 3600, max_attempts=2,
         )
         return output, usage
 
@@ -237,10 +237,19 @@ class WorkflowService:
         for offset in range(0, len(compact), 4):
             batch = compact[offset:offset + 4]
             batch_ids = [item["source_id"] for item in batch]
+
+            def validate_screen_batch(value, ids=batch_ids):
+                # Explanatory prose occasionally arrives in this harmless
+                # top-level field. Dropping it is deterministic and avoids a
+                # paid retry without changing any screening decision.
+                if isinstance(value, dict):
+                    value.pop("screening_notes", None)
+                return validate_screen(value, ids, len(ids))
+
             partial, partial_usage, _ = self.generate(
                 "P3", tier,
                 {"topic": topic, "plan": compact_plan, "candidate_sources": batch, "limits": {"keep_max": len(batch), "tier": tier}, "output_contract": load_contract("P3")},
-                lambda value, ids=batch_ids: validate_screen(value, ids, len(ids)), max_tokens=2100, max_attempts=2,
+                validate_screen_batch, max_tokens=2100, max_attempts=2,
             )
             decisions.extend(partial["decisions"])
             open_issues.extend(partial["summary"].get("open_issues", []))
