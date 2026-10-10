@@ -1,1 +1,11 @@
-目标：依据 intent={{intent}}、plan={{plan}}、evidence_records={{evidence_records}}、evidence_contexts={{evidence_contexts}}、tier={{tier}} 生成完整中文调研报告。快速版完整覆盖基础情况、主要路线、代表进展和限制；深入版按 plan.questions 组织，增加统一比较、冲突、反证、适用条件和验证建议。阅读层级必须以 evidence_contexts 为准，不得在存在 full_text 时声称“全部来自摘要”。重要事实使用合法 evidence_id；无证据内容不硬凑。report_markdown 以 4500—6000 个中文字符为上限，优先保留结论、比较、关键条件和局限，不重复同一背景。本阶段没有图片输入，figure_recommendations 必须为空数组，不得虚构 figure_id；图片由 P6 根据真实 figure_records 编排。输出必须严格符合 P5-report.schema.json，包含版本、标题、report_markdown、used_evidence_ids、figure_recommendations、status 和 open_issues。
+目标：依据 intent={{intent}}、plan={{plan}}、evidence_records={{evidence_records}}、evidence_contexts={{evidence_contexts}}、tier={{tier}} 生成一份可独立阅读、可提交给导师或上级的中文调查研究报告。它不是PPT讲稿的扩写，也不是文献摘要的拼接。
+
+报告开头必须包含“执行摘要”，直接回答中心问题，说明最重要的3—5项发现、总体判断和最关键证据边界；读者只看这一节也能理解结论。随后说明“研究问题与范围”和“方法与证据基础”，包括纳入的来源类型、阅读层级、比较口径和排除范围。正文按 plan.questions 的真实逻辑组织，不套用固定疾病模板。每个主要部分应依次回答：本节问题是什么、关键证据显示什么、研究之间能否比较、结论适用于哪些对象和条件、仍缺什么证据。结尾必须包含“综合结论”和“局限与下一步”。
+
+深入版要建立论证，而不是罗列论文：区分直接研究结果、跨研究比较和作者综合判断；比较时统一人群、干预或技术路线、对照、终点、时间和研究阶段，无法统一时明确说明不能直接比较。优先保留能改变判断的数字、反证、冲突和适用条件。不要逐篇使用“某研究发现……”形成流水账，不要重复背景，不要用“证据不足、尚未核实”代替具体说明；应写清缺少的是哪类研究、哪个终点或哪个人群的数据。
+
+重要事实必须紧邻合法 evidence_id，且只能使用输入中的编号。正文中的证据编号用于内部核验，交付导出时会转换成编号引用和Vancouver参考文献。不得编造作者、期刊、样本量、数值、批准状态或研究结论。阅读层级必须以 evidence_contexts 为准，不得在存在 full_text 时声称“全部来自摘要”，也不得把摘要阅读写成全文核验。
+
+长度要求是硬约束：快速版正文为2000—4000个中文字符；深入版以5000—7000个中文字符为目标，允许范围为4000—8000个中文字符，包括标题但不计算JSON字段。先分配篇幅再写作：执行摘要约8%，范围与方法约12%，主体约65%，综合结论、局限与下一步约15%。若证据不足以达到下限，应将status设为insufficient_evidence，不得用背景、逐篇摘要或重复结论凑字；任何版本不得超过上限。每个一级部分原则上回答一个研究任务，三级标题只在确有独立比较维度时使用。
+
+本阶段没有图片输入，figure_recommendations必须为空数组，不得虚构figure_id；图片由后续阶段根据真实figure_records编排。输出必须严格符合P5-report.schema.json，包含版本、标题、report_markdown、used_evidence_ids、figure_recommendations、status和open_issues。

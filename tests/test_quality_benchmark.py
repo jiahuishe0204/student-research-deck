@@ -2,7 +2,7 @@ import unittest
 
 from contracts import ContractError
 from quality_benchmark import score_ppt_density, score_verification
-from workflow_validation import validate_presentation_voice
+from workflow_validation import validate_presentation_voice, validate_report
 
 
 class QualityBenchmarkTests(unittest.TestCase):
@@ -49,3 +49,13 @@ class QualityBenchmarkTests(unittest.TestCase):
             validate_presentation_voice([{"page_id":"P1","title":"结论","purpose":"总结","on_slide_text":["关键判断："],"speaker_notes":"结论。"}])
         with self.assertRaises(ContractError):
             validate_presentation_voice([{"page_id":"P1","title":"结论","purpose":"总结","on_slide_text":["有效结论"],"speaker_notes":"证据支持该判断。；仍需随访。。"}])
+
+    def test_deep_report_requires_complete_sections_and_bounded_length(self):
+        markdown = "# 报告\n## 执行摘要\n结论。\n## 研究问题与范围\n问题。\n## 方法与证据基础\n方法。\n## 主要发现\n" + ("研究结果支持这一判断[EV::SRC-1::001]。" * 150) + "\n## 综合结论\n结论。\n## 局限与下一步\n局限。"
+        value = {"report_version":"1","report_title":"报告","report_markdown":markdown,"used_evidence_ids":["EV::SRC-1::001"],"figure_recommendations":[],"status":"draft","open_issues":[]}
+        self.assertEqual(validate_report(value, ["EV::SRC-1::001"], "deep"), value)
+
+    def test_deep_report_rejects_overlong_or_incomplete_delivery(self):
+        value = {"report_version":"1","report_title":"报告","report_markdown":"正文" * 4000,"used_evidence_ids":[],"figure_recommendations":[],"status":"draft","open_issues":[]}
+        with self.assertRaises(ContractError):
+            validate_report(value, [], "deep")

@@ -72,6 +72,7 @@ def search_pubmed(query, limit=5):
             if name:
                 authors.append(name)
         abstract = " ".join(text_of(item) for item in data.findall(".//AbstractText"))
+        publication_types = [text_of(item) for item in data.findall(".//PublicationType") if text_of(item)]
         year = text_of(data.find(".//PubDate/Year")) or text_of(data.find(".//ArticleDate/Year"))
         records.append({
             "source": "PubMed", "source_id": "PMID:" + pmid, "pmid": pmid, "doi": doi,
@@ -79,6 +80,7 @@ def search_pubmed(query, limit=5):
             "authors": authors, "journal": text_of(data.find("Journal/Title")), "year": year,
             "volume": text_of(data.find("Journal/JournalIssue/Volume")), "issue": text_of(data.find("Journal/JournalIssue/Issue")),
             "pages": text_of(data.find("Pagination/MedlinePgn")),
+            "publication_types": publication_types,
             "url": "https://pubmed.ncbi.nlm.nih.gov/%s/" % pmid, "access": "abstract",
         })
     return records
@@ -103,6 +105,7 @@ def search_europe_pmc(query, limit=5):
             "journal": item.get("journalTitle", ""), "year": str(item.get("pubYear", "")),
             "volume": item.get("journalVolume", ""), "issue": item.get("issue", ""), "pages": item.get("pageInfo", ""),
             "url": "https://europepmc.org/article/%s/%s" % (source, ext_id),
+            "publication_types": item.get("pubTypeList", {}).get("pubType", []),
             "pmcid": pmcid, "access": "full_text" if item.get("inEPMC") == "Y" and pmcid else "abstract",
         })
     return records

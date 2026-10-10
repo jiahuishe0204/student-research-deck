@@ -216,7 +216,7 @@ class WorkflowService:
                 "intent": planning_intent,
                 "tier": tier, "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
                 "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
-            }, validate_plan, max_tokens=7500 if tier == "deep" else 3600, max_attempts=2,
+            }, validate_plan, max_tokens=8500 if tier == "deep" else 3600, max_attempts=2,
         )
         return output, usage
 
@@ -295,7 +295,7 @@ class WorkflowService:
         output, usage, _ = self.generate(
             "P5", tier,
             {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": evidence_contexts or [], "tier": tier, "output_contract": load_contract("P5")},
-            lambda value: validate_report(value, evidence_ids), max_tokens=7500, max_attempts=2,
+            lambda value: validate_report(value, evidence_ids, tier), max_tokens=6500, max_attempts=2,
         )
         return output, usage
 

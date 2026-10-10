@@ -1,5 +1,7 @@
 """Deterministic cross-stage validation for P1-P9 workflow outputs."""
 
+import re
+
 from contracts import ContractError, validate_stage_output
 
 
@@ -134,10 +136,23 @@ def validate_evidence(value, source_id, source_access=None, allowed_figure_ids=N
     return value
 
 
-def validate_report(value, evidence_ids):
+def validate_report(value, evidence_ids, tier="deep"):
     validate_stage_output("P5", value)
     if not set(value["used_evidence_ids"]).issubset(set(evidence_ids)):
         raise ContractError("P5 使用了不存在的 evidence_id")
+    markdown = str(value.get("report_markdown", ""))
+    limits = {"fast": (2000, 4000), "deep": (4000, 8000)}
+    minimum, maximum = limits.get(tier, limits["deep"])
+    if len(markdown) > maximum:
+        raise ContractError("P5 调研报告超过版本字数上限：%d/%d" % (len(markdown), maximum))
+    if value.get("status") == "draft" and len(markdown) < minimum:
+        raise ContractError("P5 调研报告未达到完整交付的最低篇幅：%d/%d" % (len(markdown), minimum))
+    required_sections = (("执行摘要",), ("研究问题", "问题界定"), ("方法", "证据基础"), ("综合结论", "结论"), ("局限", "证据边界"))
+    if any(not any(term in markdown for term in alternatives) for alternatives in required_sections):
+        raise ContractError("P5 调研报告缺少执行摘要、问题方法、结论或局限部分")
+    cited = set(re.findall(r"EV::.+?::\d{3}", markdown))
+    if not cited.issubset(set(evidence_ids)):
+        raise ContractError("P5 正文使用了不存在的 evidence_id")
     return value
 
 
