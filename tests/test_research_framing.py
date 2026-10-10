@@ -18,9 +18,9 @@ class ResearchFramingTests(unittest.TestCase):
     def test_prompts_define_capability_boundaries_and_dynamic_structure(self):
         p1 = (ROOT / "prompts/P1-intent.md").read_text(encoding="utf-8")
         p2 = (ROOT / "prompts/P2-plan.md").read_text(encoding="utf-8")
-        for term in ("不得检索", "中心问题", "聚焦工作标题", "排除说明"):
+        for term in ("不得检索", "不替用户决定", "2—4个", "交互页面"):
             self.assertIn(term, p1)
-        for term in ("研究原型", "不得预写答案", "研究设计", "聚焦工作标题", "核心判断", "相邻方向", "快速版减少"):
+        for term in ("大故事", "小故事", "不擅自换题", "不强制写成问句", "研究设计", "不得虚构答案"):
             self.assertIn(term, p2)
 
     def test_ppt_prompt_separates_spoken_story_from_internal_audit(self):

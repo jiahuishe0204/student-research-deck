@@ -211,12 +211,25 @@ class WorkflowService:
         planning_intent["normalized_topic"] = normalized
         planning_intent["tier"] = tier
         planning_intent["need_clarification"] = False
+        def validate_planning_output(value):
+            # Explanatory keys inside an otherwise valid retrieval task are
+            # harmless and unused downstream. Strip them locally instead of
+            # paying for a second complete Pro generation.
+            if isinstance(value, dict) and isinstance(value.get("questions"), list):
+                allowed = {"question_id", "question", "evidence_needs"}
+                value["questions"] = [
+                    {key: item[key] for key in allowed if key in item}
+                    if isinstance(item, dict) else item
+                    for item in value["questions"]
+                ]
+            return validate_plan(value)
         output, usage, _ = self.generate(
             "P2", tier, {
                 "intent": planning_intent,
                 "tier": tier, "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
                 "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
-            }, validate_plan, max_tokens=6000 if tier == "deep" else 3600, max_attempts=2,
+                "output_contract": load_contract("P2"),
+            }, validate_planning_output, max_tokens=5200 if tier == "deep" else 3600, max_attempts=2,
         )
         return output, usage
 
@@ -240,10 +253,21 @@ class WorkflowService:
 
             def validate_screen_batch(value, ids=batch_ids):
                 # Explanatory prose occasionally arrives in this harmless
-                # top-level field. Dropping it is deterministic and avoids a
-                # paid retry without changing any screening decision.
+                # top-level field, and models may echo candidate metadata into
+                # a decision. Dropping unused echoes is deterministic and
+                # avoids a paid retry without changing any screening decision.
                 if isinstance(value, dict):
                     value.pop("screening_notes", None)
+                    decision_keys = {
+                        "source_id", "status", "question_ids", "intended_uses",
+                        "reason", "priority", "relevance_score", "evidence_type", "flags",
+                    }
+                    if isinstance(value.get("decisions"), list):
+                        value["decisions"] = [
+                            {key: item[key] for key in decision_keys if key in item}
+                            if isinstance(item, dict) else item
+                            for item in value["decisions"]
+                        ]
                 return validate_screen(value, ids, len(ids))
 
             partial, partial_usage, _ = self.generate(
@@ -251,6 +275,14 @@ class WorkflowService:
                 {"topic": topic, "plan": compact_plan, "candidate_sources": batch, "limits": {"keep_max": len(batch), "tier": tier}, "output_contract": load_contract("P3")},
                 validate_screen_batch, max_tokens=2100, max_attempts=2,
             )
+            decision_keys = {
+                "source_id", "status", "question_ids", "intended_uses",
+                "reason", "priority", "relevance_score", "evidence_type", "flags",
+            }
+            partial["decisions"] = [
+                {key: item[key] for key in decision_keys if key in item}
+                for item in partial["decisions"]
+            ]
             decisions.extend(partial["decisions"])
             open_issues.extend(partial["summary"].get("open_issues", []))
             add_usage(usage, partial_usage)
@@ -301,10 +333,23 @@ class WorkflowService:
         if not 1 <= len(evidence_records) <= 100:
             raise ValueError("至少需要 1 条且最多处理 100 条证据")
         evidence_ids = self._ids(evidence_records, "evidence_id", "证据编号缺失或重复")
+        def validate_report_output(value):
+            if isinstance(value, dict):
+                allowed = set(evidence_ids)
+                value["used_evidence_ids"] = [
+                    item for item in value.get("used_evidence_ids", []) if item in allowed
+                ]
+                markdown = str(value.get("report_markdown", ""))
+                cited = set(re.findall(r"EV::.+?::\d{3}", markdown))
+                for unknown in cited - allowed:
+                    markdown = markdown.replace("[" + unknown + "]", "").replace(unknown, "")
+                value["report_markdown"] = markdown
+            return validate_report(value, evidence_ids, tier)
+
         output, usage, _ = self.generate(
             "P5", tier,
             {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": evidence_contexts or [], "tier": tier, "output_contract": load_contract("P5")},
-            lambda value: validate_report(value, evidence_ids, tier), max_tokens=6500, max_attempts=2,
+            validate_report_output, max_tokens=7500, max_attempts=2,
         )
         return output, usage
 
@@ -448,8 +493,15 @@ class WorkflowService:
             located = False
             if claim["location_type"] == "report_section":
                 markdown, located = replace_once(markdown, original, replacement)
-                if not located and claim["section_or_page_id"].startswith("open_issues_"):
-                    open_issues.append(replacement)
+                if not located and (
+                    claim["section_or_page_id"] == "open_issues"
+                    or claim["section_or_page_id"].startswith("open_issues_")
+                ):
+                    matching = [index for index, item in enumerate(open_issues) if str(item).strip() == str(original).strip()]
+                    if len(matching) == 1:
+                        open_issues[matching[0]] = replacement
+                    else:
+                        open_issues.append(replacement)
                     located = True
             else:
                 page = pages_by_id.get(claim["section_or_page_id"])

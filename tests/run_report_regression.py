@@ -15,16 +15,27 @@ from run_live_regression import (
 def report_queries(plan, fallback):
     concepts = plan.get("search_concepts", {}) if isinstance(plan, dict) else {}
     core = [str(item).strip() for item in concepts.get("core_terms", []) if str(item).strip()]
-    if len(core) < 2:
-        return [fallback]
-    anchor = " AND ".join('"%s"' % item.replace('"', "") for item in core[:3])
-    queries = [anchor]
-    for key in ("efficacy_safety", "microenvironment_barriers", "patient_selection", "combination_strategies"):
-        terms = [str(item).strip() for item in concepts.get(key, []) if str(item).strip()][:3]
-        if terms:
-            detail = " OR ".join('"%s"' % item.replace('"', "") for item in terms)
-            queries.append('"%s" AND "%s" AND (%s)' % (core[0].replace('"', ""), core[1].replace('"', ""), detail))
-    return list(dict.fromkeys(queries))[:5]
+    if len(core) >= 2:
+        anchor = " AND ".join('"%s"' % item.replace('"', "") for item in core[:3])
+        queries = [anchor]
+        for key in ("efficacy_safety", "microenvironment_barriers", "patient_selection", "combination_strategies"):
+            terms = [str(item).strip() for item in concepts.get(key, []) if str(item).strip()][:3]
+            if terms:
+                detail = " OR ".join('"%s"' % item.replace('"', "") for item in terms)
+                queries.append('"%s" AND "%s" AND (%s)' % (core[0].replace('"', ""), core[1].replace('"', ""), detail))
+        return list(dict.fromkeys(queries))[:5]
+
+    # New story-first planners group concepts by content beat rather than by a
+    # fixed key vocabulary. Use their already-curated English phrases directly
+    # instead of falling back to one broad Chinese title query.
+    queries = []
+    for terms in concepts.values():
+        if not isinstance(terms, list):
+            continue
+        candidates = [str(item).strip() for item in terms if str(item).strip()]
+        if candidates:
+            queries.append(candidates[0])
+    return list(dict.fromkeys(queries))[:5] or [fallback]
 
 
 def merge_search_results(results, limit):

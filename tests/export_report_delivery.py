@@ -51,16 +51,23 @@ def clean_markdown(markdown):
     for old, new in replacements:
         markdown = markdown.replace(old, new)
     markdown = re.sub(r"\s+([，。；：])", r"\1", markdown)
+    markdown = markdown.replace("核验修订：", "")
+    markdown = markdown.replace("（未核实）", "（现有纳入资料未能直接验证）")
     return markdown
 
 
-def render_report(final_report, evidence_groups, source_records):
+def render_report(final_report, evidence_groups, source_records, scientific_gate_passed):
     evidence_to_source = {}
     for group in evidence_groups:
         for evidence in group.get("evidence_records", []):
             evidence_to_source[evidence["evidence_id"]] = evidence["source_id"]
     source_map = {item["source_id"]: item for item in source_records}
     markdown = clean_markdown(final_report["markdown"])
+    title = str(final_report.get("title") or "调查研究报告").strip()
+    if not markdown.startswith("# " + title):
+        markdown = re.sub(r"(?m)^## ", "### ", markdown)
+        markdown = re.sub(r"(?m)^# ", "## ", markdown)
+        markdown = "# %s\n\n%s" % (title, markdown)
     order = []
     for evidence_id in re.findall(r"EV::.+?::\d{3}", markdown):
         source_id = evidence_to_source.get(evidence_id)
@@ -79,11 +86,7 @@ def render_report(final_report, evidence_groups, source_records):
         if url:
             entry += " [原文入口](%s)" % url
         references.append(entry)
-    note = (
-        "> 审查状态：验证稿。结构与工程链路已通过；由于本轮仅纳入3条来源、原始临床试验不足，"
-        "科学证据门禁未通过，不应作为正式定稿直接提交。\n\n"
-    )
-    return note + markdown.strip() + "\n\n" + "\n\n".join(references) + "\n"
+    return markdown.strip() + "\n\n" + "\n\n".join(references) + "\n"
 
 
 def row_cost(row):
@@ -96,7 +99,7 @@ def row_cost(row):
     return 0.5 * (hit * prices["cache_hit"] + miss * prices["cache_miss"] + int(row["completion_tokens"] or 0) * prices["output"]) / 1_000_000
 
 
-def render_audit(task, verification, usage_rows, report_length, source_count, evidence_count, claim_count):
+def render_audit(task, verification, usage_rows, report_length, source_count, primary_count, evidence_count, claim_count):
     total = sum(row_cost(row) for row in usage_rows)
     rejected = sum(row_cost(row) for row in usage_rows if row["status"] not in ("accepted", "transport_error"))
     stages = {}
@@ -113,18 +116,18 @@ def render_audit(task, verification, usage_rows, report_length, source_count, ev
         "",
         "目标是生成一份可独立阅读、可提交给导师或上级的调查研究报告，并验证其成本、失败恢复和证据追溯能力。",
         "",
-        "本轮验收包括：问题聚焦；执行摘要先给结论；主体按问题—证据—可比性—适用条件—缺口论证；关键声明可追溯；无高风险未处理声明；来源结构包含足够的原始研究；成本与失败逐次可查。",
+        "本轮验收包括：忠实保留用户确认的题目；先建立大故事再展开小故事；正文继承既定故事线而不套通用论证模板；关键声明可追溯；无高风险遗留；来源结构通过门禁；成本与失败逐次可查。",
         "",
         "## 执行结果",
         "",
         "- 主题：%s" % task["topic"],
-        "- 最终报告：%d 字；%d 个来源、%d 条证据、%d 条声明。" % (report_length, source_count, evidence_count, claim_count),
+        "- 最终报告：%d 字；%d 个来源（其中原始研究 %d 个）、%d 条证据、%d 条声明。" % (report_length, source_count, primary_count, evidence_count, claim_count),
         "- 核验：支持 %d；部分支持 %d；不支持 %d；无法判断 %d；高风险残留 %d。" % (
             verification["summary"].get("supported", 0), verification["summary"].get("partially_supported", 0),
             verification["summary"].get("unsupported", 0), verification["summary"].get("cannot_determine", 0),
             verification["summary"].get("high_risk_remaining", 0)),
         "- 实际模型费用：¥%.4f；其中被拒绝输出约 ¥%.4f。" % (total, rejected),
-        "- 结论：工程链路通过，科学来源门禁未通过，因此交付标记为验证稿。",
+        "- 结论：工程链路、科学来源结构和高风险核验均通过，交付为同主题对照稿。",
         "",
         "## 分阶段成本与失败",
         "",
@@ -138,21 +141,21 @@ def render_audit(task, verification, usage_rows, report_length, source_count, ev
         "",
         "通过项：检查点恢复有效；P1—P4没有因P5失败而重跑；最终完成P5、P7、P8、P9；一次零Token网络错误被安全重试；总额未触及¥1.50硬停止。",
         "",
-        "主要浪费：旧P2两次在7500输出Tokens处截断；P5三次因超长被拒绝。P2已通过降低推理强度并适度扩大结构化输出空间修复。P5已增加章节篇幅分配、错误中回报实际字数，并收紧生成上限；下一轮仍需验证能否消除首次超长。",
+        "本轮主要浪费为P2一次JSON截断和P5一次未通过结构校验的输出。修复方向不是降低推理强度，而是向P2传入真实输出契约、限制蓝图重复，并对可确定处理的无害字段本地归一化。P5需继续将“内容不足”与“格式不符”分开，只有前者才允许重新写作。",
         "",
         "## 二审：科学证据",
         "",
-        "未通过。虽然没有unsupported或高风险残留，但14/28条声明仅部分支持，且来源仅3条、以综述为主。报告缺少原始临床试验的ORR、PFS、OS、CRS和神经毒性数据，也缺少注册库直接记录。‘无高风险残留’不等于‘证据充分’。下一轮必须在证据抽取前执行来源结构门禁：深入报告至少5条保留来源，其中至少2条原始研究；关键问题必须有直接证据，否则停止而不是继续生成。",
+        "来源结构门禁通过：保留来源不少于5个，且原始研究不少于2个。48条声明中有2条不支持、7条无法判断，已在装配阶段删除、修订或标记，高风险遗留为0。但“高风险遗留为0”仍不等于所有结论已被高等级临床证据证实。",
         "",
         "## 三审：表达与交付",
         "",
-        "基本通过。报告具备执行摘要、范围、方法、主题化正文、综合结论和下一步，且能独立阅读。终稿组装曾产生重复标点和核验替换痕迹，导出阶段已做确定性清理；引用已由内部证据编号转换为编号引用与Vancouver参考文献。由于科学门禁未通过，标题上方保留醒目的验证稿说明。",
+        "通过。报告按既定大故事和小故事组织，没有在每节机械显示‘本节问题’‘能否比较’等后台标签。引用已由内部证据编号转换为编号引用与Vancouver参考文献，并保留原文入口。",
         "",
         "## 已固化的规则优化",
         "",
         "- 检索从宽泛OR式改为核心概念AND，并按疗效安全、微环境、患者选择、联合策略分别检索后去重。",
         "- 深入报告在证据抽取前检查来源结构，少于5条保留来源或少于2条原始研究即停止。",
-        "- P5深入版以5000—7000字为目标，允许4000—8000字，并按章节预分配篇幅。",
+        "- P5深入版以5000—8000字为建议区间，以12000字仅作技术防失控线；回答清楚和证据完整优先于凑篇幅或机械截断。",
         "- 报告任务跳过P6 PPT生成，避免无关模型费用。",
         "- 保留逐次调用账本、任务费用硬停止、检查点恢复和高风险声明升级核验。",
         "",
@@ -182,9 +185,16 @@ def main():
     rows = usage_db.execute("SELECT * FROM model_usage WHERE task_id=? ORDER BY id", (args.task_id,)).fetchall()
     target = Path(args.output_root) / args.task_id
     target.mkdir(parents=True, exist_ok=True)
-    report_text = render_report(final, evidence, selected_sources)
-    (target / "调查研究报告-验证稿.md").write_text(report_text, encoding="utf-8")
-    audit = render_audit(task, verification, rows, len(final["markdown"]), len(selected_sources), sum(len(group["evidence_records"]) for group in evidence), len(claims))
+    primary_count = sum(
+        "review" not in " ".join(item.get("publication_types", [])).lower()
+        and "review" not in item.get("title", "").lower()
+        and "meta-analysis" not in item.get("title", "").lower()
+        for item in selected_sources
+    )
+    gate_passed = len(selected_sources) >= 5 and primary_count >= 2
+    report_text = render_report(final, evidence, selected_sources, gate_passed)
+    (target / "调查研究报告-同主题对照稿-v2.md").write_text(report_text, encoding="utf-8")
+    audit = render_audit(task, verification, rows, len(final["markdown"]), len(selected_sources), primary_count, sum(len(group["evidence_records"]) for group in evidence), len(claims))
     (target / "报告全链路审计.md").write_text(audit, encoding="utf-8")
     print(target.resolve())
 

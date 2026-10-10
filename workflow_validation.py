@@ -141,15 +141,18 @@ def validate_report(value, evidence_ids, tier="deep"):
     if not set(value["used_evidence_ids"]).issubset(set(evidence_ids)):
         raise ContractError("P5 使用了不存在的 evidence_id")
     markdown = str(value.get("report_markdown", ""))
-    limits = {"fast": (2000, 4000), "deep": (4000, 8000)}
+    # The lower bound guards against a disguised outline.  The upper bound is
+    # only a technical runaway guard: report depth must not be cut merely to
+    # satisfy the former 8,000-character product target.
+    limits = {"fast": (2000, 8000), "deep": (4000, 12000)}
     minimum, maximum = limits.get(tier, limits["deep"])
     if len(markdown) > maximum:
         raise ContractError("P5 调研报告超过版本字数上限：%d/%d" % (len(markdown), maximum))
     if value.get("status") == "draft" and len(markdown) < minimum:
         raise ContractError("P5 调研报告未达到完整交付的最低篇幅：%d/%d" % (len(markdown), minimum))
-    required_sections = (("执行摘要",), ("研究问题", "问题界定"), ("方法", "证据基础"), ("综合结论", "结论"), ("局限", "证据边界"))
+    required_sections = (("执行摘要", "摘要"), ("研究范围", "研究问题与范围", "问题界定", "研究目的"), ("方法", "证据基础", "资料基础"), ("综合结论", "结论"), ("局限", "证据边界"))
     if any(not any(term in markdown for term in alternatives) for alternatives in required_sections):
-        raise ContractError("P5 调研报告缺少执行摘要、问题方法、结论或局限部分")
+        raise ContractError("P5 调研报告缺少摘要、范围方法、结论或局限部分")
     cited = set(re.findall(r"EV::.+?::\d{3}", markdown))
     if not cited.issubset(set(evidence_ids)):
         raise ContractError("P5 正文使用了不存在的 evidence_id")

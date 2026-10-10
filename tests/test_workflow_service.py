@@ -41,7 +41,7 @@ class WorkflowServiceTests(unittest.TestCase):
             source = args[4]["candidate_sources"][0]
             return {
                 "screening_version":"1", "topic":"topic", "screening_notes":"解释文字",
-                "decisions":[{"source_id":source["source_id"], "status":"keep", "question_ids":["Q1"], "intended_uses":["overview"], "reason":"relevant", "priority":"high", "relevance_score":0.9, "evidence_type":"cohort", "flags":[]}],
+                "decisions":[{"source_id":source["source_id"], "status":"keep", "question_ids":["Q1"], "intended_uses":["overview"], "reason":"relevant", "priority":"high", "relevance_score":0.9, "evidence_type":"cohort", "flags":[], "title":"echoed but unused"}],
                 "summary":{"candidate_count":1, "keep_count":1, "reserve_count":0, "drop_count":0, "open_issues":[]},
             }, {"total_tokens":10}
 
@@ -52,6 +52,7 @@ class WorkflowServiceTests(unittest.TestCase):
 
         self.assertEqual(len(calls), 1)
         self.assertEqual(output["summary"]["keep_count"], 1)
+        self.assertNotIn("title", output["decisions"][0])
 
     def test_generate_binds_prompt_route_and_client_options(self):
         calls = []
@@ -116,6 +117,8 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertIn("只看临床", captured["intent"]["normalized_topic"])
         self.assertIn("疾病定义", captured["intent"]["scope_hint"])
         self.assertEqual(captured["runtime_config"]["source_limit"], 19)
+        self.assertEqual(captured["output_contract"]["type"], "object")
+        self.assertIn("questions", captured["output_contract"]["required"])
 
     def test_ppt_payload_inherits_topic_specific_plan(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
@@ -169,6 +172,23 @@ class WorkflowServiceTests(unittest.TestCase):
         evidence = [{"evidence_id": "EV-1"}, {"evidence_id": "EV-1"}]
         with self.assertRaisesRegex(ValueError, "重复"):
             service.create_report({}, {}, evidence, "fast")
+
+    def test_report_drops_unknown_citation_locally_without_paid_retry(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P5": "report"})
+
+        def generate(stage, tier, payload, validator=None, **options):
+            body = "# 摘要\n摘要。\n# 研究范围\n范围。\n# 资料方法\n方法。\n# 正文\n" + ("有证据的叙述[EV::SRC-1::001]与待核验叙述[EV::SRC-X::999]。" * 100) + "\n# 结论\n结论。\n# 局限\n局限。"
+            value = {
+                "report_version": "1", "report_title": "t", "report_markdown": body,
+                "used_evidence_ids": ["EV::SRC-1::001", "EV::SRC-X::999"], "figure_recommendations": [],
+                "status": "draft", "open_issues": [],
+            }
+            return validator(value), {"total_tokens": 1}, {}
+
+        service.generate = generate
+        output, _ = service.create_report({}, {}, [{"evidence_id": "EV::SRC-1::001"}], "fast")
+        self.assertNotIn("EV::SRC-X::999", output["report_markdown"])
+        self.assertEqual(output["used_evidence_ids"], ["EV::SRC-1::001"])
 
     def test_extract_claims_batches_pages_and_renumbers_claims(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P7": "claims"})
@@ -337,6 +357,30 @@ class WorkflowServiceTests(unittest.TestCase):
         )
 
         self.assertIn("体外实验中", output["final_report"]["markdown"])
+
+    def test_final_assembly_routes_exact_open_issue_claim_to_open_issues(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claim = {
+            "claim_id": "CL-OPEN", "location_type": "report_section", "section_or_page_id": "open_issues",
+            "original_text": "需要前瞻性验证。", "atomic_claim": "需要前瞻性验证。",
+        }
+        verification = {"results": [{
+            "claim_id": "CL-OPEN", "support_status": "cannot_determine", "action": "mark_unverified",
+            "revised_claim": None, "explanation": "证据缺失",
+        }]}
+        report = {"report_title": "t", "report_markdown": "正文", "used_evidence_ids": [], "open_issues": ["需要前瞻性验证。"]}
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "P1", "title": "t", "purpose": "p", "on_slide_text": [],
+            "visual_suggestion": "", "speaker_notes": "", "evidence_ids": [],
+            "figure_refs": [], "source_citations": [],
+        }]}
+
+        output, _ = service.assemble_final_deterministic(
+            verification, report, ppt, [claim], [], [], "1"
+        )
+
+        self.assertTrue(any("未核实" in item for item in output["open_issues"]))
+        self.assertEqual(len(output["open_issues"]), 1)
 
     def test_final_assembly_does_not_overflow_notes_with_verification_append(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})

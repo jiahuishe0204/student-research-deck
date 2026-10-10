@@ -10,6 +10,15 @@ class ReportRegressionTests(unittest.TestCase):
         self.assertIn('"Claudin18.2" AND "CAR-T" AND "gastric cancer"', queries[0])
         self.assertIn("response rate", queries[1])
 
+    def test_report_queries_accept_story_first_concept_groups(self):
+        plan = {"search_concepts": {
+            "therapy_related": ["Claudin18.2 CAR-T", "CT041"],
+            "safety_related": ["CAR-T cytokine release syndrome gastric cancer"],
+        }}
+        self.assertEqual(report_queries(plan, "fallback"), [
+            "Claudin18.2 CAR-T", "CAR-T cytokine release syndrome gastric cancer",
+        ])
+
     def test_merge_search_results_deduplicates_doi(self):
         first = {"query": "q1", "records": [{"source_id":"A", "doi":"10/x", "abstract":"短"}], "errors": []}
         second = {"query": "q2", "records": [{"source_id":"B", "doi":"10/X", "abstract":"更长摘要"}], "errors": []}
