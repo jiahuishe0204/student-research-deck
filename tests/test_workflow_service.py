@@ -96,29 +96,40 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(service.stage_prompts, {"P1": "intent"})
 
     def test_plan_payload_includes_epo_and_preserves_clarification(self):
-        service = WorkflowService("secret", FakeRouter(), "system", {"P2": "plan"})
+        service = WorkflowService("secret", FakeRouter(), "system", {"P2A": "architecture", "P2B": "blueprint"})
         captured = {}
+        stages = []
 
         def generate(stage, tier, payload, validator=None, **options):
-            captured.update(payload)
-            output = {
+            stages.append(stage)
+            captured[stage] = payload
+            if stage == "P2A":
+                return {
+                    "research_scope": "scope", "exclusions": [], "overall_story": "story",
+                    "modules": [{
+                        "module_id": "M%d" % i, "working_title": "t", "content_purpose": "p",
+                        "main_content": "c", "why_it_comes_here": "w", "connection_to_next": None,
+                    } for i in range(3)], "risks": [],
+                }, {"total_tokens": 2}, {}
+            return {
                 "research_scope": "scope", "exclusions": [],
                 "questions": [{"question_id": str(i), "question": "q", "evidence_needs": []} for i in range(3)],
                 "search_concepts": {}, "source_plan": [], "selection_criteria": [], "stop_conditions": [],
                 "report_outline": [], "ppt_story_arc": [], "risks": [],
-            }
-            return output, {"total_tokens": 1}, {}
+            }, {"total_tokens": 3}, {}
 
         service.generate = generate
         intent = {"domain": "life_science", "normalized_topic": "主题", "scope_hint": "按疾病定义、机制、研究方法和干预证据展开", "tier": "deep", "assumptions": [], "need_clarification": False, "clarification_question": None, "confirmation_text": "确认"}
         service.create_plan("主题", "只看临床", "deep", intent)
 
-        self.assertIn("EPO OPS", captured["available_sources"])
-        self.assertIn("只看临床", captured["intent"]["normalized_topic"])
-        self.assertIn("疾病定义", captured["intent"]["scope_hint"])
-        self.assertEqual(captured["runtime_config"]["source_limit"], 19)
-        self.assertEqual(captured["output_contract"]["type"], "object")
-        self.assertIn("questions", captured["output_contract"]["required"])
+        self.assertEqual(stages, ["P2A", "P2B"])
+        self.assertIn("EPO OPS", captured["P2B"]["available_sources"])
+        self.assertIn("只看临床", captured["P2A"]["intent"]["normalized_topic"])
+        self.assertIn("疾病定义", captured["P2A"]["intent"]["scope_hint"])
+        self.assertEqual(captured["P2B"]["runtime_config"]["source_limit"], 19)
+        self.assertEqual(captured["P2A"]["output_contract"]["type"], "object")
+        self.assertIn("questions", captured["P2B"]["output_contract"]["required"])
+        self.assertEqual(captured["P2B"]["research_architecture"]["overall_story"], "story")
 
     def test_ppt_payload_inherits_topic_specific_plan(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
@@ -466,6 +477,34 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertLess(calls[1]["max_tokens"], calls[0]["max_tokens"])
         self.assertEqual(len(output["results"]), 9)
         self.assertEqual(metadata["batches"], 2)
+
+    def test_verify_claims_merges_safe_near_duplicates_before_model_call(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
+        calls = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            batch = payload["claims"]["claims"]
+            calls.append([item["claim_id"] for item in batch])
+            results = [{
+                "claim_id": item["claim_id"], "source_identity": {"matched": True, "source_ids": ["SRC-1"]},
+                "support_status": "supported", "issue_codes": ["none"], "explanation": "supported",
+                "action": "keep", "revised_claim": None, "valid_evidence_ids": ["EV-1"],
+            } for item in batch]
+            return validator({"results": results}), {"total_tokens": 1}, {"model": "flash", "upgraded": False}
+
+        service.generate = generate
+        common = {"cited_evidence_ids": ["EV-1"], "risk_level": "medium", "claim_type": "efficacy"}
+        claims = {"claim_set_version": "1", "claims": [
+            dict(common, claim_id="CL-1", atomic_claim="CT041的ORR为38.8%"),
+            dict(common, claim_id="CL-2", atomic_claim="CT041的ORR为38.8%。"),
+        ]}
+        output, _, metadata = service.verify_claims(
+            claims, [{"evidence_id": "EV-1", "source_id": "SRC-1"}], [{"source_id": "SRC-1"}], "deep"
+        )
+
+        self.assertEqual(calls, [["CL-1"]])
+        self.assertEqual([item["claim_id"] for item in output["results"]], ["CL-1", "CL-2"])
+        self.assertEqual(metadata["unique_claims"], 1)
 
     def test_high_risk_verification_includes_sibling_evidence_from_same_source(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})

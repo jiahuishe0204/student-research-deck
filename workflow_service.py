@@ -6,7 +6,7 @@ import re
 import threading
 from pathlib import Path
 
-from contracts import load_contract
+from contracts import load_contract, validate_stage_output
 from model_client import deepseek_json
 from workflow_validation import (
     PPT_DENSITY_LIMITS,
@@ -211,7 +211,7 @@ class WorkflowService:
         planning_intent["normalized_topic"] = normalized
         planning_intent["tier"] = tier
         planning_intent["need_clarification"] = False
-        def validate_planning_output(value):
+        def validate_blueprint_output(value):
             # Explanatory keys inside an otherwise valid retrieval task are
             # harmless and unused downstream. Strip them locally instead of
             # paying for a second complete Pro generation.
@@ -222,15 +222,42 @@ class WorkflowService:
                     if isinstance(item, dict) else item
                     for item in value["questions"]
                 ]
-            return validate_plan(value)
-        output, usage, _ = self.generate(
-            "P2", tier, {
+            return validate_stage_output("P2B", value)
+
+        architecture, architecture_usage, _ = self.generate(
+            "P2A", tier, {
                 "intent": planning_intent,
-                "tier": tier, "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
-                "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
-                "output_contract": load_contract("P2"),
-            }, validate_planning_output, max_tokens=5200 if tier == "deep" else 3600, max_attempts=2,
+                "tier": tier,
+                "output_contract": load_contract("P2A"),
+            }, lambda value: validate_stage_output("P2A", value),
+            max_tokens=3600 if tier == "deep" else 2800, max_attempts=2,
         )
+        blueprint, blueprint_usage, _ = self.generate(
+            "P2B", tier, {
+                "intent": planning_intent,
+                "research_architecture": architecture,
+                "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
+                "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
+                "output_contract": load_contract("P2B"),
+            }, validate_blueprint_output,
+            max_tokens=4400 if tier == "deep" else 3400, max_attempts=2,
+        )
+        output = {
+            "research_scope": architecture["research_scope"],
+            "exclusions": architecture["exclusions"],
+            "questions": blueprint["questions"],
+            "search_concepts": blueprint["search_concepts"],
+            "source_plan": blueprint["source_plan"],
+            "selection_criteria": blueprint["selection_criteria"],
+            "stop_conditions": blueprint["stop_conditions"],
+            "report_outline": blueprint["report_outline"],
+            "ppt_story_arc": blueprint["ppt_story_arc"],
+            "risks": list(dict.fromkeys(architecture["risks"] + blueprint["risks"])),
+        }
+        validate_plan(output)
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
+        add_usage(usage, architecture_usage)
+        add_usage(usage, blueprint_usage)
         return output, usage
 
     def screen_sources(self, topic, plan, candidates, tier="fast"):
@@ -335,6 +362,11 @@ class WorkflowService:
         evidence_ids = self._ids(evidence_records, "evidence_id", "证据编号缺失或重复")
         def validate_report_output(value):
             if isinstance(value, dict):
+                report_keys = {
+                    "report_version", "report_title", "report_markdown",
+                    "used_evidence_ids", "figure_recommendations", "status", "open_issues",
+                }
+                value = {key: item for key, item in value.items() if key in report_keys}
                 allowed = set(evidence_ids)
                 value["used_evidence_ids"] = [
                     item for item in value.get("used_evidence_ids", []) if item in allowed
@@ -641,13 +673,35 @@ class WorkflowService:
             raise ValueError("独立核验证据编号无效")
         evidence_by_id = {item["evidence_id"]: item for item in evidence_records}
         source_by_id = {item.get("source_id"): item for item in source_records if isinstance(item, dict) and item.get("source_id")}
-        groups = {}
+        groups = []
+
+        def normalized_claim(item):
+            text = re.sub(r"\[[^\]]+\]", "", str(item.get("atomic_claim", "")))
+            return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff%]+", "", text).lower()
+
+        def same_deterministic_claim(left, right):
+            if left.get("claim_type") != right.get("claim_type") or left.get("risk_level") != right.get("risk_level"):
+                return False
+            if set(left.get("cited_evidence_ids", [])) != set(right.get("cited_evidence_ids", [])):
+                return False
+            left_text, right_text = normalized_claim(left), normalized_claim(right)
+            if not left_text or not right_text:
+                return False
+            if left_text == right_text:
+                return True
+            shorter, longer = sorted((left_text, right_text), key=len)
+            if len(shorter) / len(longer) < 0.82 or shorter not in longer:
+                return False
+            return re.findall(r"\d+(?:\.\d+)?%?", left_text) == re.findall(r"\d+(?:\.\d+)?%?", right_text)
+
         for claim in claim_items:
-            normalized = re.sub(r"\s+", "", claim.get("atomic_claim", "")).strip("。；;，,")
-            key = (normalized, tuple(sorted(claim.get("cited_evidence_ids", []))))
-            groups.setdefault(key, []).append(claim)
-        representatives = [items[0] for items in groups.values()]
-        representative_to_group = {items[0]["claim_id"]: items for items in groups.values()}
+            matching = next((items for items in groups if same_deterministic_claim(items[0], claim)), None)
+            if matching is None:
+                groups.append([claim])
+            else:
+                matching.append(claim)
+        representatives = [items[0] for items in groups]
+        representative_to_group = {items[0]["claim_id"]: items for items in groups}
         representative_results = []
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
         strong_types = {"causal", "efficacy", "safety", "approval"}

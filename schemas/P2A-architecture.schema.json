@@ -1,0 +1,11 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+  "required":["research_scope","exclusions","overall_story","modules","risks"],
+  "properties":{
+    "research_scope":{"type":"string","minLength":1},
+    "exclusions":{"type":"array","items":{"type":"string"}},
+    "overall_story":{"type":"string","minLength":1},
+    "modules":{"type":"array","minItems":3,"maxItems":6,"items":{"type":"object","required":["module_id","working_title","content_purpose","main_content","why_it_comes_here","connection_to_next"],"properties":{"module_id":{"type":"string","minLength":1},"working_title":{"type":"string","minLength":1},"content_purpose":{"type":"string","minLength":1},"main_content":{"type":"string","minLength":1},"why_it_comes_here":{"type":"string","minLength":1},"connection_to_next":{"type":["string","null"]}},"additionalProperties":false}},
+    "risks":{"type":"array","items":{"type":"string"}}
+  },"additionalProperties":false
+}

@@ -4,6 +4,8 @@
   "stages": [
     {"id":"P1","name":"intent_detection","prompt":"prompts/P1-intent.md","output_schema":"schemas/P1-intent.schema.json","fast_model_class":"reasoning_high","deep_model_class":"reasoning_high"},
     {"id":"P2","name":"research_planning","prompt":"prompts/P2-plan.md","output_schema":"schemas/P2-plan.schema.json","fast_model_class":"reasoning_high_merged_with_P1","deep_model_class":"reasoning_high"},
+    {"id":"P2A","name":"research_architecture","prompt":"prompts/P2A-architecture.md","output_schema":"schemas/P2A-architecture.schema.json","fast_model_class":"reasoning_high","deep_model_class":"reasoning_high"},
+    {"id":"P2B","name":"section_blueprint","prompt":"prompts/P2B-blueprint.md","output_schema":"schemas/P2B-blueprint.schema.json","fast_model_class":"reasoning_high","deep_model_class":"reasoning_high"},
     {"id":"P3","name":"candidate_screening","prompt":"prompts/P3-screen.md","output_schema":"schemas/P3-screen.schema.json","fast_model_class":"economy","deep_model_class":"economy"},
     {"id":"P4","name":"evidence_extraction","prompt":"prompts/P4-evidence.md","output_schema":"schemas/P4-evidence.schema.json","fast_model_class":"economy","deep_model_class":"economy"},
     {"id":"P5","name":"report_generation","prompt":"prompts/P5-report.md","output_schema":"schemas/P5-report.schema.json","fast_model_class":"economy","deep_model_class":"economy_with_selective_upgrade"},
