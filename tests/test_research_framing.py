@@ -25,8 +25,10 @@ class ResearchFramingTests(unittest.TestCase):
 
     def test_ppt_prompt_separates_spoken_story_from_internal_audit(self):
         p6 = (ROOT / "prompts/P6-ppt.md").read_text(encoding="utf-8")
-        for term in ("现场可以直接说出口", "不是审稿意见", "代表性数据", "集中放在专门页面", "不得为了流畅而虚构"):
+        for term in ("现场可以直接说出口", "学术答辩稿", "不是聊天式解说", "准确术语", "代表性数据", "集中放在专门页面", "不得为了流畅而虚构"):
             self.assertIn(term, p6)
+        for casual_phrase in ("这一页想说明", "我们先看", "那这些", "刚才讲了", "这一页告诉我们"):
+            self.assertIn(casual_phrase, p6)
 
 
 if __name__ == "__main__":

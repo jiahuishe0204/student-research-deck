@@ -28,3 +28,18 @@ class QualityBenchmarkTests(unittest.TestCase):
     def test_spoken_notes_allow_caveats_on_dedicated_limitations_page(self):
         pages = [{"page_id":"P9","title":"研究局限与下一步","purpose":"说明证据边界","speaker_notes":"部分证据不足，临床效果仍未核实。"}]
         self.assertEqual(validate_presentation_voice(pages), pages)
+
+    def test_spoken_notes_reject_chatty_scaffolding_across_deck(self):
+        pages = [
+            {"page_id":"P1","title":"细胞来源","purpose":"解释来源","speaker_notes":"有了中心问题，我们先看细胞来源。"},
+            {"page_id":"P2","title":"驱动机制","purpose":"解释机制","speaker_notes":"刚才讲了来源，下面讨论驱动机制。"},
+        ]
+        with self.assertRaises(ContractError):
+            validate_presentation_voice(pages)
+
+    def test_spoken_notes_allow_academic_defense_register(self):
+        pages = [{
+            "page_id":"P1", "title":"细胞来源", "purpose":"解释来源",
+            "speaker_notes":"首先需要明确成骨样VICs的细胞来源。单细胞测序识别出过渡状态，谱系追踪进一步支持其主要来自驻留间质细胞。",
+        }]
+        self.assertEqual(validate_presentation_voice(pages), pages)

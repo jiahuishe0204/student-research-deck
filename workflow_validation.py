@@ -15,6 +15,10 @@ AUDIT_LANGUAGE = (
     "摘要未提供", "需要进一步查证", "需进一步核实", "没有查到", "没查到",
 )
 LIMITATION_PAGE_TERMS = ("局限", "争议", "研究空白", "证据边界", "不足与展望")
+CASUAL_SPEAKER_LANGUAGE = (
+    "这一页想说明", "我们先看", "那这些", "刚才讲了", "刚才的",
+    "这一页告诉我们", "大家可以看到", "下面来看", "简单来说", "说白了",
+)
 
 
 def validate_ppt_density(pages):
@@ -33,9 +37,10 @@ def validate_ppt_density(pages):
 
 
 def validate_presentation_voice(pages):
-    """Keep internal audit language out of ordinary student-facing speaker notes."""
+    """Keep audit language and chatty scaffolding out of academic-defense notes."""
     ordinary_pages = []
     flagged_pages = []
+    casual_hits = []
     for page in pages:
         title = str(page.get("title", ""))
         purpose = str(page.get("purpose", ""))
@@ -48,8 +53,12 @@ def validate_presentation_voice(pages):
             raise ContractError("PPT 普通页面讲稿反复使用证据审计措辞，应改为可直接讲述的汇报语言")
         if hits:
             flagged_pages.append(page.get("page_id"))
+        if any(term in notes for term in CASUAL_SPEAKER_LANGUAGE):
+            casual_hits.append(page.get("page_id"))
     if ordinary_pages and len(flagged_pages) / len(ordinary_pages) > 0.2:
         raise ContractError("PPT 讲稿中过多普通页面暴露内部证据审计语言，应集中到局限页")
+    if len(casual_hits) > 1:
+        raise ContractError("PPT 讲稿中过多页面使用聊天式串词，应改为专业的学术答辩表达")
     return pages
 
 
