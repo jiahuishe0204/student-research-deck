@@ -599,6 +599,46 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(page["on_slide_text"], [])
         self.assertIn(long_revision, page["speaker_notes"])
 
+    def test_deterministic_final_removes_unique_long_bullet_containing_numeric_claim(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claim = {
+            "claim_id": "CL-1", "location_type": "ppt_slide", "section_or_page_id": "P1",
+            "original_text": "结直肠癌IV期5年相对生存率降至约15%。",
+            "atomic_claim": "结直肠癌IV期5年相对生存率降至约15%。",
+        }
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "unsupported", "action": "remove",
+            "explanation": "引用错配", "revised_claim": None, "valid_evidence_ids": [],
+        }], "summary": {"supported": 0, "partially_supported": 0, "unsupported": 1, "cannot_determine": 0, "high_risk_remaining": 0}}
+        report = {"report_title": "报告", "report_markdown": "正文", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "汇报", "storyline": "证据", "pages": [{
+            "page_id": "P1", "title": "早筛", "purpose": "说明背景",
+            "on_slide_text": ["结直肠癌等癌种分期与预后相关（I期5年相对生存率接近90%，IV期降至约15%）。", "另一条结论"],
+            "visual_suggestion": "示意图", "speaker_notes": "讲稿", "evidence_ids": ["EV-1"],
+            "figure_refs": [], "source_citations": [],
+        }]}
+
+        output, usage = service.assemble_final_deterministic(verification, report, ppt, [claim], ["SRC-1"], ["EV-1"])
+
+        self.assertEqual(output["final_ppt"]["pages"][0]["on_slide_text"], ["另一条结论"])
+        self.assertEqual(usage["total_tokens"], 0)
+
+    def test_deterministic_final_treats_overlapping_removals_as_idempotent(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claims = [
+            {"claim_id": "CL-1", "location_type": "ppt_slide", "section_or_page_id": "P1", "original_text": "结直肠癌等癌种分期与预后相关（I期5年相对生存率接近90%，IV期降至约15%）。", "atomic_claim": "结直肠癌I期5年相对生存率接近90%。"},
+            {"claim_id": "CL-2", "location_type": "ppt_slide", "section_or_page_id": "P1", "original_text": "结直肠癌IV期5年相对生存率降至约15%。", "atomic_claim": "结直肠癌IV期5年相对生存率降至约15%。"},
+        ]
+        results = [{"claim_id": item["claim_id"], "support_status": "unsupported", "action": "remove", "explanation": "引用错配", "revised_claim": None, "valid_evidence_ids": []} for item in claims]
+        verification = {"results": results, "summary": {"supported": 0, "partially_supported": 0, "unsupported": 2, "cannot_determine": 0, "high_risk_remaining": 0}}
+        report = {"report_title": "报告", "report_markdown": "正文", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "汇报", "storyline": "证据", "pages": [{"page_id": "P1", "title": "早筛", "purpose": "背景", "on_slide_text": [claims[0]["original_text"], "另一条结论"], "visual_suggestion": "示意图", "speaker_notes": "讲稿", "evidence_ids": ["EV-1"], "figure_refs": [], "source_citations": []}]}
+
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
+
+        self.assertEqual(output["final_ppt"]["pages"][0]["on_slide_text"], ["另一条结论"])
+        self.assertEqual([item["action"] for item in output["change_log"]], ["removed", "removed"])
+
 
 if __name__ == "__main__":
     unittest.main()

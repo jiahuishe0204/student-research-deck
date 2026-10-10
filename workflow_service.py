@@ -194,7 +194,7 @@ class WorkflowService:
             raise ValueError("请输入 2—500 字的主题并选择有效版本")
         output, usage, _ = self.generate(
             "P1", tier, {"topic": topic, "tier": tier, "runtime_config": {"language": "zh-CN"}},
-            validate_intent, max_tokens=2600, max_attempts=2,
+            validate_intent, max_tokens=4200, max_attempts=2,
         )
         return output, usage
 
@@ -383,6 +383,21 @@ class WorkflowService:
             page["speaker_notes"] = candidate
             return True
 
+        def unique_embedded_numeric_line(page, claim_text):
+            """Locate one longer slide bullet that conservatively contains a numeric claim."""
+            numeric_anchors = re.findall(r"(?:[IVX]+期|\d+(?:\.\d+)?%?)", claim_text)
+            han = "".join(re.findall(r"[\u4e00-\u9fff]", claim_text))
+            bigrams = {han[index:index + 2] for index in range(max(0, len(han) - 1))}
+            if not numeric_anchors or len(bigrams) < 4:
+                return None
+            matches = []
+            for index, line in enumerate(page.get("on_slide_text", [])):
+                text = str(line)
+                coverage = sum(item in text for item in bigrams) / len(bigrams)
+                if all(anchor in text for anchor in numeric_anchors) and coverage >= 0.7:
+                    matches.append(index)
+            return matches[0] if len(matches) == 1 else None
+
         def slide_replacement(page, index, candidate, replacement, claim_id):
             other_characters = sum(len(str(line)) for position, line in enumerate(page.get("on_slide_text", [])) if position != index)
             if len(replacement) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and len(candidate) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and other_characters + len(candidate) <= PPT_DENSITY_LIMITS["page_characters_max"]:
@@ -446,6 +461,11 @@ class WorkflowService:
                                 break
                         if not located:
                             page["speaker_notes"], located = replace_once(page.get("speaker_notes", ""), original, replacement)
+                        if not located and action == "remove" and claim["location_type"] == "ppt_slide":
+                            embedded_index = unique_embedded_numeric_line(page, atomic or original)
+                            if embedded_index is not None:
+                                page["on_slide_text"].pop(embedded_index)
+                                located = True
             if not located:
                 originally_located = False
                 if claim["location_type"] == "report_section":
@@ -458,6 +478,8 @@ class WorkflowService:
                         str(original_page.get("visual_suggestion", "")), str(original_page.get("speaker_notes", "")),
                     ])
                     _, originally_located = replace_once(original_text, original, "")
+                    if not originally_located and action == "remove" and claim["location_type"] == "ppt_slide":
+                        originally_located = unique_embedded_numeric_line(original_page, atomic or original) is not None
                 if originally_located:
                     if replacement and claim["location_type"] == "report_section":
                         markdown += "\n\n核验修订：%s" % replacement
@@ -474,10 +496,17 @@ class WorkflowService:
                 if not located:
                     raise ValueError("无法在交付物中定位声明 %s，拒绝生成未落实核验结论的终稿" % claim["claim_id"])
 
+        def clean_assembly_punctuation(value):
+            text = str(value or "")
+            text = re.sub(r"。{2,}", "。", text)
+            text = re.sub(r"；{2,}", "；", text)
+            text = text.replace("。；", "。").replace("；。", "。").replace(".。", "。")
+            return text.strip()
+
         final_pages = [{
             "page_id": page.get("page_id"), "title": page.get("title"), "purpose": page.get("purpose", ""),
-            "on_slide_text": [item for item in page.get("on_slide_text", []) if str(item).strip()], "visual_suggestion": page.get("visual_suggestion", ""),
-            "speaker_notes": page.get("speaker_notes", ""), "evidence_ids": page.get("evidence_ids", []),
+            "on_slide_text": [clean_assembly_punctuation(item) for item in page.get("on_slide_text", []) if clean_assembly_punctuation(item) and not (len(clean_assembly_punctuation(item)) < 20 and clean_assembly_punctuation(item).endswith(("：", ":")))], "visual_suggestion": page.get("visual_suggestion", ""),
+            "speaker_notes": clean_assembly_punctuation(page.get("speaker_notes", "")), "evidence_ids": page.get("evidence_ids", []),
             "figure_refs": page.get("figure_refs", []), "source_citations": page.get("source_citations", []),
         } for page in pages]
         output = {

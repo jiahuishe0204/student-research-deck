@@ -8,7 +8,6 @@ import time
 import urllib.error
 import urllib.request
 
-
 def read_with_deadline(response, timeout_seconds):
     """Read chunked responses with a total wall-clock deadline, not an idle-only timeout."""
     deadline = time.monotonic() + max(1, float(timeout_seconds))
@@ -19,7 +18,10 @@ def read_with_deadline(response, timeout_seconds):
             raise TimeoutError("模型响应超过单次总时间上限")
         try:
             sock = response.fp.raw._sock
-            sock.settimeout(min(15.0, remaining))
+            # The API can remain silent while a reasoning model is working.
+            # Use the remaining wall-clock budget instead of treating a quiet
+            # interval as a disconnected response.
+            sock.settimeout(max(1.0, remaining))
         except AttributeError:
             pass
         chunk = response.read(65536)

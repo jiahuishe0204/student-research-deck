@@ -13,6 +13,7 @@ PPT_DENSITY_LIMITS = {
 AUDIT_LANGUAGE = (
     "证据不足", "未核实", "开放问题", "无法确认", "无法核查",
     "摘要未提供", "需要进一步查证", "需进一步核实", "没有查到", "没查到",
+    "所引证据未直接", "本次可获取证据",
 )
 LIMITATION_PAGE_TERMS = ("局限", "争议", "研究空白", "证据边界", "不足与展望")
 CASUAL_SPEAKER_LANGUAGE = (
@@ -48,6 +49,12 @@ def validate_presentation_voice(pages):
             continue
         ordinary_pages.append(page)
         notes = str(page.get("speaker_notes", ""))
+        bullets = [str(item).strip() for item in page.get("on_slide_text", [])]
+        if any((len(item) < 20 and item.endswith(("：", ":"))) for item in bullets):
+            raise ContractError("PPT 核验装配后留下空标签或残句，应在交付前清理")
+        combined = "\n".join(bullets + [notes])
+        if any(pattern in combined for pattern in ("。。", "。；", "；。", ".。")):
+            raise ContractError("PPT 核验装配后出现断裂标点，应在交付前清理")
         hits = sum(notes.count(term) for term in AUDIT_LANGUAGE)
         if hits > 1:
             raise ContractError("PPT 普通页面讲稿反复使用证据审计措辞，应改为可直接讲述的汇报语言")

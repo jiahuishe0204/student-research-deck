@@ -41,6 +41,26 @@ class ModelClientTests(unittest.TestCase):
             def __init__(self): self.parts = [b'{"ok":', b'true}', b'']
             def read(self, amount=None): return self.parts.pop(0)
         self.assertEqual(read_with_deadline(Chunked(), 1), b'{"ok":true}')
+
+    def test_response_reader_uses_remaining_total_deadline_for_reasoning_gaps(self):
+        class Socket:
+            timeout = None
+            def settimeout(self, value): self.timeout = value
+        class Raw:
+            _sock = Socket()
+        class FP:
+            raw = Raw()
+        class Response:
+            fp = FP()
+            def __init__(self): self.finished = False
+            def read(self, amount=None):
+                if self.finished: return b""
+                self.finished = True
+                return b"{}"
+        response = Response()
+        self.assertEqual(read_with_deadline(response, 300), b"{}")
+        self.assertGreaterEqual(response.fp.raw._sock.timeout, 299.0)
+
     def test_validation_failure_retries_and_accumulates_usage(self):
         replies = [
             FakeResponse({"choices": [{"message": {"content": '{"ok": false}'}}], "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}),

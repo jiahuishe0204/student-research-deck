@@ -43,3 +43,9 @@ class QualityBenchmarkTests(unittest.TestCase):
             "speaker_notes":"首先需要明确成骨样VICs的细胞来源。单细胞测序识别出过渡状态，谱系追踪进一步支持其主要来自驻留间质细胞。",
         }]
         self.assertEqual(validate_presentation_voice(pages), pages)
+
+    def test_post_verification_readability_rejects_dangling_label_and_broken_punctuation(self):
+        with self.assertRaises(ContractError):
+            validate_presentation_voice([{"page_id":"P1","title":"结论","purpose":"总结","on_slide_text":["关键判断："],"speaker_notes":"结论。"}])
+        with self.assertRaises(ContractError):
+            validate_presentation_voice([{"page_id":"P1","title":"结论","purpose":"总结","on_slide_text":["有效结论"],"speaker_notes":"证据支持该判断。；仍需随访。。"}])
