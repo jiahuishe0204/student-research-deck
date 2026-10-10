@@ -194,7 +194,7 @@ class WorkflowService:
             raise ValueError("请输入 2—500 字的主题并选择有效版本")
         output, usage, _ = self.generate(
             "P1", tier, {"topic": topic, "tier": tier, "runtime_config": {"language": "zh-CN"}},
-            validate_intent, max_tokens=1800, max_attempts=2,
+            validate_intent, max_tokens=2600, max_attempts=2,
         )
         return output, usage
 
@@ -272,6 +272,11 @@ class WorkflowService:
             {"source_record": compact, "source_text": source_text, "figure_candidates": source_record.get("figure_candidates", []), "question_ids": question_ids, "limits": {"evidence_records_max": 8, "figure_records_max": 4}, "output_contract": load_contract("P4")},
             lambda value: validate_evidence(value, source_id, source_record.get("access"), allowed_figure_ids, 8, 4), max_tokens=4500, max_attempts=2,
         )
+        # Each source is extracted independently, so model-local EV-001 style IDs
+        # are not globally unique. Namespace them deterministically before they
+        # can be merged into a report task.
+        for index, evidence in enumerate(output["evidence_records"], 1):
+            evidence["evidence_id"] = "EV::%s::%03d" % (source_id, index)
         candidates_by_id = {item.get("figure_id"): item for item in source_record.get("figure_candidates", [])}
         for figure in output["figure_records"]:
             candidate = candidates_by_id.get(figure["figure_id"], {})
@@ -370,15 +375,21 @@ class WorkflowService:
             return text, False
 
         def append_verification_note(page, claim_id, replacement):
-            note = "核验修订（%s）：%s" % (claim_id, replacement)
-            page["speaker_notes"] = (str(page.get("speaker_notes", "")).strip() + "\n" + note).strip()
+            note = replacement
+            current = str(page.get("speaker_notes", "")).strip()
+            candidate = (current + "\n" + note).strip()
+            if len(candidate) > PPT_DENSITY_LIMITS["speaker_notes_max"]:
+                return False
+            page["speaker_notes"] = candidate
+            return True
 
         def slide_replacement(page, index, candidate, replacement, claim_id):
             other_characters = sum(len(str(line)) for position, line in enumerate(page.get("on_slide_text", [])) if position != index)
             if len(replacement) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and len(candidate) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and other_characters + len(candidate) <= PPT_DENSITY_LIMITS["page_characters_max"]:
                 return candidate
-            append_verification_note(page, claim_id, replacement)
-            return "该结论已按证据限定，完整修订见备注。"
+            if append_verification_note(page, claim_id, replacement):
+                return ""
+            return ""
 
         for claim in claims:
             result = results[claim["claim_id"]]
@@ -387,9 +398,29 @@ class WorkflowService:
             if action == "keep":
                 continue
             original = claim["original_text"]
+            atomic = str(claim.get("atomic_claim") or "").strip()
+            if claim["location_type"] == "report_section":
+                search_space = markdown
+            else:
+                search_page = pages_by_id.get(claim["section_or_page_id"], {})
+                search_space = "\n".join([
+                    str(search_page.get("title", "")), str(search_page.get("purpose", "")),
+                    "\n".join(search_page.get("on_slide_text", [])),
+                    str(search_page.get("visual_suggestion", "")), str(search_page.get("speaker_notes", "")),
+                ])
+            if original not in search_space and atomic and atomic.rstrip("。；;，,") in search_space:
+                original = atomic
             replacement = result.get("revised_claim") or ""
             if action == "mark_unverified":
-                replacement = (replacement or original) + "（未核实）"
+                if claim["location_type"] == "report_section":
+                    replacement = (replacement or original) + "（未核实）"
+                else:
+                    page_for_limit = pages_by_id.get(claim["section_or_page_id"], {})
+                    page_context = str(page_for_limit.get("title", "")) + str(page_for_limit.get("purpose", ""))
+                    if any(term in page_context for term in ("局限", "争议", "研究空白", "证据边界", "不足与展望")):
+                        replacement = (replacement or original) + "（未核实）"
+                    else:
+                        replacement = ""
             located = False
             if claim["location_type"] == "report_section":
                 markdown, located = replace_once(markdown, original, replacement)
@@ -433,7 +464,7 @@ class WorkflowService:
                     elif replacement and page and claim["location_type"] == "ppt_speaker_note":
                         page["speaker_notes"] = (page.get("speaker_notes", "") + " 核验修订：" + replacement).strip()
                     elif replacement and page:
-                        candidate = "核验修订：" + replacement
+                        candidate = replacement
                         if len(candidate) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and sum(len(str(line)) for line in page.get("on_slide_text", [])) + len(candidate) <= PPT_DENSITY_LIMITS["page_characters_max"]:
                             page.setdefault("on_slide_text", []).append(candidate)
                         else:

@@ -3,8 +3,29 @@
 import http.client
 import json
 import os
+import socket
+import time
 import urllib.error
 import urllib.request
+
+
+def read_with_deadline(response, timeout_seconds):
+    """Read chunked responses with a total wall-clock deadline, not an idle-only timeout."""
+    deadline = time.monotonic() + max(1, float(timeout_seconds))
+    chunks = []
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("模型响应超过单次总时间上限")
+        try:
+            sock = response.fp.raw._sock
+            sock.settimeout(min(15.0, remaining))
+        except AttributeError:
+            pass
+        chunk = response.read(65536)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
 
 
 def parse_json_object(content):
@@ -56,7 +77,7 @@ def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", 
         )
         try:
             with urllib.request.urlopen(request, timeout=request_timeout) as response:
-                data = json.loads(response.read().decode("utf-8"))
+                data = json.loads(read_with_deadline(response, request_timeout).decode("utf-8"))
         except urllib.error.HTTPError as exc:
             if usage_callback:
                 usage_callback(attempt + 1, "http_error", {}, {"status": exc.code})
@@ -66,7 +87,11 @@ def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", 
             if attempt + 1 < max_attempts:
                 continue
             raise
-        except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (
+            http.client.IncompleteRead, http.client.RemoteDisconnected,
+            urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError,
+            json.JSONDecodeError,
+        ) as exc:
             if usage_callback:
                 usage_callback(attempt + 1, "transport_error", {}, {"error": type(exc).__name__})
             last_error = exc

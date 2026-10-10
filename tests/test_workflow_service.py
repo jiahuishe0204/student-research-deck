@@ -121,6 +121,28 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(output["extraction_status"], "no_extractable_evidence")
         self.assertEqual(usage["total_tokens"], 0)
 
+    def test_evidence_ids_are_namespaced_by_source(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P4": "evidence"})
+
+        def generate(stage, tier, payload, validator=None, **options):
+            output = {
+                "evidence_version": "1", "source_id": "SRC-1", "extraction_status": "extracted",
+                "reading_scope": "abstract", "figure_records": [], "no_extractable_reason": None,
+                "evidence_records": [{
+                    "evidence_id": "EV-001", "source_id": "SRC-1", "question_ids": ["Q1"],
+                    "fact": "fact", "excerpt": "quote", "locator": "abstract",
+                    "evidence_type": "observation", "conditions": [], "limitations": [],
+                }],
+            }
+            return validator(output), {"total_tokens": 1}, {}
+
+        service.generate = generate
+        output, _ = service.extract_evidence(
+            {"source_id": "SRC-1", "source": "PubMed", "abstract": "text", "access": "abstract"},
+            ["Q1"], "fast",
+        )
+        self.assertEqual(output["evidence_records"][0]["evidence_id"], "EV::SRC-1::001")
+
     def test_service_rejects_duplicate_evidence_before_model_call(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P5": "report"})
         service.generate = lambda *args, **kwargs: self.fail("invalid input must not call model")
@@ -272,6 +294,75 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(result["action"], "remove")
         self.assertIsNone(result["revised_claim"])
         self.assertEqual(result["valid_evidence_ids"], ["EV-1"])
+
+    def test_final_assembly_falls_back_to_atomic_claim_when_original_text_drifted(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claim = {
+            "claim_id": "CL-1", "location_type": "report_section", "section_or_page_id": "body",
+            "original_text": "震荡剪切应力使炎症基因升高", "atomic_claim": "振荡剪切应力使炎症基因升高。",
+        }
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "体外实验中，振荡剪切应力使炎症基因升高。", "explanation": "补充条件",
+        }]}
+        report = {"report_title": "t", "report_markdown": "研究显示振荡剪切应力使炎症基因升高[EV-1]。", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "P1", "title": "title", "purpose": "", "on_slide_text": ["text"],
+            "visual_suggestion": "", "speaker_notes": "", "evidence_ids": ["EV-1"],
+            "figure_refs": [], "source_citations": [],
+        }]}
+
+        output, _ = service.assemble_final_deterministic(
+            verification, report, ppt, [claim], ["SRC-1"], ["EV-1"], "1"
+        )
+
+        self.assertIn("体外实验中", output["final_report"]["markdown"])
+
+    def test_final_assembly_does_not_overflow_notes_with_verification_append(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claim = {
+            "claim_id": "CL-1", "location_type": "ppt_slide", "section_or_page_id": "P1",
+            "original_text": "原结论", "atomic_claim": "原结论",
+        }
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "修订" * 100, "explanation": "补充条件",
+        }]}
+        report = {"report_title": "t", "report_markdown": "report", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "P1", "title": "title", "purpose": "", "on_slide_text": ["原结论"],
+            "visual_suggestion": "", "speaker_notes": "讲稿" * 300, "evidence_ids": ["EV-1"],
+            "figure_refs": [], "source_citations": [],
+        }]}
+        output, _ = service.assemble_final_deterministic(
+            verification, report, ppt, [claim], ["SRC-1"], ["EV-1"], "1"
+        )
+        page = output["final_ppt"]["pages"][0]
+        self.assertLessEqual(len(page["speaker_notes"]), 800)
+        self.assertEqual(page["on_slide_text"], [])
+
+    def test_final_assembly_removes_unverified_claim_from_ordinary_spoken_notes(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claim = {
+            "claim_id": "CL-1", "location_type": "ppt_speaker_note", "section_or_page_id": "P1",
+            "original_text": "尚未得到验证的结论", "atomic_claim": "尚未得到验证的结论",
+        }
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "cannot_determine", "action": "mark_unverified",
+            "revised_claim": None, "explanation": "证据缺失",
+        }]}
+        report = {"report_title": "t", "report_markdown": "report", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "P1", "title": "核心机制", "purpose": "解释机制", "on_slide_text": ["可靠结论"],
+            "visual_suggestion": "", "speaker_notes": "先讲可靠发现。尚未得到验证的结论。然后进入下一页。",
+            "evidence_ids": ["EV-1"], "figure_refs": [], "source_citations": [],
+        }]}
+        output, _ = service.assemble_final_deterministic(
+            verification, report, ppt, [claim], ["SRC-1"], ["EV-1"], "1"
+        )
+        notes = output["final_ppt"]["pages"][0]["speaker_notes"]
+        self.assertNotIn("未核实", notes)
+        self.assertNotIn("尚未得到验证的结论", notes)
 
     def test_verify_claims_uses_dynamic_batches_and_only_cited_evidence(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
@@ -482,7 +573,7 @@ class WorkflowServiceTests(unittest.TestCase):
 
         output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
 
-        self.assertIn("核验修订：多数证据为摘要级", output["final_ppt"]["pages"][0]["on_slide_text"][-1])
+        self.assertIn("多数证据为摘要级", output["final_ppt"]["pages"][0]["on_slide_text"][-1])
 
     def test_deterministic_final_moves_long_slide_revision_to_notes(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})
@@ -505,9 +596,8 @@ class WorkflowServiceTests(unittest.TestCase):
         output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
         page = output["final_ppt"]["pages"][0]
 
-        self.assertEqual(page["on_slide_text"], ["该结论已按证据限定，完整修订见备注。"])
+        self.assertEqual(page["on_slide_text"], [])
         self.assertIn(long_revision, page["speaker_notes"])
-        self.assertLessEqual(len(page["on_slide_text"][0]), 80)
 
 
 if __name__ == "__main__":

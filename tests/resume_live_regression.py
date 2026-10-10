@@ -8,7 +8,7 @@ import urllib.request
 
 from run_live_regression import (
     ACTIVE_TASK, LOCAL_OPENER, MAX_VERIFICATION_CLAIMS, persist, post, query_from_plan,
-    select_pro_claim_ids, set_auth,
+    namespace_evidence_groups, select_pro_claim_ids, set_auth,
 )
 
 
@@ -78,6 +78,8 @@ def resume(base, task_id, task_token):
         persist(base, task_id, "P4", "evidence_completed", {"groups": groups}, "evidence")
     else:
         groups = evidence_artifact["groups"]
+    namespace_evidence_groups(groups)
+    persist(base, task_id, "P4", "evidence_ids_namespaced", {"groups": groups}, "evidence")
     evidence_records = [item for group in groups for item in group["evidence_records"]]
     figure_records = [item for group in groups for item in group["figure_records"]]
     evidence_ids = [item["evidence_id"] for item in evidence_records]

@@ -16,6 +16,15 @@ PRIVATE_STATE_DIR = ROOT / "data" / "private"
 MAX_VERIFICATION_CLAIMS = 120
 
 
+def namespace_evidence_groups(groups):
+    """Repair legacy per-source evidence IDs without another model call."""
+    for group in groups:
+        source_id = group["source_id"]
+        for index, evidence in enumerate(group.get("evidence_records", []), 1):
+            evidence["evidence_id"] = "EV::%s::%03d" % (source_id, index)
+    return groups
+
+
 def select_pro_claim_ids(claims, limit=10):
     type_priority = {"approval": 4, "safety": 3, "efficacy": 2, "causal": 1}
     risk_priority = {"high": 2, "medium": 1, "low": 0}
@@ -170,6 +179,8 @@ def run_topic(base, topic, tier):
     figure_records = [item for group in evidence_groups for item in group["figure_records"]]
     if not evidence_records:
         raise RuntimeError("%s produced no extractable evidence" % topic)
+    namespace_evidence_groups(evidence_groups)
+    evidence_records = [item for group in evidence_groups for item in group["evidence_records"]]
     persist(base, task_id, "P4", "evidence_completed", {"groups": evidence_groups}, "evidence")
 
     print("[%s] P5 report" % topic, flush=True)
