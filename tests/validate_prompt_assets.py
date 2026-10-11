@@ -3,7 +3,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 registry = json.loads((ROOT / "config/prompt-stages.json").read_text())
-assert [s["id"] for s in registry["stages"]] == [f"P{i}" for i in range(1, 10)]
+stage_ids = [s["id"] for s in registry["stages"]]
+assert stage_ids == ["P1", "P2", "P2A", "P2B", "P3", "P4", "P5", "P6", "P7", "P8", "P9"]
+assert {f"P{i}" for i in range(1, 10)} <= set(stage_ids)
 assert (ROOT / registry["global_prompt"]).exists()
 
 for stage in registry["stages"]:
