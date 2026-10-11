@@ -72,13 +72,28 @@ def validate_presentation_voice(pages):
 
 
 def validate_intent(value):
-    required = {"domain", "normalized_topic", "scope_hint", "tier", "assumptions", "need_clarification", "clarification_question", "confirmation_text"}
+    required = {"domain", "normalized_topic", "scope_hint", "tier", "assumptions", "topic_breadth", "direction_options", "need_clarification", "clarification_question", "confirmation_text"}
     if not isinstance(value, dict) or set(value) != required:
         raise ValueError("意图识别返回字段不完整")
     if not isinstance(value["need_clarification"], bool):
         raise ValueError("澄清状态无效")
     if value["need_clarification"] and not isinstance(value["clarification_question"], str):
         raise ValueError("需要澄清时必须返回一个问题")
+    breadth = value["topic_breadth"]
+    if breadth not in {"focused", "broad", "ambiguous", "out_of_scope"}:
+        raise ValueError("主题范围判断无效")
+    options = value["direction_options"]
+    if not isinstance(options, list):
+        raise ValueError("研究方向选项必须为数组")
+    if breadth == "broad" and (not value["need_clarification"] or not 2 <= len(options) <= 4):
+        raise ValueError("宽泛主题必须返回2—4个方向并等待用户选择")
+    if breadth != "broad" and options:
+        raise ValueError("只有宽泛主题可以返回研究方向卡片")
+    option_keys = {"direction_id", "title", "focus"}
+    if any(not isinstance(item, dict) or set(item) != option_keys or not all(isinstance(item[key], str) and item[key].strip() for key in option_keys) for item in options):
+        raise ValueError("研究方向卡片字段无效")
+    if len({item["direction_id"] for item in options}) != len(options):
+        raise ValueError("研究方向编号不能重复")
     return value
 
 

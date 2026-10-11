@@ -119,7 +119,7 @@ class WorkflowServiceTests(unittest.TestCase):
             }, {"total_tokens": 3}, {}
 
         service.generate = generate
-        intent = {"domain": "life_science", "normalized_topic": "主题", "scope_hint": "按疾病定义、机制、研究方法和干预证据展开", "tier": "deep", "assumptions": [], "need_clarification": False, "clarification_question": None, "confirmation_text": "确认"}
+        intent = {"domain": "life_science", "normalized_topic": "主题", "scope_hint": "按疾病定义、机制、研究方法和干预证据展开", "tier": "deep", "assumptions": [], "topic_breadth": "focused", "direction_options": [], "need_clarification": False, "clarification_question": None, "confirmation_text": "确认"}
         service.create_plan("主题", "只看临床", "deep", intent)
 
         self.assertEqual(stages, ["P2A", "P2B"])

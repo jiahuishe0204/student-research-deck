@@ -54,7 +54,7 @@ def main():
         item={"case_id":case['id'],"run":run,"stage":case['stage'],"model":case['model'],"effort":case['effort'],"elapsed_seconds":elapsed,"usage":usage,"output":parsed}
         results.append(item)
         (out/f"{case['id']}-run{run}.json").write_text(json.dumps(item,ensure_ascii=False,indent=2))
-    p1_keys={'domain','normalized_topic','scope_hint','tier','assumptions','need_clarification','clarification_question','confirmation_text'}
+    p1_keys={'domain','normalized_topic','scope_hint','tier','assumptions','topic_breadth','direction_options','need_clarification','clarification_question','confirmation_text'}
     p2_keys={'research_scope','exclusions','questions','search_concepts','source_plan','selection_criteria','stop_conditions','report_outline','ppt_story_arc','risks'}
     def assess(r):
       output=r['output']; expected=p1_keys if r['stage']=='P1' else p2_keys

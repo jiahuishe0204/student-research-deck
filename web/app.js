@@ -1,6 +1,6 @@
 const $=selector=>document.querySelector(selector);
 const form=$('#intent-form'),task=$('#task'),result=$('#intent-result'),title=$('#intent-title'),copy=$('#intent-copy'),error=$('#error'),confirmButton=$('#confirm');
-let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,currentTaskToken=null,taskPaused=false;
+let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',selectedDirection=null,currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,currentTaskToken=null,taskPaused=false;
 const taskSessionKey='research-delivery.active-task.v1';
 
 const previews={
@@ -32,17 +32,20 @@ form.addEventListener('submit',async event=>{
     const taskResponse=await request('/api/tasks',{topic:currentTopic,tier:currentTier});currentTaskId=taskResponse.data.task_id;currentTaskToken=taskResponse.data.owner_token;saveTaskSession();
     const response=await request('/api/intent',{topic:currentTopic,tier:currentTier});currentIntent=response.data;
     await persistStage('P1','intent_completed',currentIntent,'intent');
-    title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);
-    $('#clarification-wrap').hidden=!currentIntent.need_clarification;$('#clarification').value='';
-    confirmButton.innerHTML=currentIntent.need_clarification?'回答后生成工作规划 <span>→</span>':'确认并生成工作规划 <span>→</span>';
+    selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);
+    const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');
+    directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');
+    $('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;$('#clarification').value='';
+    confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后生成工作规划 <span>→</span>':'确认并生成工作规划 <span>→</span>');
     result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});
   }catch(exc){error.textContent=exc.message;}
   finally{setBusy(form.querySelector('.primary'),false,'让系统先理解题目 <span>→</span>');}
 });
 
 confirmButton.addEventListener('click',async()=>{
-  const clarification=$('#clarification').value.trim();
-  if(currentIntent?.need_clarification&&!clarification){$('#clarification').focus();return;}
+  const directions=Array.isArray(currentIntent?.direction_options)?currentIntent.direction_options:[];
+  const clarification=directions.length?(selectedDirection?`${selectedDirection.title}：${selectedDirection.focus}`:''):$('#clarification').value.trim();
+  if(currentIntent?.need_clarification&&!clarification){(directions.length?$('#direction-options .direction-card'):$('#clarification'))?.focus();return;}
   setBusy(confirmButton,true,'正在建立规划… <span>·</span>');$('#task-workspace').hidden=false;$('#plan-output').innerHTML='<p class="empty-plan">正在确定研究问题、资料需求和交付结构…</p>';$('#task-status-title').textContent='正在建立调研规划';$('#task-workspace').scrollIntoView({behavior:'smooth',block:'start'});
   try{
     const response=await request('/api/plan',{topic:currentTopic,tier:currentTier,clarification,intent:currentIntent});currentPlan=response.data;await persistStage('P2','plan_completed',currentPlan,'plan');renderPlan(response.data,response.usage);
@@ -50,6 +53,13 @@ confirmButton.addEventListener('click',async()=>{
     document.querySelectorAll('.task-status li')[1].className='done';
   }catch(exc){$('#plan-output').innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。你可以返回上方重新提交。</p>`;$('#task-status-title').textContent='规划未能完成';}
   finally{setBusy(confirmButton,false,'重新生成规划 <span>↻</span>');}
+});
+
+$('#direction-options').addEventListener('click',event=>{
+  const button=event.target.closest('.direction-card');if(!button)return;
+  selectedDirection=(currentIntent?.direction_options||[]).find(item=>item.direction_id===button.dataset.directionId)||null;
+  document.querySelectorAll('.direction-card').forEach(item=>item.classList.toggle('selected',item===button));
+  confirmButton.innerHTML='按这个方向生成工作规划 <span>→</span>';
 });
 
 function renderPlan(plan,usage){

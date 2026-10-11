@@ -40,11 +40,28 @@ class ValidationTests(unittest.TestCase):
             "scope_hint": "聚焦主要技术路线",
             "tier": "fast",
             "assumptions": [],
+            "topic_breadth": "focused",
+            "direction_options": [],
             "need_clarification": False,
             "clarification_question": None,
             "confirmation_text": "将梳理主要技术路线",
         }
         self.assertEqual(server.validate_intent(value), value)
+
+    def test_broad_intent_requires_clickable_directions(self):
+        value = {
+            "domain": "life_science", "normalized_topic": "心脏瓣膜钙化", "scope_hint": "需选择焦点",
+            "tier": "deep", "assumptions": [], "topic_breadth": "broad",
+            "direction_options": [
+                {"direction_id": "D1", "title": "钙化机制", "focus": "重点梳理细胞与分子机制"},
+                {"direction_id": "D2", "title": "干预策略", "focus": "重点梳理药物与材料干预"},
+            ],
+            "need_clarification": True, "clarification_question": "请选择一个本次最想展开的方向", "confirmation_text": None,
+        }
+        self.assertEqual(server.validate_intent(value), value)
+        value["direction_options"] = value["direction_options"][:1]
+        with self.assertRaisesRegex(ValueError, "2—4"):
+            server.validate_intent(value)
 
     def test_intent_rejects_extra_field(self):
         with self.assertRaises(ValueError):
