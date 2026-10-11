@@ -1,7 +1,10 @@
 """Application service that binds stages to prompts, routes, and model calls."""
 
 import copy
+import hashlib
 import json
+import math
+import os
 import re
 import threading
 from pathlib import Path
@@ -22,7 +25,7 @@ def add_usage(total, partial):
 
 class WorkflowService:
     CLAIMS_PER_BATCH_LIMIT = 6
-    def __init__(self, api_key, model_router, system_prompt, stage_prompts, model_client=deepseek_json, usage_ledger=None, model_limits=None):
+    def __init__(self, api_key, model_router, system_prompt, stage_prompts, model_client=deepseek_json, usage_ledger=None, model_limits=None, response_cache_dir=None):
         self.api_key = api_key
         self.model_router = model_router
         self.system_prompt = system_prompt
@@ -30,6 +33,10 @@ class WorkflowService:
         self.model_client = model_client
         self.usage_ledger = usage_ledger
         self.model_limits = model_limits or {}
+        self.response_cache_dir = Path(response_cache_dir) if response_cache_dir else None
+        if self.response_cache_dir:
+            self.response_cache_dir.mkdir(parents=True, exist_ok=True)
+            os.chmod(self.response_cache_dir, 0o700)
         self._context = threading.local()
 
     @classmethod
@@ -44,7 +51,7 @@ class WorkflowService:
             if not stage or not prompt_path or stage in stage_prompts:
                 raise ValueError("提示词阶段注册表无效")
             stage_prompts[stage] = (root / prompt_path).read_text(encoding="utf-8")
-        return cls(api_key, model_router, system_prompt, stage_prompts, model_client, usage_ledger, model_limits)
+        return cls(api_key, model_router, system_prompt, stage_prompts, model_client, usage_ledger, model_limits, root / "data" / "private" / "model-response-cache")
 
     def set_task_context(self, task_id):
         self._context.task_id = task_id
@@ -125,7 +132,28 @@ class WorkflowService:
             raise ValueError("阶段 %s 缺少提示词" % stage)
         route = self.model_router.for_stage(stage, tier, upgrade=upgrade)
         task_id = getattr(self._context, "task_id", "unassigned")
-        input_bytes = len((self.system_prompt + self.stage_prompts[stage] + json.dumps(payload, ensure_ascii=False)).encode("utf-8"))
+        input_text = self.system_prompt + self.stage_prompts[stage] + json.dumps(payload, ensure_ascii=False)
+        # The budget guard accepts token counts, not UTF-8 byte counts. Chinese
+        # text commonly occupies three bytes per character, so passing bytes
+        # directly can over-reserve by roughly 3x and stop a valid task late in
+        # a multi-batch stage. Two bytes per estimated token remains deliberately
+        # conservative for mixed Chinese/English research payloads.
+        estimated_input_tokens = max(1, math.ceil(len(input_text.encode("utf-8")) / 2))
+
+        cache_path = None
+        if self.response_cache_dir and task_id != "unassigned":
+            cache_key = hashlib.sha256(json.dumps({
+                "task_id": task_id, "stage": stage, "tier": tier, "upgrade": upgrade,
+                "model": route["model"], "effort": route["effort"], "prompt": self.stage_prompts[stage],
+                "payload": payload,
+            }, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+            cache_path = self.response_cache_dir / (cache_key + ".json")
+            if cache_path.is_file():
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                output = validator(cached["output"]) if validator else cached["output"]
+                if self.usage_ledger:
+                    self.usage_ledger.record(task_id, stage, route["model"], route["effort"], 0, "cache_hit", {}, {"cache_key": cache_key})
+                return output, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}, route
 
         def record(attempt, status, usage, detail):
             if self.usage_ledger:
@@ -133,7 +161,7 @@ class WorkflowService:
 
         def guard(attempt):
             if self.usage_ledger:
-                self.usage_ledger.guard(task_id, route["model"], self.model_limits, max_tokens, input_bytes)
+                self.usage_ledger.guard(task_id, route["model"], self.model_limits, max_tokens, estimated_input_tokens)
         output, usage = self.model_client(
             self.api_key,
             route["model"],
@@ -148,6 +176,11 @@ class WorkflowService:
             record,
             guard,
         )
+        if cache_path:
+            temporary = cache_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps({"output": output}, ensure_ascii=False), encoding="utf-8")
+            os.chmod(temporary, 0o600)
+            temporary.replace(cache_path)
         return output, usage, route
 
     @staticmethod
@@ -460,6 +493,31 @@ class WorkflowService:
                     return text.replace(candidate, replacement, 1), True
             return text, False
 
+        def replace_unique_similar_sentence(text, original, replacement):
+            """Repair punctuation/alias drift without guessing among matches."""
+            def normalized(value):
+                return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff%]+", "", str(value)).lower()
+
+            target = normalized(original)
+            target_bigrams = {target[index:index + 2] for index in range(max(0, len(target) - 1))}
+            if len(target_bigrams) < 8:
+                return text, False
+            candidates = []
+            for match in re.finditer(r"[^\n。！？!?]+[。！？!?]?", text):
+                sentence = match.group(0)
+                current = normalized(sentence)
+                if not current:
+                    continue
+                coverage = sum(item in current for item in target_bigrams) / len(target_bigrams)
+                if coverage >= 0.72:
+                    candidates.append((coverage, match.start(), match.end(), sentence))
+            candidates.sort(reverse=True)
+            if not candidates or (len(candidates) > 1 and candidates[0][0] - candidates[1][0] < 0.08):
+                return text, False
+            _, start, end, sentence = candidates[0]
+            trailing = sentence[-1] if sentence and sentence[-1] in "。！？!?" and replacement else ""
+            return text[:start] + replacement.rstrip("。！？!?") + trailing + text[end:], True
+
         def append_verification_note(page, claim_id, replacement):
             note = replacement
             current = str(page.get("speaker_notes", "")).strip()
@@ -525,6 +583,8 @@ class WorkflowService:
             located = False
             if claim["location_type"] == "report_section":
                 markdown, located = replace_once(markdown, original, replacement)
+                if not located:
+                    markdown, located = replace_unique_similar_sentence(markdown, atomic or original, replacement)
                 if not located and (
                     claim["section_or_page_id"] == "open_issues"
                     or claim["section_or_page_id"].startswith("open_issues_")
@@ -542,18 +602,26 @@ class WorkflowService:
                     if field == "speaker_notes":
                         page[field], located = replace_once(page.get(field, ""), original, replacement)
                         if not located:
+                            page[field], located = replace_unique_similar_sentence(page.get(field, ""), atomic or original, replacement)
+                        if not located:
                             for index, line in enumerate(page.get("on_slide_text", [])):
                                 page["on_slide_text"][index], located = replace_once(line, original, replacement)
+                                if not located:
+                                    page["on_slide_text"][index], located = replace_unique_similar_sentence(line, atomic or original, replacement)
                                 if located:
                                     break
                     else:
                         for index, line in enumerate(page.get(field, [])):
                             candidate, located = replace_once(line, original, replacement)
+                            if not located:
+                                candidate, located = replace_unique_similar_sentence(line, atomic or original, replacement)
                             if located:
                                 page[field][index] = slide_replacement(page, index, candidate, replacement, claim["claim_id"])
                                 break
                         if not located:
                             page["speaker_notes"], located = replace_once(page.get("speaker_notes", ""), original, replacement)
+                        if not located:
+                            page["speaker_notes"], located = replace_unique_similar_sentence(page.get("speaker_notes", ""), atomic or original, replacement)
                         if not located and action == "remove" and claim["location_type"] == "ppt_slide":
                             embedded_index = unique_embedded_numeric_line(page, atomic or original)
                             if embedded_index is not None:

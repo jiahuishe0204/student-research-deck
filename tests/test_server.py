@@ -73,6 +73,16 @@ class ValidationTests(unittest.TestCase):
         normalized = server.validate_intent(value)
         self.assertEqual(normalized["assumptions"], ["默认讨论周围神经"])
 
+    def test_intent_normalizes_empty_assumption_without_paid_retry(self):
+        value = {
+            "domain": "life_science", "normalized_topic": "导电水凝胶", "scope_hint": "聚焦周围神经",
+            "tier": "deep", "assumptions": "   ",
+            "topic_breadth": "focused", "direction_options": [], "need_clarification": False,
+            "clarification_question": None, "confirmation_text": "按该主题继续",
+        }
+        normalized = server.validate_intent(value)
+        self.assertEqual(normalized["assumptions"], [])
+
     def test_intent_rejects_extra_field(self):
         with self.assertRaises(ValueError):
             server.validate_intent({"unexpected": True})

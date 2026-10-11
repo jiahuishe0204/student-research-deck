@@ -597,6 +597,30 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(output["change_log"][0]["action"], "revised")
         self.assertEqual(usage["total_tokens"], 0)
 
+    def test_deterministic_final_repairs_unique_alias_and_punctuation_drift(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claims = [{
+            "claim_id": "CL-1", "location_type": "report_section", "section_or_page_id": "摘要",
+            "original_text": "CLDN18.2在胃癌中呈局限性表达而在正常组织中表达受限，使其成为CAR-T细胞疗法的候选靶点",
+            "atomic_claim": "CLDN18.2在胃癌中呈局限性表达，而在正常组织中表达受限，使其成为CAR-T细胞疗法的候选靶点。",
+            "claim_type": "mechanism", "cited_evidence_ids": ["EV-1"], "risk_level": "medium",
+        }]
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "现有资料仅支持该靶点已进入早期临床评估。", "explanation": "机制证据不足",
+        }]}
+        report = {"report_title": "报告", "report_markdown": "Claudin18.2（CLDN18.2）在胃癌中呈局限性表达而在正常组织中表达受限，使其成为CAR-T细胞疗法的候选靶点。", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "汇报", "storyline": "证据", "pages": [{
+            "page_id": "P1", "title": "结论", "purpose": "汇报", "on_slide_text": ["证据结论"],
+            "visual_suggestion": "", "speaker_notes": "", "evidence_ids": ["EV-1"],
+            "figure_refs": [], "source_citations": [],
+        }]}
+
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
+
+        self.assertIn("仅支持该靶点已进入早期临床评估", output["final_report"]["markdown"])
+        self.assertNotIn("局限性表达", output["final_report"]["markdown"])
+
     def test_deterministic_final_preserves_visuals_and_citations(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})
         claims = [{"claim_id": "CL-1", "location_type": "ppt_slide", "section_or_page_id": "P1", "original_text": "证据结论", "atomic_claim": "证据结论", "claim_type": "other", "cited_evidence_ids": ["EV-1"], "risk_level": "low"}]

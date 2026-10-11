@@ -75,9 +75,10 @@ def validate_intent(value):
     required = {"domain", "normalized_topic", "scope_hint", "tier", "assumptions", "topic_breadth", "direction_options", "need_clarification", "clarification_question", "confirmation_text"}
     if not isinstance(value, dict) or set(value) != required:
         raise ValueError("意图识别返回字段不完整")
-    if isinstance(value["assumptions"], str) and value["assumptions"].strip():
+    if isinstance(value["assumptions"], str):
         value = dict(value)
-        value["assumptions"] = [value["assumptions"].strip()]
+        normalized_assumption = value["assumptions"].strip()
+        value["assumptions"] = [normalized_assumption] if normalized_assumption else []
     if not isinstance(value["assumptions"], list) or any(not isinstance(item, str) for item in value["assumptions"]):
         raise ValueError("意图假设必须为字符串数组")
     if not isinstance(value["need_clarification"], bool):
