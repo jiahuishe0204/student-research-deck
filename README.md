@@ -1,5 +1,13 @@
 # 调研交付台（student-research-deck）
 
+[![产品演示](https://img.shields.io/badge/在线演示-GitHub%20Pages-0969da?logo=github)](https://jiahuishe0204.github.io/student-research-deck/)
+[![CI](https://github.com/jiahuishe0204/student-research-deck/actions/workflows/ci.yml/badge.svg)](https://github.com/jiahuishe0204/student-research-deck/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+**在线演示：** https://jiahuishe0204.github.io/student-research-deck/
+
+> 演示站用于展示产品界面与交互流程。完整的检索、模型生成和任务持久化能力需要在本地配置服务端与 API 密钥后运行。
+
 面向中国高校生命科学相关专业本科生和研究生的按次科研调研交付产品。它主要服务不准备长期走科研道路、但仍需完成专业课或组会调研汇报的学生，帮助他们节省检索、整理和制作精力，同时得到体面、专业、有来源的调研报告与PPT逐页内容包。用户输入一个主题；主题较宽时先选择研究焦点，随后由系统完成资料检索、证据核验、报告写作和汇报内容组织。
 
 > 完整版规划已形成，正在分阶段实现证据链、交付生成与核验闭环。以 `调研交付台-PROMPT.md` 为主文档；商业规则未冻结前可以继续本地工程和内测准备，但不接真实支付、不公开投放。
@@ -46,4 +54,4 @@ python3 server.py
 
 ## 当前状态
 
-这是从原“生命科学科研调研工作台”派生的商业化升级项目。已完成产品定义、P1—P9 工作流、任务持久化与归属令牌、公开论文数据源和 EPO OPS 本地接入、证据底稿、报告、PPT 内容包及独立引用核验的本地 MVP。EPO 采用 3 GB 创建者提醒、接近 4 GB 原子预留停止，并由 EPO 官方上限兜底。GitHub 私有远程仓库已经建立；剩余真实主题回归、线上 EPO 强一致计量写入、真实支付、PPTX、完整用户登录和公开部署尚未完成。
+这是从原“生命科学科研调研工作台”派生的商业化升级项目。已完成产品定义、P1—P9 工作流、任务持久化与归属令牌、公开论文数据源和 EPO OPS 本地接入、证据底稿、报告、PPT 内容包及独立引用核验的本地 MVP。EPO 采用 3 GB 创建者提醒、接近 4 GB 原子预留停止，并由 EPO 官方上限兜底。公开仓库与静态产品演示已经建立；剩余真实主题回归、线上 EPO 强一致计量写入、真实支付、PPTX、完整用户登录和生产环境部署尚未完成。
