@@ -11,6 +11,7 @@ from run_live_regression import (
     MAX_VERIFICATION_CLAIMS, namespace_evidence_groups, persist, post,
     query_from_plan, select_pro_claim_ids, set_auth,
 )
+from workflow_validation import validate_report
 
 
 def resume(state):
@@ -23,19 +24,30 @@ def resume(state):
         persist(base, task_id, "P1", "intent_completed", intent, "intent")
     plan = artifact(task, "plan")
     if plan is None:
-        clarification = intent.get("scope_hint", "") if intent.get("need_clarification") else ""
+        if intent.get("need_clarification"):
+            raise RuntimeError("P1 尚待用户选定方向或回答澄清问题，不能自动续跑 P2")
+        clarification = ""
         plan = post(base, "/api/plan", {"topic": task["topic"], "tier": task["tier"], "clarification": clarification, "intent": intent})["data"]
         persist(base, task_id, "P2", "plan_completed", plan, "plan")
     source_artifact = artifact(task, "sources")
     if source_artifact is None:
-        source_artifact = post(base, "/api/search", {"topic": task["topic"], "query": query_from_plan(plan, task["topic"]), "tier": task["tier"]})["data"]
-        source_artifact["records"] = source_artifact["records"][:12 if task["tier"] == "deep" else 8]
+        source_artifact = post(base, "/api/search", {"topic": task["topic"], "plan": plan, "tier": task["tier"]})["data"]
         persist(base, task_id, "P2", "search_completed", source_artifact, "sources")
     sources = source_artifact["records"]
     screening = artifact(task, "screening")
     if screening is None:
-        screening = post(base, "/api/screen", {"topic": task["topic"], "tier": task["tier"], "plan": plan, "candidates": sources})["data"]
+        response = post(base, "/api/screen", {"topic": task["topic"], "tier": task["tier"], "plan": plan, "candidates": sources, "queries": source_artifact.get("queries", [])})
+        screening = response["data"]
+        sources = response.get("sources", sources)
+        source_artifact["records"] = sources
+        persist(base, task_id, "P2", "search_finalized", source_artifact, "sources")
         persist(base, task_id, "P3", "screening_completed", screening, "screening")
+    if not screening.get("quality_gate", {}).get("passed", False):
+        reassessed = post(base, "/api/reassess-sources", {})
+        screening = reassessed["data"]
+        sources = reassessed["sources"]
+    if not screening.get("quality_gate", {}).get("passed", False):
+        raise RuntimeError("P3 来源质量门禁未通过：" + "；".join(screening.get("quality_gate", {}).get("problems", [])))
     evidence_artifact = artifact(task, "evidence")
     if evidence_artifact is None:
         groups = []
@@ -56,9 +68,14 @@ def resume(state):
     source_ids = sorted({item["source_id"] for item in evidence_records})
     selected_sources = [item for item in sources if item["source_id"] in set(source_ids)]
     report = artifact(task, "report")
+    if report is not None:
+        try:
+            validate_report(report, evidence_ids, task["tier"])
+        except ValueError:
+            report = None
     if report is None:
         contexts = [{"source_id": group["source_id"], "reading_scope": group["reading_scope"]} for group in groups]
-        report = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": contexts, "tier": task["tier"]})["data"]
+        report = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "figure_records": [item for group in groups for item in group["figure_records"]], "evidence_contexts": contexts, "tier": task["tier"]})["data"]
         persist(base, task_id, "P5", "report_completed", report, "report")
     claims = artifact(task, "claims")
     if claims is None:

@@ -1,0 +1,14 @@
+---
+description: Enforce user-confirmed product decisions for authentication, free trials, delivery, retention, and deployment
+alwaysApply: true
+---
+
+# Product decisions are binding
+
+- Before planning or changing authentication, deployment, task execution, free entitlement, email delivery, retention, or payment, read `config/product-decisions.json` and its `source_document`.
+- Treat entries under `decisions` as user-confirmed requirements, not suggestions.
+- Do not replace a confirmed choice with an older document, a convenient implementation default, or a new recommendation.
+- If implementation conflicts with a confirmed choice, stop and explain the conflict before editing.
+- Change a confirmed choice only after the user explicitly approves the replacement; update the JSON, source document, tests, and implementation together.
+- Items under `explicitly_deferred` must not enter the implementation unless the user explicitly reopens them.
+- Report separately: decision made, code completed, tests passed, deployed, and verified online. Never collapse these states into “done.”

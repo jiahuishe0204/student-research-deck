@@ -11,6 +11,7 @@ from pathlib import Path
 
 from contracts import load_contract, validate_stage_output
 from model_client import deepseek_json
+from report_citations import render_linked_report
 from workflow_validation import (
     PPT_DENSITY_LIMITS,
     validate_claims, validate_evidence, validate_final, validate_intent, validate_plan,
@@ -150,10 +151,15 @@ class WorkflowService:
             cache_path = self.response_cache_dir / (cache_key + ".json")
             if cache_path.is_file():
                 cached = json.loads(cache_path.read_text(encoding="utf-8"))
-                output = validator(cached["output"]) if validator else cached["output"]
-                if self.usage_ledger:
-                    self.usage_ledger.record(task_id, stage, route["model"], route["effort"], 0, "cache_hit", {}, {"cache_key": cache_key})
-                return output, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}, route
+                try:
+                    output = validator(cached["output"]) if validator else cached["output"]
+                except ValueError as exc:
+                    if self.usage_ledger:
+                        self.usage_ledger.record(task_id, stage, route["model"], route["effort"], 0, "cache_rejected", {}, {"cache_key": cache_key, "reason": str(exc)[:160]})
+                else:
+                    if self.usage_ledger:
+                        self.usage_ledger.record(task_id, stage, route["model"], route["effort"], 0, "cache_hit", {}, {"cache_key": cache_key})
+                    return output, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}, route
 
         def record(attempt, status, usage, detail):
             if self.usage_ledger:
@@ -273,7 +279,9 @@ class WorkflowService:
                 "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
                 "output_contract": load_contract("P2B"),
             }, validate_blueprint_output,
-            max_tokens=4400 if tier == "deep" else 3400, max_attempts=2,
+            # Reasoning tokens share the response cap with the JSON body. The
+            # previous 4400-token cap truncated two paid Pro responses here.
+            max_tokens=8000 if tier == "deep" else 3400, max_attempts=2,
         )
         output = {
             "research_scope": architecture["research_scope"],
@@ -382,17 +390,27 @@ class WorkflowService:
         for figure in output["figure_records"]:
             candidate = candidates_by_id.get(figure["figure_id"], {})
             figure_url = str(candidate.get("article_figure_url") or "").strip()
+            # A model may describe why a figure is useful, but cannot grant
+            # reuse rights or invent its authoritative source location.
+            figure["reuse_status"] = candidate.get("reuse_status", "unknown")
+            if candidate.get("label"):
+                figure["label"] = candidate["label"]
             if figure_url and figure_url not in figure["locator"]:
                 figure["locator"] = "%s | %s" % (figure["locator"], figure_url)
+            if figure_url:
+                figure["article_figure_url"] = figure_url
         return output, usage
 
-    def create_report(self, intent, plan, evidence_records, tier="fast", evidence_contexts=None):
+    def create_report(self, intent, plan, evidence_records, tier="fast", evidence_contexts=None, figure_records=None):
         tier = self._tier(tier)
-        if not isinstance(intent, dict) or not isinstance(plan, dict) or not isinstance(evidence_records, list):
+        figure_records = [] if figure_records is None else figure_records
+        if not isinstance(intent, dict) or not isinstance(plan, dict) or not isinstance(evidence_records, list) or not isinstance(figure_records, list):
             raise ValueError("报告生成输入无效")
         if not 1 <= len(evidence_records) <= 100:
             raise ValueError("至少需要 1 条且最多处理 100 条证据")
         evidence_ids = self._ids(evidence_records, "evidence_id", "证据编号缺失或重复")
+        figure_ids = set(self._ids(figure_records, "figure_id", "报告输入包含无效图片编号"))
+        figure_by_id = {item["figure_id"]: item for item in figure_records}
         def validate_report_output(value):
             if isinstance(value, dict):
                 report_keys = {
@@ -400,20 +418,16 @@ class WorkflowService:
                     "used_evidence_ids", "figure_recommendations", "status", "open_issues",
                 }
                 value = {key: item for key, item in value.items() if key in report_keys}
-                allowed = set(evidence_ids)
-                value["used_evidence_ids"] = [
-                    item for item in value.get("used_evidence_ids", []) if item in allowed
-                ]
-                markdown = str(value.get("report_markdown", ""))
-                cited = set(re.findall(r"EV::.+?::\d{3}", markdown))
-                for unknown in cited - allowed:
-                    markdown = markdown.replace("[" + unknown + "]", "").replace(unknown, "")
-                value["report_markdown"] = markdown
-            return validate_report(value, evidence_ids, tier)
+            validated = validate_report(value, evidence_ids, tier)
+            for recommendation in validated["figure_recommendations"]:
+                figure = figure_by_id.get(recommendation["figure_id"])
+                if recommendation["figure_id"] not in figure_ids or recommendation["reuse_status"] != figure["reuse_status"]:
+                    raise ValueError("P5 推荐了未提供的图片或改写了图片复用状态")
+            return validated
 
         output, usage, _ = self.generate(
             "P5", tier,
-            {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": evidence_contexts or [], "tier": tier, "output_contract": load_contract("P5")},
+            {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": evidence_contexts or [], "figure_records": figure_records, "tier": tier, "output_contract": load_contract("P5")},
             validate_report_output, max_tokens=7500, max_attempts=2,
         )
         return output, usage
@@ -428,13 +442,46 @@ class WorkflowService:
         evidence_ids = self._ids(evidence_records, "evidence_id", "PPT 输入包含无效证据编号", unique=False)
         figure_ids = self._ids(figure_records, "figure_id", "PPT 输入包含无效图片编号", unique=False)
         source_ids = self._ids(source_records, "source_id", "PPT 输入包含无效来源编号", unique=False)
-        output, usage, _ = self.generate(
-            "P6", tier,
-            {"intent": intent, "plan": plan or {}, "report": report, "evidence_records": evidence_records, "figure_records": figure_records, "source_records": source_records, "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids, "allowed_source_ids": source_ids, "constraints": constraints, "output_contract": load_contract("P6")},
-            lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids), max_tokens=9000, max_attempts=2,
-        )
+        payload = {"intent": intent, "plan": plan or {}, "report": report, "evidence_records": evidence_records,
+                   "figure_records": figure_records, "source_records": source_records,
+                   "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids,
+                   "allowed_source_ids": source_ids, "presentation_limits": PPT_DENSITY_LIMITS,
+                   "constraints": constraints, "output_contract": load_contract("P6")}
+        arc = (plan or {}).get("ppt_story_arc", [])
+        split_long_report = tier == "deep" and len(str(report.get("report_markdown") or "")) > 7000 and len(arc) >= 4
+        if split_long_report:
+            midpoint = (len(arc) + 1) // 2
+            parts = []
+            usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
+            for index, subset in enumerate((arc[:midpoint], arc[midpoint:]), 1):
+                batch_payload = {**payload, "page_batch": {"index": index, "total": 2,
+                    "assigned_arc": subset, "target_pages": "4—6", "complete_arc": arc}}
+                partial, partial_usage, _ = self.generate(
+                    "P6", tier, batch_payload,
+                    lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids),
+                    max_tokens=7000, max_attempts=2,
+                )
+                parts.append(partial)
+                add_usage(usage, partial_usage)
+            output = {"deck_title": parts[0]["deck_title"], "storyline": parts[0]["storyline"],
+                      "pages": [page for part in parts for page in part["pages"]]}
+            for index, page in enumerate(output["pages"], 1):
+                page["page_id"] = "SL-%02d" % index
+            validate_ppt(output, evidence_ids, figure_ids, source_ids)
+        else:
+            output, usage, _ = self.generate(
+                "P6", tier, payload,
+                lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids),
+                max_tokens=9000, max_attempts=2,
+            )
         source_by_id = {item.get("source_id"): item for item in source_records}
+        figure_by_id = {item.get("figure_id"): item for item in figure_records}
         for page in output["pages"]:
+            for reference in page["figure_refs"]:
+                figure = figure_by_id[reference["figure_id"]]
+                reference["source_id"] = figure["source_id"]
+                reference["locator"] = figure["locator"]
+                reference["reuse_status"] = figure["reuse_status"]
             for citation in page["source_citations"]:
                 source = source_by_id.get(citation["source_id"])
                 if source and source.get("journal"):
@@ -469,7 +516,7 @@ class WorkflowService:
         )
         return output, usage
 
-    def assemble_final_deterministic(self, verification, report, ppt, claims, source_ids, evidence_ids, evidence_version="1.0"):
+    def assemble_final_deterministic(self, verification, report, ppt, claims, source_ids, evidence_ids, evidence_version="1.0", evidence_records=None, source_records=None, figure_records=None):
         """Apply verified edits without asking the model to reproduce the full delivery."""
         claim_ids = self._ids(claims, "claim_id", "最终装配声明编号缺失或重复")
         results = {item["claim_id"]: item for item in verification.get("results", [])}
@@ -572,7 +619,14 @@ class WorkflowService:
             replacement = result.get("revised_claim") or ""
             if action == "mark_unverified":
                 if claim["location_type"] == "report_section":
-                    replacement = (replacement or original) + "（未核实）"
+                    # A customer report must not present an unsupported claim
+                    # as a fact with a small audit label appended. Remove it
+                    # from the prose and retain the issue for review instead.
+                    issue = "尚待核实：" + (replacement or atomic or original).strip()
+                    if claim["section_or_page_id"] not in ("open_issues",) and not claim["section_or_page_id"].startswith("open_issues_"):
+                        if issue not in open_issues:
+                            open_issues.append(issue)
+                    replacement = ""
                 else:
                     page_for_limit = pages_by_id.get(claim["section_or_page_id"], {})
                     page_context = str(page_for_limit.get("title", "")) + str(page_for_limit.get("purpose", ""))
@@ -591,9 +645,9 @@ class WorkflowService:
                 ):
                     matching = [index for index, item in enumerate(open_issues) if str(item).strip() == str(original).strip()]
                     if len(matching) == 1:
-                        open_issues[matching[0]] = replacement
+                        open_issues[matching[0]] = issue if action == "mark_unverified" else replacement
                     else:
-                        open_issues.append(replacement)
+                        open_issues.append(issue if action == "mark_unverified" else replacement)
                     located = True
             else:
                 page = pages_by_id.get(claim["section_or_page_id"])
@@ -659,11 +713,20 @@ class WorkflowService:
 
         def clean_assembly_punctuation(value):
             text = str(value or "")
+            # Verified removals can leave two consecutive connectors or stops.
+            # This is punctuation-only repair; it must not reintroduce a claim.
+            text = text.replace("此外，，因此", "因此")
+            text = re.sub(r"，{2,}", "，", text)
             text = re.sub(r"。{2,}", "。", text)
             text = re.sub(r"；{2,}", "；", text)
             text = text.replace("。；", "。").replace("；。", "。").replace(".。", "。")
+            text = text.replace("。，", "。").replace("，。", "。")
+            # P8 may express an evidence boundary using an internal field name.
+            # Translate only this exact audit phrase; retain its uncertainty.
+            text = text.replace("但未提供对应 evidence_id 的独立证据条目", "但这一细节尚缺独立证据支持")
             return text.strip()
 
+        markdown = clean_assembly_punctuation(markdown)
         final_pages = [{
             "page_id": page.get("page_id"), "title": page.get("title"), "purpose": page.get("purpose", ""),
             "on_slide_text": [clean_assembly_punctuation(item) for item in page.get("on_slide_text", []) if clean_assembly_punctuation(item) and not (len(clean_assembly_punctuation(item)) < 20 and clean_assembly_punctuation(item).endswith(("：", ":")))], "visual_suggestion": page.get("visual_suggestion", ""),
@@ -678,7 +741,11 @@ class WorkflowService:
             "open_issues": list(dict.fromkeys(item for item in open_issues if item)),
             "source_ids": list(source_ids), "evidence_ids": list(evidence_ids), "change_log": change_log,
         }
-        return validate_final(output, claim_ids, source_ids, evidence_ids, verification), {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
+        validate_final(output, claim_ids, source_ids, evidence_ids, verification)
+        if evidence_records is not None and source_records is not None:
+            output["final_report"]["markdown"] = render_linked_report(markdown, evidence_records, source_records, report.get("figure_recommendations", []), figure_records or [])
+            validate_final(output, claim_ids, source_ids, evidence_ids, verification)
+        return output, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
 
     def extract_claims(self, report, ppt, evidence_ids, tier):
         report_chunks = self._text_chunks(report.get("report_markdown", ""))

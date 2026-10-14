@@ -18,6 +18,10 @@ from epo_ops import EPOClient
 from model_routing import ModelRouter
 from model_usage import ModelBudgetExceeded, ModelUsageLedger
 from retrieval import hydrate_europe_pmc_full_text, search_all
+from research_sources import (
+    assess_evidence_quality, assess_source_quality, enrich_kept_open_full_text, merge_search_results,
+    plan_search_queries,
+)
 from task_store import TaskStore
 from workflow_validation import (
     validate_claims,
@@ -74,6 +78,29 @@ def load_dotenv(path):
             continue
         key, value = line.split("=", 1)
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def resolve_plan_request(task, body):
+    """Enforce the user's scope choice before any paid P2 call, across clients."""
+    if body.get("topic") != task.get("topic") or body.get("tier", "fast") != task.get("tier"):
+        raise ValueError("规划主题或版本与当前任务不一致")
+    saved = task.get("artifacts", {}).get("intent", {}).get("data")
+    if saved is None:
+        raise ValueError("请先完成并保存题目理解，再生成规划")
+    intent = validate_intent(saved)
+    breadth = intent["topic_breadth"]
+    choice = str(body.get("direction_id") or "").strip()
+    clarification = str(body.get("clarification") or "").strip()
+    if breadth == "broad":
+        selected = next((item for item in intent["direction_options"] if item["direction_id"] == choice), None)
+        if selected is None:
+            raise ValueError("宽泛主题必须由用户选择一个研究方向，不能自动代选")
+        clarification = selected["title"] + "：" + selected["focus"]
+    elif choice:
+        raise ValueError("当前主题没有可选研究方向")
+    elif intent["need_clarification"] and not clarification:
+        raise ValueError("请先回答题目澄清问题")
+    return task["topic"], task["tier"], clarification, intent
 
 
 class AppHandler(SimpleHTTPRequestHandler):
@@ -211,7 +238,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/plan":
-                output, usage = self.server.workflow.create_plan(body.get("topic"), body.get("clarification"), body.get("tier", "fast"), body.get("intent"))
+                topic, tier, clarification, intent = resolve_plan_request(self.server.task_store.get_task(task_id), body)
+                output, usage = self.server.workflow.create_plan(topic, clarification, tier, intent)
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/search":
@@ -223,21 +251,108 @@ class AppHandler(SimpleHTTPRequestHandler):
                     raise ValueError("检索主题或检索式无效")
                 if tier not in ("fast", "deep"):
                     raise ValueError("检索版本无效")
-                output = search_all(query, per_source=6 if tier == "deep" else 4, epo_client=self.server.epo_client, epo_query=epo_query)
+                plan = body.get("plan")
+                if plan is not None and not isinstance(plan, dict):
+                    raise ValueError("检索规划无效")
+                if plan:
+                    queries = plan_search_queries(plan, topic)
+                    results = [search_all(item, per_source=4 if tier == "deep" else 3,
+                                          epo_client=self.server.epo_client if index == 0 else None,
+                                          epo_query=epo_query) for index, item in enumerate(queries)]
+                    output = merge_search_results(results, 24 if tier == "deep" else 12)
+                else:
+                    output = search_all(query, per_source=6 if tier == "deep" else 4, epo_client=self.server.epo_client, epo_query=epo_query)
                 output["topic"] = topic
                 self.send_json(HTTPStatus.OK, {"data": output})
                 return
             if path == "/api/screen":
-                output, usage = self.server.workflow.screen_sources(body.get("topic"), body.get("plan"), body.get("candidates"), body.get("tier", "fast"))
-                self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
+                topic, plan, tier = body.get("topic"), body.get("plan"), body.get("tier", "fast")
+                candidates = body.get("candidates")
+                output, usage = self.server.workflow.screen_sources(topic, plan, candidates, tier)
+                candidates, enrichment = enrich_kept_open_full_text(candidates, output) if tier == "deep" else (candidates, {"lookups": 0, "enriched_source_ids": [], "errors": []})
+                quality = assess_source_quality(plan, candidates, output, tier)
+                search_update = None
+                if tier == "deep" and not quality["passed"] and body.get("supplement", True):
+                    previous_queries = set(body.get("queries") or [])
+                    extra_queries = [item for item in plan_search_queries(plan, topic, supplement=True, limit=3)
+                                     if item not in previous_queries][:2]
+                    if extra_queries:
+                        extra_results = [search_all(item, per_source=4) for item in extra_queries]
+                        search_update = merge_search_results([{"query": "previous", "records": candidates, "errors": []}] + extra_results, 30)
+                        updated = search_update["records"]
+                        if {item["source_id"] for item in updated} != {item["source_id"] for item in candidates}:
+                            candidates = updated
+                            output, additional_usage = self.server.workflow.screen_sources(topic, plan, candidates, tier)
+                            candidates, additional_enrichment = enrich_kept_open_full_text(candidates, output)
+                            enrichment["lookups"] += additional_enrichment["lookups"]
+                            enrichment["publisher_lookups"] = enrichment.get("publisher_lookups", 0) + additional_enrichment.get("publisher_lookups", 0)
+                            enrichment["enriched_source_ids"].extend(additional_enrichment["enriched_source_ids"])
+                            enrichment["errors"].extend(additional_enrichment["errors"])
+                            for key in ("prompt_tokens", "completion_tokens", "total_tokens", "attempts"):
+                                usage[key] = usage.get(key, 0) + additional_usage.get(key, 0)
+                            quality = assess_source_quality(plan, candidates, output, tier)
+                output["quality_gate"] = quality
+                output["full_text_enrichment"] = enrichment
+                if search_update:
+                    search_update["topic"] = topic
+                    search_update["records"] = candidates
+                    self.server.task_store.record_event(task_id, "P2", "supplemental_search_completed", search_update, "sources")
+                else:
+                    self.server.task_store.record_event(task_id, "P2", "source_search_completed", {"topic": topic, "records": candidates, "query": "planned", "errors": []}, "sources")
+                self.server.task_store.record_event(task_id, "P3", "screening_and_quality_checked", output, "screening")
+                self.send_json(HTTPStatus.OK, {"data": output, "usage": usage, "sources": candidates})
+                return
+            if path == "/api/reassess-sources":
+                artifacts = self.server.task_store.get_task(task_id)["artifacts"]
+                plan = artifacts.get("plan", {}).get("data", {})
+                saved_sources = artifacts.get("sources", {}).get("data", {})
+                screening = artifacts.get("screening", {}).get("data", {})
+                if not plan or not saved_sources.get("records") or not screening.get("decisions"):
+                    raise ValueError("当前任务没有可重评的规划、来源和筛选结果")
+                candidates, enrichment = enrich_kept_open_full_text(saved_sources["records"], screening)
+                quality = assess_source_quality(plan, candidates, screening, "deep")
+                screening["quality_gate"] = quality
+                screening["full_text_enrichment"] = enrichment
+                saved_sources["records"] = candidates
+                self.server.task_store.record_event(task_id, "P2", "source_full_text_reassessed", saved_sources, "sources")
+                self.server.task_store.record_event(task_id, "P3", "source_gate_reassessed", screening, "screening")
+                self.send_json(HTTPStatus.OK, {"data": screening, "sources": candidates})
                 return
             if path == "/api/evidence":
-                source_record = hydrate_europe_pmc_full_text(body.get("source_record") or {})
+                source_record = body.get("source_record") or {}
+                if body.get("tier", "fast") == "deep":
+                    artifacts = self.server.task_store.get_task(task_id)["artifacts"]
+                    saved_plan = artifacts.get("plan", {}).get("data", {})
+                    saved_sources = artifacts.get("sources", {}).get("data", {}).get("records", [])
+                    saved_screening = artifacts.get("screening", {}).get("data", {})
+                    gate = assess_source_quality(saved_plan, saved_sources, saved_screening, "deep")
+                    if not gate["passed"]:
+                        raise ValueError("来源质量门禁未通过，不能继续付费提取证据：" + "；".join(gate["problems"]))
+                    kept_ids = {item.get("source_id") for item in saved_screening.get("decisions", []) if item.get("status") == "keep"}
+                    if source_record.get("source_id") not in kept_ids:
+                        raise ValueError("该来源未通过本任务筛选，不能提取证据")
+                    source_record = next(item for item in saved_sources if item.get("source_id") == source_record["source_id"])
+                source_record = hydrate_europe_pmc_full_text(source_record)
                 output, usage = self.server.workflow.extract_evidence(source_record, body.get("question_ids", []), body.get("tier", "fast"))
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/report":
-                output, usage = self.server.workflow.create_report(body.get("intent"), body.get("plan"), body.get("evidence_records"), body.get("tier", "fast"), body.get("evidence_contexts", []))
+                tier = body.get("tier", "fast")
+                if tier == "deep":
+                    task = self.server.task_store.get_task(task_id)
+                    artifacts = task["artifacts"]
+                    sources = artifacts.get("sources", {}).get("data", {}).get("records", [])
+                    screening = artifacts.get("screening", {}).get("data", {})
+                    saved_plan = artifacts.get("plan", {}).get("data", {})
+                    if not saved_plan or saved_plan != body.get("plan"):
+                        raise ValueError("报告规划与本任务保存的规划不一致")
+                    gate = assess_source_quality(saved_plan, sources, screening, tier)
+                    if not gate["passed"]:
+                        raise ValueError("来源质量门禁未通过：" + "；".join(gate["problems"]))
+                    evidence_gate = assess_evidence_quality(saved_plan, body.get("evidence_records") or [], tier)
+                    if not evidence_gate["passed"]:
+                        raise ValueError("证据覆盖门禁未通过：" + "；".join(evidence_gate["problems"]))
+                output, usage = self.server.workflow.create_report(body.get("intent"), body.get("plan"), body.get("evidence_records"), body.get("tier", "fast"), body.get("evidence_contexts", []), body.get("figure_records", []))
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/ppt":
@@ -269,17 +384,20 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage, "route": metadata})
                 return
             if path == "/api/final":
-                if isinstance(body.get("claims"), list):
-                    output, usage = self.server.workflow.assemble_final_deterministic(
-                        body.get("verification_results"), body.get("draft_report"), body.get("draft_ppt"),
-                        body.get("claims"), body.get("source_ids"), body.get("evidence_ids"), body.get("evidence_version", "1.0"),
-                    )
-                else:
-                    output, usage = self.server.workflow.assemble_final(
-                        body.get("verification_results"), body.get("draft_report"), body.get("draft_ppt"),
-                        body.get("claim_ids"), body.get("source_ids"), body.get("evidence_ids"),
-                        body.get("evidence_version", "1.0"), body.get("tier", "fast"),
-                    )
+                if not isinstance(body.get("claims"), list):
+                    raise ValueError("终稿需要声明清单；不能退回到额外付费的整稿重写路径")
+                artifacts = self.server.task_store.get_task(task_id)["artifacts"]
+                source_records = artifacts.get("sources", {}).get("data", {}).get("records", [])
+                evidence_groups = artifacts.get("evidence", {}).get("data", {}).get("groups", [])
+                evidence_records = [item for group in evidence_groups for item in group.get("evidence_records", [])]
+                figure_records = [item for group in evidence_groups for item in group.get("figure_records", [])]
+                if not source_records or not evidence_records:
+                    raise ValueError("终稿缺少已保存的来源与证据，不能生成可核验引用")
+                output, usage = self.server.workflow.assemble_final_deterministic(
+                    body.get("verification_results"), body.get("draft_report"), body.get("draft_ppt"),
+                    body.get("claims"), body.get("source_ids"), body.get("evidence_ids"), body.get("evidence_version", "1.0"),
+                    evidence_records, source_records, figure_records,
+                )
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})

@@ -8,8 +8,9 @@ import urllib.request
 
 from run_live_regression import (
     ACTIVE_TASK, LOCAL_OPENER, MAX_VERIFICATION_CLAIMS, persist, post, query_from_plan,
-    namespace_evidence_groups, select_pro_claim_ids, set_auth,
+    namespace_evidence_groups, select_pro_claim_ids, set_auth, choose_user_direction,
 )
+from workflow_validation import validate_report
 
 
 def get(base, path, timeout=60):
@@ -31,7 +32,7 @@ def merge_verification(results, claims):
     return {"verification_version": "P8-resumable-1.0", "results": results, "summary": summary}
 
 
-def resume(base, task_id, task_token):
+def resume(base, task_id, task_token, selected_direction=""):
     set_auth(task_id, task_token)
     task = get(base, "/api/tasks/%s" % task_id)["data"]
     intent = artifact(task, "intent")
@@ -42,14 +43,13 @@ def resume(base, task_id, task_token):
     plan = artifact(task, "plan")
     if plan is None:
         print("[%s] resume P2" % task["topic"], flush=True)
-        clarification = intent.get("scope_hint", "") if intent.get("need_clarification") else ""
-        plan = post(base, "/api/plan", {"topic": task["topic"], "tier": task["tier"], "clarification": clarification, "intent": intent})["data"]
+        direction_id = choose_user_direction(intent, selected_direction)
+        plan = post(base, "/api/plan", {"topic": task["topic"], "tier": task["tier"], "direction_id": direction_id})["data"]
         persist(base, task_id, "P2", "plan_completed", plan, "plan")
     source_artifact = artifact(task, "sources")
     if source_artifact is None:
         print("[%s] resume retrieval" % task["topic"], flush=True)
-        source_artifact = post(base, "/api/search", {"topic": task["topic"], "query": query_from_plan(plan, task["topic"]), "tier": task["tier"]})["data"]
-        source_artifact["records"] = source_artifact["records"][:12 if task["tier"] == "deep" else 8]
+        source_artifact = post(base, "/api/search", {"topic": task["topic"], "plan": plan, "tier": task["tier"]})["data"]
         if not source_artifact["records"]:
             raise RuntimeError("%s returned no sources" % task["topic"])
         persist(base, task_id, "P2", "search_completed", source_artifact, "sources")
@@ -57,8 +57,18 @@ def resume(base, task_id, task_token):
     screening = artifact(task, "screening")
     if screening is None:
         print("[%s] resume P3" % task["topic"], flush=True)
-        screening = post(base, "/api/screen", {"topic": task["topic"], "tier": task["tier"], "plan": plan, "candidates": sources})["data"]
+        response = post(base, "/api/screen", {"topic": task["topic"], "tier": task["tier"], "plan": plan, "candidates": sources, "queries": source_artifact.get("queries", [])})
+        screening = response["data"]
+        sources = response.get("sources", sources)
+        source_artifact["records"] = sources
+        persist(base, task_id, "P2", "search_finalized", source_artifact, "sources")
         persist(base, task_id, "P3", "screening_completed", screening, "screening")
+    if not screening.get("quality_gate", {}).get("passed", False):
+        reassessed = post(base, "/api/reassess-sources", {})
+        screening = reassessed["data"]
+        sources = reassessed["sources"]
+    if not screening.get("quality_gate", {}).get("passed", False):
+        raise RuntimeError("P3 来源质量门禁未通过：" + "；".join(screening.get("quality_gate", {}).get("problems", [])))
     evidence_artifact = artifact(task, "evidence")
     if evidence_artifact is None:
         print("[%s] resume P4" % task["topic"], flush=True)
@@ -86,10 +96,15 @@ def resume(base, task_id, task_token):
     source_ids = sorted({item["source_id"] for item in evidence_records})
     selected_sources = [item for item in sources if item["source_id"] in set(source_ids)]
     report = artifact(task, "report")
+    if report is not None:
+        try:
+            validate_report(report, evidence_ids, task["tier"])
+        except ValueError:
+            report = None
     if report is None:
         print("[%s] resume P5" % task["topic"], flush=True)
         evidence_contexts = [{"source_id": group["source_id"], "reading_scope": group["reading_scope"]} for group in groups]
-        report = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": evidence_contexts, "tier": task["tier"]})["data"]
+        report = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "figure_records": figure_records, "evidence_contexts": evidence_contexts, "tier": task["tier"]})["data"]
         persist(base, task_id, "P5", "report_completed", report, "report")
     ppt = artifact(task, "ppt")
     if ppt is None:
@@ -160,7 +175,7 @@ def main():
     results = []
     for task_id in args.task_ids:
         try:
-            results.append({"ok": True, **resume(args.base, task_id, args.task_token)})
+            results.append({"ok": True, **resume(args.base, task_id, args.task_token, state.get("selected_direction", "") if state_path else "")})
             if state_path:
                 state_path.unlink(missing_ok=True)
         except Exception as exc:

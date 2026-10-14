@@ -144,6 +144,52 @@ def hydrate_europe_pmc_full_text(record, text_limit=24000, figure_limit=12):
     return hydrated
 
 
+def hydrate_frontiers_full_text(record, text_limit=24000, figure_limit=12):
+    """Read a Frontiers JATS XML by DOI; never infer image reuse rights."""
+    doi = str(record.get("doi") or "").strip().lower()
+    if not doi.startswith("10.3389/"):
+        return dict(record)
+    hydrated = dict(record)
+    try:
+        request = urllib.request.Request(
+            "https://doi.org/" + urllib.parse.quote(doi, safe="/"),
+            headers={"User-Agent": USER_AGENT}, method="HEAD",
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            landing_url = response.geturl()
+        parsed = urllib.parse.urlsplit(landing_url)
+        if parsed.scheme != "https" or parsed.hostname not in ("frontiersin.org", "www.frontiersin.org") or not parsed.path.endswith("/full"):
+            return hydrated
+        xml_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path[:-5] + "/xml", "", ""))
+        root = ET.fromstring(fetch_url_bytes(xml_url))
+    except Exception as exc:
+        hydrated["full_text_error"] = type(exc).__name__
+        return hydrated
+    body = root.find(".//body")
+    full_text = re.sub(r"\s+", " ", text_of(body)).strip()
+    if not full_text:
+        return hydrated
+    hydrated["full_text"] = full_text[:text_limit]
+    hydrated["access"] = "full_text"
+    hydrated["source"] = "Frontiers"
+    hydrated["url"] = landing_url
+    hydrated["also_found_in"] = list(dict.fromkeys((record.get("also_found_in") or []) + ["Frontiers"]))
+    figures = []
+    for index, figure in enumerate(root.findall(".//fig")[:figure_limit], 1):
+        figure_id = figure.attrib.get("id") or "fig-%d" % index
+        label = text_of(figure.find("label")) or figure_id
+        figures.append({
+            "figure_id": "%s:%s" % (record.get("source_id") or doi, figure_id),
+            "label": label,
+            "caption": re.sub(r"\s+", " ", text_of(figure.find("caption"))).strip(),
+            "locator": "%s, %s" % (doi, label),
+            "article_figure_url": landing_url + "#" + urllib.parse.quote(figure_id, safe=""),
+            "reuse_status": "unknown",
+        })
+    hydrated["figure_candidates"] = figures
+    return hydrated
+
+
 def search_crossref(query, limit=5):
     params = {"query.bibliographic": query, "rows": limit, "select": "DOI,title,author,published,container-title,abstract,URL,type"}
     email = os.environ.get("RESEARCH_CONTACT_EMAIL", "").strip()

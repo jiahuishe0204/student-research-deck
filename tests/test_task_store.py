@@ -27,8 +27,8 @@ class TaskStoreTests(unittest.TestCase):
         resumed = self.store.set_status(task["task_id"], "active")
         self.assertEqual(resumed["current_stage"], "P5")
         exported = self.store.export_markdown(task["task_id"])
-        self.assertIn("CRISPR诊断", exported)
-        self.assertIn("# 报告", exported)
+        self.assertEqual(exported, "# 报告\n正文\n")
+        self.assertNotIn("任务编号", exported)
 
     def test_missing_task_is_rejected(self):
         with self.assertRaises(KeyError):

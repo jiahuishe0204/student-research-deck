@@ -52,6 +52,10 @@ def parse_json_object(content):
     return value
 
 
+class ModelOutputTruncated(ValueError):
+    """A full output allowance was consumed before JSON could finish."""
+
+
 def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", validator=None, max_tokens=6000, max_attempts=2, request_timeout=300, usage_callback=None, before_attempt=None):
     thinking = "disabled" if effort == "none" else "enabled"
     base_content = stage_prompt + "\n\n实际输入JSON：\n" + json.dumps(payload, ensure_ascii=False)
@@ -104,6 +108,10 @@ def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", 
         for key in total_usage:
             total_usage[key] += int(usage.get(key, 0) or 0)
         content = data["choices"][0]["message"].get("content") or ""
+        if data["choices"][0].get("finish_reason") == "length":
+            if usage_callback:
+                usage_callback(attempt + 1, "truncated", usage, {"max_tokens": max_tokens})
+            raise ModelOutputTruncated("模型达到输出上限，不能用相同上限重复付费重试")
         if not content.strip():
             last_error = RuntimeError("模型未返回可用内容")
             if usage_callback:

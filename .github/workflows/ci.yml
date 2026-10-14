@@ -22,5 +22,7 @@ jobs:
         run: python tests/validate_project.py
       - name: Validate prompt assets
         run: python tests/validate_prompt_assets.py
+      - name: Validate confirmed product decisions
+        run: python tests/validate_product_decisions.py
       - name: Check Python syntax
         run: python -m compileall -q .

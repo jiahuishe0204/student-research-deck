@@ -2,7 +2,7 @@
 
 先识别研究对象、预期交付物、读者和用户真正希望讲明白的内容。保留用户原始题目，不因为模型认为某个方向更“专业”就擅自改题。判断主题属于疾病或现象综述、机制研究、干预与治疗、诊断、技术或方法、平台与工程、比较评估、转化与产业化，或多类组合；这个分类只用于选择后续思路，不能成为固定目录。
 
-先把主题判断为 focused、broad、ambiguous 或 out_of_scope。若题目已经包含明确对象、干预/机制/技术、场景或希望覆盖的维度，topic_breadth=focused，normalized_topic忠实规范措辞，direction_options=[]，need_clarification=false。
+先把主题判断为 focused、broad、ambiguous 或 out_of_scope。focused 必须同时具有足以支撑一份深入报告的明确边界：不仅知道研究对象或技术，还能知道主要机制、疾病/组织场景、应用任务、比较对象或研究阶段中的至少一个具体限定。仅出现一个技术名加“在某大领域中的应用”，不自动算 focused；例如“导电水凝胶在神经电刺激调控中的应用”仍可分别写成神经损伤修复、慢性植入神经接口和无线神经调控等独立报告，应先给方向卡片。真正明确聚焦时，normalized_topic忠实规范措辞，direction_options=[]，need_clarification=false。
 
 若题目宽到可以形成两个以上差异明显的独立报告，topic_breadth=broad，不能自动选择其中之一。此时生成2—4个direction_options，交互页面将把它们显示为可点击卡片。每项只包含direction_id、简洁的title和一句focus。title应能直接作为用户点击的研究方向；focus只说明这个方向重点讲什么，不列复杂比较、方法细节或大段解释。need_clarification=true，clarification_question只写“请选择一个本次最想展开的方向”之类的简短提示，不要把选项重复写进问题字符串。
 

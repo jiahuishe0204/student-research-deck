@@ -4,7 +4,7 @@ import http.client
 import unittest
 from unittest.mock import patch
 
-from model_client import deepseek_json, parse_json_object, read_with_deadline
+from model_client import ModelOutputTruncated, deepseek_json, parse_json_object, read_with_deadline
 
 
 class FakeResponse:
@@ -97,6 +97,17 @@ class ModelClientTests(unittest.TestCase):
         self.assertEqual(result, {"ok": True})
         self.assertEqual(statuses, ["transport_error", "accepted"])
         self.assertEqual(request.call_count, 2)
+
+    def test_length_truncation_is_recorded_without_repeating_same_paid_cap(self):
+        reply = FakeResponse({"choices": [{"finish_reason": "length", "message": {"content": '{"unfinished":'}}],
+                              "usage": {"prompt_tokens": 100, "completion_tokens": 4400, "total_tokens": 4500}})
+        statuses = []
+        with patch("model_client.urllib.request.urlopen", return_value=reply) as request:
+            with self.assertRaises(ModelOutputTruncated):
+                deepseek_json("key", "model", "system", "prompt", {}, max_tokens=4400, max_attempts=2,
+                              usage_callback=lambda attempt, status, usage, detail: statuses.append(status))
+        self.assertEqual(statuses, ["truncated"])
+        self.assertEqual(request.call_count, 1)
 
 
 if __name__ == "__main__":

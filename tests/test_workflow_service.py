@@ -80,6 +80,23 @@ class WorkflowServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "缺少提示词"):
             service.generate("P1", "fast", {})
 
+    def test_cached_output_failing_new_validator_is_regenerated(self):
+        calls = []
+        def client(*args):
+            calls.append(True)
+            return ({"ok": False} if len(calls) == 1 else {"ok": True}), {"total_tokens": 1}
+        with tempfile.TemporaryDirectory() as directory:
+            service = WorkflowService("secret", FakeRouter(), "system", {"P5": "report"}, client, response_cache_dir=directory)
+            service.set_task_context("TASK-test")
+            service.generate("P5", "fast", {"same": "input"}, lambda value: value)
+            def stricter(value):
+                if not value["ok"]:
+                    raise ValueError("旧缓存未满足新规则")
+                return value
+            output, _, _ = service.generate("P5", "fast", {"same": "input"}, stricter)
+        self.assertTrue(output["ok"])
+        self.assertEqual(len(calls), 2)
+
     def test_project_factory_loads_registered_prompts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -144,6 +161,29 @@ class WorkflowServiceTests(unittest.TestCase):
         service.create_ppt({}, {}, [{"evidence_id": "EV-1"}], [], {}, "deep", plan)
 
         self.assertEqual(captured["plan"], plan)
+        self.assertEqual(captured["presentation_limits"]["page_characters_max"], 400)
+
+    def test_long_deep_ppt_uses_two_bounded_arc_batches_and_unique_page_ids(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
+        calls = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            batch = payload["page_batch"]
+            calls.append((batch["index"], [item["module_id"] for item in batch["assigned_arc"]], options["max_tokens"]))
+            page = {"page_id": "SL-01", "title": "界面结论", "purpose": "解释界面机制",
+                    "on_slide_text": ["导电水凝胶改善电极界面"], "visual_suggestion": "材料结构示意图",
+                    "speaker_notes": "材料界面性能需要结合具体实验评价。", "evidence_ids": ["EV-1"],
+                    "figure_refs": [], "source_citations": []}
+            return (validator({"deck_title": "deck", "storyline": "story", "pages": [page]}),
+                    {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30, "attempts": 1}, {})
+
+        service.generate = generate
+        arc = [{"module_id": "M%d" % index, "narrative": "part"} for index in range(1, 7)]
+        output, usage = service.create_ppt({}, {"report_markdown": "文" * 7001},
+                                           [{"evidence_id": "EV-1"}], [], {}, "deep", {"ppt_story_arc": arc})
+        self.assertEqual(calls, [(1, ["M1", "M2", "M3"], 7000), (2, ["M4", "M5", "M6"], 7000)])
+        self.assertEqual([page["page_id"] for page in output["pages"]], ["SL-01", "SL-02"])
+        self.assertEqual(usage["total_tokens"], 60)
 
     def test_metadata_only_evidence_skips_model_call(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P4": "evidence"})
@@ -154,6 +194,39 @@ class WorkflowServiceTests(unittest.TestCase):
         )
         self.assertEqual(output["extraction_status"], "no_extractable_evidence")
         self.assertEqual(usage["total_tokens"], 0)
+
+    def test_figure_provenance_overrides_model_claim_of_reuse_permission(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P4": "evidence"})
+        source = {"source_id": "SRC-1", "source": "Europe PMC", "abstract": "Study result", "access": "full_text",
+                  "figure_candidates": [{"figure_id": "SRC-1:fig1", "label": "Figure 1", "caption": "Observed response",
+                                         "article_figure_url": "https://europepmc.org/articles/PMC123/figure/fig1", "reuse_status": "unknown"}]}
+        model_output = {"evidence_version": "1", "source_id": "SRC-1", "extraction_status": "extracted", "reading_scope": "abstract",
+                        "evidence_records": [], "figure_records": [{"figure_id": "SRC-1:fig1", "source_id": "SRC-1", "caption": "Observed response",
+                        "locator": "PMC123, Figure 1", "supported_claims": ["response"], "reuse_status": "allowed"}], "no_extractable_reason": None}
+        service.generate = lambda stage, tier, payload, validator, **kwargs: (validator(model_output), {"total_tokens": 1}, {})
+
+        output, _ = service.extract_evidence(source, ["Q1"], "fast")
+
+        figure = output["figure_records"][0]
+        self.assertEqual(figure["reuse_status"], "unknown")
+        self.assertEqual(figure["article_figure_url"], "https://europepmc.org/articles/PMC123/figure/fig1")
+        self.assertEqual(figure["label"], "Figure 1")
+
+    def test_ppt_figure_reference_inherits_saved_source_and_permission(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
+        figure = {"figure_id": "SRC-1:fig1", "source_id": "SRC-1", "locator": "PMC123, Figure 1 | https://example.org/fig1", "reuse_status": "unknown"}
+        page = {"page_id": "P1", "title": "Study", "purpose": "Explain", "on_slide_text": ["Evidence-based result"],
+                "visual_suggestion": "Figure 1", "speaker_notes": "The source reports this result.", "evidence_ids": ["EV-1"],
+                "figure_refs": [{"figure_id": "SRC-1:fig1", "source_id": "WRONG", "locator": "invented", "intended_use": "Show result", "reuse_status": "allowed"}],
+                "source_citations": []}
+        service.generate = lambda *args, **kwargs: ({"deck_title": "Deck", "storyline": "Story", "pages": [page]}, {"total_tokens": 1}, {})
+
+        output, _ = service.create_ppt({}, {}, [{"evidence_id": "EV-1"}], [figure], {}, "fast")
+
+        reference = output["pages"][0]["figure_refs"][0]
+        self.assertEqual(reference["source_id"], "SRC-1")
+        self.assertEqual(reference["locator"], figure["locator"])
+        self.assertEqual(reference["reuse_status"], "unknown")
 
     def test_evidence_ids_are_namespaced_by_source(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P4": "evidence"})
@@ -184,7 +257,7 @@ class WorkflowServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "重复"):
             service.create_report({}, {}, evidence, "fast")
 
-    def test_report_drops_unknown_citation_locally_without_paid_retry(self):
+    def test_report_rejects_unknown_citation_instead_of_silently_deleting_support(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P5": "report"})
 
         def generate(stage, tier, payload, validator=None, **options):
@@ -197,9 +270,8 @@ class WorkflowServiceTests(unittest.TestCase):
             return validator(value), {"total_tokens": 1}, {}
 
         service.generate = generate
-        output, _ = service.create_report({}, {}, [{"evidence_id": "EV::SRC-1::001"}], "fast")
-        self.assertNotIn("EV::SRC-X::999", output["report_markdown"])
-        self.assertEqual(output["used_evidence_ids"], ["EV::SRC-1::001"])
+        with self.assertRaisesRegex(ValueError, "不存在的 evidence_id"):
+            service.create_report({}, {}, [{"evidence_id": "EV::SRC-1::001"}], "fast")
 
     def test_extract_claims_batches_pages_and_renumbers_claims(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P7": "claims"})
@@ -356,7 +428,7 @@ class WorkflowServiceTests(unittest.TestCase):
             "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
             "revised_claim": "体外实验中，振荡剪切应力使炎症基因升高。", "explanation": "补充条件",
         }]}
-        report = {"report_title": "t", "report_markdown": "研究显示振荡剪切应力使炎症基因升高[EV-1]。", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        report = {"report_title": "t", "report_markdown": "研究显示振荡剪切应力使炎症基因升高[EV-1]。源头摘要提及 M2 极化，但未提供对应 evidence_id 的独立证据条目。", "used_evidence_ids": ["EV-1"], "open_issues": []}
         ppt = {"deck_title": "d", "storyline": "s", "pages": [{
             "page_id": "P1", "title": "title", "purpose": "", "on_slide_text": ["text"],
             "visual_suggestion": "", "speaker_notes": "", "evidence_ids": ["EV-1"],
@@ -368,6 +440,8 @@ class WorkflowServiceTests(unittest.TestCase):
         )
 
         self.assertIn("体外实验中", output["final_report"]["markdown"])
+        self.assertIn("M2 极化，但这一细节尚缺独立证据支持", output["final_report"]["markdown"])
+        self.assertNotIn("evidence_id", output["final_report"]["markdown"])
 
     def test_final_assembly_routes_exact_open_issue_claim_to_open_issues(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})
@@ -390,7 +464,7 @@ class WorkflowServiceTests(unittest.TestCase):
             verification, report, ppt, [claim], [], [], "1"
         )
 
-        self.assertTrue(any("未核实" in item for item in output["open_issues"]))
+        self.assertTrue(any(item.startswith("尚待核实：") for item in output["open_issues"]))
         self.assertEqual(len(output["open_issues"]), 1)
 
     def test_final_assembly_does_not_overflow_notes_with_verification_append(self):
@@ -765,6 +839,21 @@ class WorkflowServiceTests(unittest.TestCase):
 
         self.assertEqual(output["final_ppt"]["pages"][0]["on_slide_text"], ["另一条结论"])
         self.assertEqual([item["action"] for item in output["change_log"]], ["removed", "removed"])
+
+    def test_deterministic_final_cleans_punctuation_left_by_report_removal(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        report = {"report_title": "报告", "report_markdown": "此外，，因此仍需验证。。下一步。，继续研究。", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "汇报", "storyline": "证据", "pages": [{
+            "page_id": "P1", "title": "研究结论", "purpose": "说明后续验证", "on_slide_text": ["现有研究提出值得进一步检验的方向"],
+            "visual_suggestion": "研究流程图", "speaker_notes": "现有研究给出一些线索，后续仍需独立验证。",
+            "evidence_ids": ["EV-1"], "figure_refs": [], "source_citations": [],
+        }]}
+        verification = {"results": [], "summary": {"supported": 0, "partially_supported": 0, "unsupported": 0, "cannot_determine": 0, "high_risk_remaining": 0}}
+
+        output, usage = service.assemble_final_deterministic(verification, report, ppt, [], ["SRC-1"], ["EV-1"])
+
+        self.assertEqual(output["final_report"]["markdown"], "因此仍需验证。下一步。继续研究。")
+        self.assertEqual(usage["total_tokens"], 0)
 
 
 if __name__ == "__main__":

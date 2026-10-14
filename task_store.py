@@ -173,4 +173,5 @@ class TaskStore:
             report = task["artifacts"].get("report", {}).get("data", {}).get("report_markdown")
         if not report:
             raise ValueError("任务尚无可导出的报告")
-        return "# %s\n\n- 任务编号：%s\n- 版本：%s\n- 状态：%s\n\n%s\n" % (task["topic"], task_id, task["tier"], task["status"], report)
+        # Customer export is the report itself, not an internal task receipt.
+        return str(report).rstrip() + "\n"

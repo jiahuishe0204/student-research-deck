@@ -5,13 +5,17 @@ import argparse
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from research_sources import plan_search_queries
+
 LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 ACTIVE_TASK = {"id": "", "token": ""}
-ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_STATE_DIR = ROOT / "data" / "private"
 MAX_VERIFICATION_CLAIMS = 120
 
@@ -37,12 +41,13 @@ def set_auth(task_id, token):
     ACTIVE_TASK.update({"id": task_id, "token": token})
 
 
-def save_resume_state(base, topic, tier, task_id, owner_token):
+def save_resume_state(base, topic, tier, task_id, owner_token, selected_direction=""):
     """Persist the one-time task credential locally so interrupted paid runs can resume."""
     PRIVATE_STATE_DIR.mkdir(parents=True, exist_ok=True)
     path = PRIVATE_STATE_DIR / ("live-regression-%s.json" % task_id)
     temporary = path.with_suffix(".tmp")
-    payload = {"version": 1, "base": base, "topic": topic, "tier": tier, "task_id": task_id, "owner_token": owner_token}
+    payload = {"version": 1, "base": base, "topic": topic, "tier": tier, "task_id": task_id, "owner_token": owner_token,
+               "selected_direction": selected_direction}
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     os.chmod(temporary, 0o600)
     temporary.replace(path)
@@ -68,21 +73,7 @@ def post(base, path, payload, timeout=600):
 
 
 def query_from_plan(plan, fallback):
-    values = []
-
-    def visit(value):
-        if isinstance(value, str) and re.search(r"[A-Za-z]{3}", value) and len(value) < 90:
-            values.append(value)
-        elif isinstance(value, list):
-            for item in value:
-                visit(item)
-        elif isinstance(value, dict):
-            for item in value.values():
-                visit(item)
-
-    visit(plan.get("search_concepts", {}))
-    unique = list(dict.fromkeys(values))[:5]
-    return " OR ".join('"%s"' % item.replace('"', "") for item in unique) if unique else fallback
+    return plan_search_queries(plan, fallback)[0]
 
 
 def persist(base, task_id, stage, event_type, payload, artifact_kind):
@@ -133,11 +124,25 @@ def verify_with_checkpoints(base, task_id, topic, tier, claims, evidence_records
     return merge_verification(results)
 
 
-def run_topic(base, topic, tier):
+def choose_user_direction(intent, selected_direction):
+    """Use only an explicitly supplied user choice; never infer a direction."""
+    if not intent.get("need_clarification"):
+        if selected_direction:
+            raise RuntimeError("用户已选择细分方向，但本次 P1 未给出方向卡片；停止以免偏离用户意图")
+        return None
+    if intent.get("topic_breadth") != "broad" or not selected_direction:
+        raise RuntimeError("P1 需要用户选定方向或回答澄清问题；自动回归不能代选。保存的任务可在用户选择后恢复。")
+    matches = [item for item in intent.get("direction_options", []) if selected_direction in item["title"]]
+    if len(matches) != 1:
+        raise RuntimeError("用户选择无法唯一对应本次 P1 方向卡片；请核对方向后再继续")
+    return matches[0]["direction_id"]
+
+
+def run_topic(base, topic, tier, selected_direction=""):
     task = post(base, "/api/tasks", {"topic": topic, "tier": tier})["data"]
     task_id = task["task_id"]
     set_auth(task_id, task["owner_token"])
-    state_path = save_resume_state(base, topic, tier, task_id, task["owner_token"])
+    state_path = save_resume_state(base, topic, tier, task_id, task["owner_token"], selected_direction)
     print("[%s] private resume state: %s" % (topic, state_path), flush=True)
     usage = {}
     print("[%s] P1 intent" % topic, flush=True)
@@ -146,23 +151,26 @@ def run_topic(base, topic, tier):
     usage["P1"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P1", "intent_completed", intent, "intent")
 
-    clarification = intent.get("scope_hint", "") if intent.get("need_clarification") else ""
+    direction_id = choose_user_direction(intent, selected_direction)
     print("[%s] P2 plan" % topic, flush=True)
-    response = post(base, "/api/plan", {"topic": topic, "tier": tier, "clarification": clarification, "intent": intent})
+    response = post(base, "/api/plan", {"topic": topic, "tier": tier, "direction_id": direction_id})
     plan = response["data"]
     usage["P2"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P2", "plan_completed", plan, "plan")
 
     print("[%s] retrieval" % topic, flush=True)
-    sources = post(base, "/api/search", {"topic": topic, "query": query_from_plan(plan, topic), "tier": tier})["data"]
+    sources = post(base, "/api/search", {"topic": topic, "plan": plan, "tier": tier})["data"]
     if not sources["records"]:
         raise RuntimeError("%s returned no sources" % topic)
-    candidates = sources["records"][:12 if tier == "deep" else 8]
+    candidates = sources["records"]
     persist(base, task_id, "P2", "search_completed", {**sources, "records": candidates}, "sources")
 
     print("[%s] P3 screen %d candidates" % (topic, len(candidates)), flush=True)
-    response = post(base, "/api/screen", {"topic": topic, "tier": tier, "plan": plan, "candidates": candidates})
+    response = post(base, "/api/screen", {"topic": topic, "tier": tier, "plan": plan, "candidates": candidates, "queries": sources.get("queries", [])})
     screening = response["data"]
+    candidates = response.get("sources", candidates)
+    if not screening.get("quality_gate", {}).get("passed", False):
+        raise RuntimeError("P3 来源质量门禁未通过：" + "；".join(screening.get("quality_gate", {}).get("problems", [])))
     usage["P3"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P3", "screening_completed", screening, "screening")
 
@@ -185,7 +193,7 @@ def run_topic(base, topic, tier):
 
     print("[%s] P5 report" % topic, flush=True)
     evidence_contexts = [{"source_id": group["source_id"], "reading_scope": group["reading_scope"]} for group in evidence_groups]
-    response = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": evidence_contexts, "tier": tier})
+    response = post(base, "/api/report", {"intent": intent, "plan": plan, "evidence_records": evidence_records, "figure_records": figure_records, "evidence_contexts": evidence_contexts, "tier": tier})
     report = response["data"]
     usage["P5"] = response.get("usage", {}).get("total_tokens", 0)
     persist(base, task_id, "P5", "report_completed", report, "report")
@@ -233,6 +241,7 @@ def main():
     parser.add_argument("--pending", action="store_true", help="运行 live-regression-plan.json 中尚未完成的主题")
     parser.add_argument("--base", default="http://127.0.0.1:4180")
     parser.add_argument("--tier", choices=("fast", "deep"), default="fast")
+    parser.add_argument("--selected-direction", default="", help="用户明确选择的方向标题关键字；必须唯一匹配 P1 卡片")
     args = parser.parse_args()
     regression_plan = json.loads((ROOT / "tests/fixtures/live-regression-plan.json").read_text(encoding="utf-8"))
     if args.pending:
@@ -243,10 +252,12 @@ def main():
         args.topics = [topics_by_id[item] for item in regression_plan["pending_ids"]]
     if not args.topics:
         parser.error("请提供主题，或使用 --pending")
+    if args.selected_direction and len(args.topics) != 1:
+        parser.error("--selected-direction 只能用于一个明确主题")
     results = []
     for topic in args.topics:
         try:
-            result = run_topic(args.base, topic, args.tier)
+            result = run_topic(args.base, topic, args.tier, args.selected_direction)
             failures = acceptance_failures(result, regression_plan["acceptance"])
             results.append({"ok": not failures, **result, "acceptance_failures": failures})
         except Exception as exc:

@@ -162,6 +162,11 @@ def validate_report(value, evidence_ids, tier="deep"):
     if not set(value["used_evidence_ids"]).issubset(set(evidence_ids)):
         raise ContractError("P5 使用了不存在的 evidence_id")
     markdown = str(value.get("report_markdown", ""))
+    if re.search(r"\[\d+\]", markdown):
+        raise ContractError("P5 草稿使用了无法对应证据的数字脚注；必须先引用输入中的 EV 编号")
+    cited = set(re.findall(r"EV::.+?::\d{3}", markdown))
+    if tier == "deep" and value.get("status") == "draft" and not cited:
+        raise ContractError("P5 深入报告没有逐项证据引用，不能进入后续交付")
     # The lower bound guards against a disguised outline.  The upper bound is
     # only a technical runaway guard: report depth must not be cut merely to
     # satisfy the former 8,000-character product target.
@@ -174,7 +179,6 @@ def validate_report(value, evidence_ids, tier="deep"):
     required_sections = (("执行摘要", "摘要"), ("研究范围", "研究问题与范围", "问题界定", "研究目的"), ("方法", "证据基础", "资料基础"), ("综合结论", "结论"), ("局限", "证据边界"))
     if any(not any(term in markdown for term in alternatives) for alternatives in required_sections):
         raise ContractError("P5 调研报告缺少摘要、范围方法、结论或局限部分")
-    cited = set(re.findall(r"EV::.+?::\d{3}", markdown))
     if not cited.issubset(set(evidence_ids)):
         raise ContractError("P5 正文使用了不存在的 evidence_id")
     return value
@@ -239,6 +243,18 @@ def validate_final(value, claim_ids, source_ids, evidence_ids, verification=None
         raise ContractError("P9 PPT 使用了不存在的 evidence_id")
     validate_ppt_density(value["final_ppt"]["pages"])
     validate_presentation_voice(value["final_ppt"]["pages"])
+    delivery_text = "\n".join([value["final_report"]["markdown"]] + [
+        "\n".join([page.get("speaker_notes", "")] + page.get("on_slide_text", []))
+        for page in value["final_ppt"]["pages"]
+    ])
+    if any(fragment in delivery_text for fragment in ("，，", "，但。", "，而。", "，因此。", "；。", "。。", "。，", "，。")):
+        raise ContractError("P9 核验修订留下断裂标点或空转折，不能交付")
+    report_text = value["final_report"]["markdown"]
+    if any(fragment in report_text for fragment in ("evidence_id", "source_id", "evidence_contexts", "（未核实）")):
+        raise ContractError("P9 客户报告泄露内部审计字段或未核实标签，不能交付")
+    reference_headings = re.findall(r"(?m)^#{1,3}\s*参考文献\s*$", value["final_report"]["markdown"])
+    if len(reference_headings) > 1:
+        raise ContractError("P9 报告重复生成参考文献标题，不能交付")
     if any(item["claim_id"] not in set(claim_ids) for item in value["change_log"]):
         raise ContractError("P9 变更记录使用了不存在的 claim_id")
     if verification is not None:
