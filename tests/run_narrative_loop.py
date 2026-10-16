@@ -82,14 +82,27 @@ def generate_cases(service,directory,cases,prompts):
             finally:
                 service.stage_prompts['P8']=old_prompt
             case=apply_reconciliation(case,corrected)
+        last_raw=None
         def validate(x):
+            nonlocal last_raw
+            last_raw=x
             save(directory,f'case-{i}-attempt-{attempt}-raw-author',x)
             x=normalize_envelope(x,[case])
             validate_author(x,[case]);render(case,x['pages'][0]);return x
-        payload={'cases':[case]}
+        author_case={k:v for k,v in case.items() if k!='evidence_records'}
+        bridge_budget=max(0,780-sum(len(v['text']) for v in case['canonical'].values() if v['text']))
+        payload={'cases':[author_case],'total_bridge_character_budget':bridge_budget}
         accepted=False
         for attempt in range(1,4):
-            output,_,_=service.generate('P6','deep',payload,validate,max_tokens=2500,max_attempts=1,request_timeout=90)
+            last_raw=None
+            try:
+                output,_,_=service.generate('P6','deep',payload,validate,max_tokens=2500,max_attempts=1,request_timeout=90)
+            except ValueError as exc:
+                if last_raw is None: raise
+                save(directory,f'case-{i}-attempt-{attempt}-structural-failure',{'error':str(exc)})
+                payload={'cases':[author_case],'previous_output':last_raw,'structural_error':str(exc),
+                         'total_bridge_character_budget':bridge_budget,'instruction':'保留全部事实，仅精简过渡或修复结构，不截断。'}
+                continue
             page=output['pages'][0]
             audit=review(service,case,page,directory,f'case-{i}-attempt-{attempt}')
             save(directory,f'case-{i}-attempt-{attempt}',{'case':case,'page':page,'rendered':render(case,page),'review':audit})
@@ -100,7 +113,7 @@ def generate_cases(service,directory,cases,prompts):
                 assert validate_seal(case,page,approval,prompts)
                 save(directory,f'case-{i}-approval',approval)
                 accepted=True;break
-            payload={'cases':[case],'previous_page':page,'specific_review_findings':errors,
+            payload={'cases':[author_case],'previous_page':page,'specific_review_findings':errors,'total_bridge_character_budget':bridge_budget,
                      'revision_instruction':'仅修正实际问题，不删除有效主张，不强行加图；保持原框架。'}
         outcomes.append({'page_id':case['page_id'],'passed':accepted,'attempts':attempt})
     return outcomes
