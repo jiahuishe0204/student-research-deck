@@ -1,0 +1,101 @@
+.delivery-view-tabs {
+  position: relative;
+}
+
+.delivery-view-tabs button {
+  border-bottom: 0;
+}
+
+.delivery-view-tabs button[aria-selected="true"] {
+  border-bottom-color: transparent;
+}
+
+.view-tab-indicator {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: var(--indicator-width, 0);
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--purple);
+  transform: translateX(var(--indicator-left, 0));
+  transform-origin: left center;
+  transition: transform 380ms cubic-bezier(.65, 0, .35, 1), width 380ms cubic-bezier(.65, 0, .35, 1);
+  pointer-events: none;
+}
+
+.content-index {
+  isolation: isolate;
+  border-right-color: #efecf4;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(102, 88, 181, .22) transparent;
+}
+
+.content-index::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.content-index::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content-index::-webkit-scrollbar-thumb {
+  background: rgba(102, 88, 181, .2);
+  border-radius: 999px;
+}
+
+.content-index button {
+  position: relative;
+  z-index: 1;
+  transition: color 200ms ease;
+}
+
+.content-index button:hover,
+.content-index button.active {
+  background: transparent;
+}
+
+.index-active-indicator {
+  position: absolute;
+  z-index: 0;
+  left: var(--index-x, 0);
+  top: 0;
+  width: var(--index-width, 0);
+  height: var(--index-height, 0);
+  border-radius: 8px;
+  overflow: visible;
+  background: linear-gradient(100deg, #ece8f8 0%, #f5f2fb 72%, #fbfafc 100%);
+  box-shadow: 0 8px 18px rgba(76, 62, 132, .08), inset 0 0 0 1px rgba(102, 88, 181, .04);
+  opacity: 0;
+  transform: translateY(var(--index-y, 0));
+  transition: transform 420ms cubic-bezier(.65, 0, .35, 1), width 420ms cubic-bezier(.65, 0, .35, 1), height 420ms cubic-bezier(.65, 0, .35, 1), opacity 150ms ease;
+  pointer-events: none;
+}
+
+.index-active-indicator.visible {
+  opacity: 1;
+}
+
+@media (max-width: 650px) {
+  .delivery-actions {
+    margin-top: 14px;
+  }
+
+  .index-active-indicator {
+    left: 0;
+    top: var(--index-y, 0);
+    transform: translateX(var(--index-x, 0));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view-tab-indicator {
+    transition: none;
+  }
+
+  .index-active-indicator,
+  .content-index button {
+    transition: none;
+  }
+}

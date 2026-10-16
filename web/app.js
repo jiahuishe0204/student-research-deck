@@ -3,8 +3,14 @@ const form=$('#intent-form'),task=$('#task'),result=$('#intent-result'),title=$(
 let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',selectedDirection=null,currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,currentTaskToken=null,taskPaused=false;
 const taskSessionKey='research-delivery.active-task.v1';
 
+const slidePreviewPages=[
+  {label:'问题',eyebrow:'01 / RESEARCH QUESTION',title:'实体瘤为什么仍是 CAR-T 的困难场景？',bullets:['抗原异质性带来逃逸风险','肿瘤微环境抑制 T 细胞活性','浸润与持续性仍限制疗效'],sources:'SOURCES · 03 / 07 / 11',notes:'这一页先建立问题，不急着给出路线优劣。讲述时用三个障碍解释后续技术为什么分别从靶点、细胞状态和递送方式入手。',chips:['来源 03','来源 07']},
+  {label:'路线',eyebrow:'02 / TECHNICAL ROUTES',title:'不同技术路线分别解决哪一种障碍？',bullets:['多靶点设计降低抗原逃逸风险','细胞装甲化增强抑制环境中的活性','局部递送改善肿瘤浸润与暴露'],sources:'SOURCES · 04 / 08 / 12',notes:'这一页不把路线排成简单名次，而是说明每条路线对应的问题、适用条件和仍未解决的限制。',chips:['来源 04','来源 08']},
+  {label:'证据',eyebrow:'03 / EVIDENCE',title:'现有证据支持到什么程度？',bullets:['临床前结果用于说明机制可行性','早期临床信号不能等同于确定疗效','跨研究数字不作为头对头比较'],sources:'SOURCES · 05 / 09 / 13',notes:'收束时强调证据层级。讲清哪些判断来自临床前研究、哪些来自早期临床，以及为什么仍需要更成熟的比较证据。',chips:['来源 05','来源 09']}
+];
+
 const previews={
-  slides:`<div class="slide-preview"><div class="slide-list"><button class="active">01 · 问题</button><button>02 · 路线</button><button>03 · 证据</button></div><div class="slide-canvas"><small>01 / RESEARCH QUESTION</small><div><h3>实体瘤为什么仍是 CAR-T 的困难场景？</h3><ul><li>抗原异质性带来逃逸风险</li><li>肿瘤微环境抑制 T 细胞活性</li><li>浸润与持续性仍限制疗效</li></ul></div><small>SOURCES · 03 / 07 / 11</small></div><aside class="speaker-note"><h4>演讲者注释</h4><p>这一页先建立问题，不急着给出路线优劣。讲述时用三个障碍解释后续技术为什么分别从靶点、细胞状态和递送方式入手。</p><span class="source-chip">来源 03</span><span class="source-chip">来源 07</span></aside></div>`,
+  slides:`<div class="slide-preview"><div class="slide-list" aria-label="PPT页面预览">${slidePreviewPages.map((page,index)=>`<button type="button" data-slide-preview="${index}" class="${index===0?'active':''}" aria-pressed="${index===0}">${String(index+1).padStart(2,'0')} · ${page.label}</button>`).join('')}</div><div class="slide-canvas" id="slide-preview-canvas" aria-live="polite"></div><aside class="speaker-note" id="slide-preview-note"></aside></div>`,
   report:`<article class="document-preview"><p class="eyebrow">REPORT EXCERPT</p><h3>技术路线并不是简单的优劣排序</h3><p>现有方案分别针对抗原异质性、免疫抑制微环境与细胞浸润障碍。由于多数证据来自早期临床或临床前研究，不宜把不同研究中的缓解率直接视为头对头比较。</p><h4>这一结论为什么可信</h4><p>系统会把每个可核验判断拆开，对照证据中的研究对象、条件、数字和语气强度。无法确认的内容会降级表达或删除。</p></article>`,
   sources:`<div class="source-preview"><article class="source-card"><span class="verified">● 身份已核验</span><b>系统综述</b><p>用于建立主要技术路线与共识性障碍，不替代原始研究中的具体数据。</p><span class="source-chip">全文</span></article><article class="source-card"><span class="verified">● 语义已核验</span><b>临床研究</b><p>提取样本量、终点和适用范围；避免把早期信号写成确定疗效。</p><span class="source-chip">原始研究</span></article><article class="source-card"><span class="verified">● 边界已标记</span><b>注册与官方资料</b><p>核对试验状态和监管信息，和论文证据分别呈现。</p><span class="source-chip">官方来源</span></article></div>`
 };
@@ -15,7 +21,16 @@ function renderLinkedReportMarkdown(value){
   for(const match of markdown.matchAll(links)){rendered+=escapeHtml(markdown.slice(offset,match.index));rendered+=`<a href="${escapeHtml(match[2])}" target="_blank" rel="noopener">[${escapeHtml(match[1])}]</a>`;offset=match.index+match[0].length;}
   return rendered+escapeHtml(markdown.slice(offset));
 }
-function showPreview(name){$('#preview-body').innerHTML=previews[name];document.querySelectorAll('.preview-tabs button').forEach(button=>button.classList.toggle('active',button.dataset.preview===name));}
+function renderSlidePreview(index,animate=false){
+  const page=slidePreviewPages[index],canvas=$('#slide-preview-canvas'),note=$('#slide-preview-note');if(!page||!canvas||!note)return;
+  const render=()=>{canvas.innerHTML=`<small>${page.eyebrow}</small><div><h3>${page.title}</h3><ul>${page.bullets.map(item=>`<li>${item}</li>`).join('')}</ul></div><small>${page.sources}</small>`;note.innerHTML=`<h4>演讲者注释</h4><p>${page.notes}</p>${page.chips.map(item=>`<span class="source-chip">${item}</span>`).join('')}`;};
+  if(animate&&typeof canvas.animate==='function'&&!window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    canvas.animate([{opacity:1,transform:'translateY(0)'},{opacity:0,transform:'translateY(-10px)'}],{duration:130,easing:'cubic-bezier(.55,0,1,.45)'}).finished.then(()=>{render();canvas.animate([{opacity:0,transform:'translateY(12px)'},{opacity:1,transform:'translateY(0)'}],{duration:280,easing:'cubic-bezier(0,.55,.45,1)'});});
+    note.animate([{opacity:1},{opacity:0}],{duration:120}).finished.then(()=>{note.innerHTML=`<h4>演讲者注释</h4><p>${page.notes}</p>${page.chips.map(item=>`<span class="source-chip">${item}</span>`).join('')}`;note.animate([{opacity:0},{opacity:1}],{duration:260});});
+  }else render();
+  document.querySelectorAll('[data-slide-preview]').forEach((button,buttonIndex)=>{button.classList.toggle('active',buttonIndex===index);button.setAttribute('aria-pressed',String(buttonIndex===index));});
+}
+function showPreview(name){$('#preview-body').innerHTML=previews[name];document.querySelectorAll('.preview-tabs button').forEach(button=>button.classList.toggle('active',button.dataset.preview===name));if(name==='slides')renderSlidePreview(0);}
 async function request(path,payload){const headers={'Content-Type':'application/json'};if(currentTaskId&&currentTaskToken){headers['X-Task-ID']=currentTaskId;headers['X-Task-Token']=currentTaskToken;}const response=await fetch(path,{method:'POST',headers,body:JSON.stringify(payload)});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.error||'请求失败');return data;}
 async function fetchCurrentTask(){const response=await fetch(`/api/tasks/${encodeURIComponent(currentTaskId)}`,{headers:{'X-Task-ID':currentTaskId,'X-Task-Token':currentTaskToken}});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.error||'任务恢复失败');return data.data;}
 function saveTaskSession(){if(currentTaskId&&currentTaskToken)sessionStorage.setItem(taskSessionKey,JSON.stringify({taskId:currentTaskId,token:currentTaskToken}));}
@@ -27,6 +42,7 @@ function ensureActive(){if(taskPaused)throw new Error('任务已暂停，已有�
 
 showPreview('slides');
 document.querySelectorAll('[data-preview]').forEach(button=>button.addEventListener('click',()=>showPreview(button.dataset.preview)));
+$('#preview-body').addEventListener('click',event=>{const button=event.target.closest('[data-slide-preview]');if(button)renderSlidePreview(Number(button.dataset.slidePreview),true);});
 document.querySelectorAll('[data-example]').forEach(button=>button.addEventListener('click',()=>{task.value=button.dataset.example;task.focus();error.textContent='';}));
 
 form.addEventListener('submit',async event=>{

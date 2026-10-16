@@ -1,0 +1,66 @@
+/* A restrained editorial heading face paired with a familiar screen-reading UI face. */
+:root {
+  --font-ui: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-editorial: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", serif;
+}
+
+body,
+button,
+textarea {
+  font-family: var(--font-ui);
+  font-weight: 400;
+}
+
+.hero h1,
+.section-intro h2,
+.sample-intro h2,
+.flow-panel h2,
+.delivery-header h3,
+.reader-article h4,
+.slide-main h4,
+.source-list h4 {
+  font-family: var(--font-editorial);
+  font-weight: 600;
+  letter-spacing: -.025em;
+}
+
+.hero h1 {
+  font-size: clamp(42px, 4.5vw, 65px);
+  line-height: 1.28;
+  letter-spacing: -.035em;
+}
+
+.hero-lede,
+.reader-article p,
+.reader-article li {
+  letter-spacing: .005em;
+}
+
+.brand,
+.input-card > label,
+.tier-option strong,
+.step-row h3,
+.status-demo h3,
+.reader-article h5,
+.slide-main h5 {
+  font-family: var(--font-ui);
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.eyebrow,
+.section-kicker,
+.sample-label,
+.card-topline,
+.slide-number {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: .035em;
+}
+
+@media (max-width: 650px) {
+  .hero h1 {
+    font-size: clamp(37px, 9vw, 43px);
+    line-height: 1.3;
+  }
+}

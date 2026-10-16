@@ -1,0 +1,22 @@
+@media (max-width: 650px) {
+  .delivery-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    justify-content: stretch;
+  }
+
+  .delivery-actions button {
+    min-width: 0;
+  }
+
+  .download-menu,
+  .download-menu > button {
+    width: 100%;
+  }
+
+  .download-options {
+    left: auto;
+    right: 0;
+    width: min(310px, calc(100vw - 64px));
+  }
+}

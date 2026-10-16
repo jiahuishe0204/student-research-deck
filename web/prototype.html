@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="调研交付台新版界面交互原型" />
+  <title>调研交付台｜新版界面原型</title>
+  <link rel="stylesheet" href="./prototype.css" />
+  <link rel="stylesheet" href="./prototype-typography.css" />
+  <link rel="stylesheet" href="./prototype-usability.css?v=2" />
+  <script src="./prototype.js?v=2" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#start">跳到主要内容</a>
+  <div class="prototype-banner">界面原型 · 案例为人工润色的验证稿 · 登录、生成与邮件交付尚未接入</div>
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="调研交付台首页"><span class="brand-mark" aria-hidden="true">✳</span><span>调研交付台</span></a>
+    <nav aria-label="主导航"><a href="#how">如何使用</a><a href="#sample">交付案例</a><a href="#start">开始调研</a></nav>
+    <a class="header-action" href="#sample">先看案例 <span aria-hidden="true">↗</span></a>
+  </header>
+
+  <main id="top">
+    <section class="hero page-width" id="start">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="eyebrow-line"></span> 为课程、组会与初步研究而做</div>
+        <h1>把题目研究清楚，<br><span>把成果讲得明白。</span></h1>
+        <p class="hero-lede">确定研究范围，阅读可追溯的学术报告，再把关键内容组织成逐页可讲的 PPT 内容包。</p>
+        <div class="hero-points"><span>报告可直接阅读</span><span>PPT 逐页内容与讲稿</span><span>重要来源可追溯</span></div>
+      </div>
+      <div class="input-card">
+        <div class="card-topline"><span>新建调研</span><span class="small-star" aria-hidden="true">✳</span></div>
+        <label for="topic">你想了解什么主题？</label>
+        <textarea id="topic" rows="3" maxlength="500" placeholder="例如：导电水凝胶在神经电刺激调控中的应用"></textarea>
+        <div class="example-row"><span>试试示例</span><button type="button" id="example-topic">宽题：导电水凝胶与神经接口</button><button type="button" id="focused-example">聚焦题：慢性植入神经接口</button></div>
+        <fieldset class="tier-fieldset"><legend>交付深度</legend>
+          <label class="tier-option"><input type="radio" name="tier" value="fast" checked><span><strong>快速版</strong><small>适合课程调研与短汇报。每个已验证邮箱可领取一次完整交付。</small></span></label>
+          <label class="tier-option"><input type="radio" name="tier" value="deep"><span><strong>深入版</strong><small>增加路线比较、反证与证据边界。首次免费不适用。</small></span></label>
+        </fieldset>
+        <p id="form-error" class="form-error" role="alert"></p>
+        <button class="primary-button" id="begin" type="button">先确认题目 <span aria-hidden="true">↗</span></button>
+        <p class="fine-print">了解产品和输入题目无需登录。确认交付范围后，生成前需邮箱验证码。</p>
+      </div>
+    </section>
+
+    <section class="flow-panel page-width" id="flow-panel" hidden aria-live="polite">
+      <div class="flow-head"><span class="section-kicker">01 / 题目确认</span><button class="text-button" id="edit-topic" type="button">修改题目</button></div>
+      <h2 id="flow-title"></h2>
+      <p id="flow-description"></p>
+      <div id="direction-area" hidden><p class="field-title">这个题目可以从几个方向收束。请选择一个：</p><div class="direction-grid" id="directions"></div></div>
+      <div class="scope-summary" id="scope-summary"></div>
+      <p id="flow-error" class="form-error" role="alert"></p>
+      <button class="primary-button flow-next" id="confirm-scope" type="button">确认范围，继续 <span aria-hidden="true">↗</span></button>
+    </section>
+
+    <section class="flow-panel page-width gate-panel" id="gate-panel" hidden aria-live="polite">
+      <span class="section-kicker">02 / 邮箱验证 · 待接入</span>
+      <h2>题目范围已确认</h2>
+      <p>正式流程将在这里使用邮箱一次性验证码。验证后才检查快速版首次免费资格并启动完整生成；当前原型不会发送验证码或创建任务。</p>
+      <div class="gate-note"><span aria-hidden="true">◎</span><span id="gate-summary"></span></div>
+      <button class="secondary-button" id="back-to-scope" type="button">返回调整题目</button>
+    </section>
+
+    <section class="how-section" id="how"><div class="page-width">
+      <div class="section-intro"><span class="section-kicker">从题目到成果</span><h2>把复杂工作留给流程，<br>把关键选择留给你。</h2><p>只有主题过宽时才需要选择方向。之后的进度用清楚的阶段说明，不要求你学习提示词或逐步操作模型。</p></div>
+      <div class="step-row"><article><span>01</span><h3>确认研究范围</h3><p>宽题给出少量方向，由你选择；明确题目直接继续。</p></article><article><span>02</span><h3>查看任务进度</h3><p>正式版将以真实任务阶段显示检索、整理、撰写与核验。</p></article><article><span>03</span><h3>阅读并使用交付</h3><p>报告、PPT 逐页内容、讲稿及图源放在同一交付页。</p></article></div>
+      <div class="status-demo"><div><span class="section-kicker">任务状态设计示例 · 非真实任务</span><h3>每个状态都说明下一步</h3></div><div class="status-tabs" role="group" aria-label="查看状态示例"><button type="button" data-status="working" class="active" aria-pressed="true">进行中</button><button type="button" data-status="limited" aria-pressed="false">证据不足</button><button type="button" data-status="failed" aria-pressed="false">失败</button><button type="button" data-status="expired" aria-pressed="false">已过期</button></div><div id="status-panel" class="status-panel" aria-live="polite"></div></div>
+    </div></section>
+
+    <section class="sample-section page-width" id="sample">
+      <div class="sample-intro"><div><span class="section-kicker">真实内容样本</span><h2>看看最终要读到什么。</h2></div><p>以下“慢性植入神经接口”案例取自本地验证稿，并经过人工学术润色。它用于评估阅读体验，不代表当前自动生成质量已经达到同一水平。</p></div>
+      <div class="delivery-shell">
+        <div class="delivery-header"><div><span class="sample-label">交付案例</span><h3>导电水凝胶在慢性植入神经接口中的应用</h3><p>以材料设计、界面证据和长期稳定性为主线</p></div><div class="delivery-meta"><span>报告</span><span>12 页 PPT 内容</span><span>来源入口</span></div></div>
+        <div class="delivery-tabs" role="tablist" aria-label="案例内容"><button type="button" role="tab" aria-selected="true" data-tab="report">调研报告</button><button type="button" role="tab" aria-selected="false" data-tab="slides">PPT 逐页内容</button><button type="button" role="tab" aria-selected="false" data-tab="sources">来源与配图</button></div>
+        <div class="sample-actions"><span>当前卡片展示人工润色案例的节选</span><div><a class="sample-open-link" href="./delivery.html">阅读完整本地交付 ↗</a><button type="button" id="copy-excerpt">复制当前节选</button><button type="button" id="download-excerpt">下载当前节选 .md</button></div></div>
+        <p id="sample-feedback" class="sample-feedback" role="status"></p>
+        <div class="delivery-content" id="delivery-content"></div>
+      </div>
+    </section>
+  </main>
+  <footer><div class="page-width footer-inner"><span class="brand"><span class="brand-mark" aria-hidden="true">✳</span><span>调研交付台</span></span><p>界面原型，仅供视觉与交互审查。正式服务尚未开放。</p><a href="#top">回到顶部 ↑</a></div></footer>
+</body>
+</html>

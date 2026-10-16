@@ -1,0 +1,88 @@
+.delivery-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 78% 8%, rgba(120, 104, 192, .12), transparent 30%),
+    radial-gradient(circle at 7% 30%, rgba(196, 187, 232, .18), transparent 24%),
+    linear-gradient(180deg, #f4f1fa 0%, #f8f7f4 50%, #f5f3f8 100%);
+  background-attachment: fixed;
+}
+
+.delivery-site-header {
+  background: rgba(247, 246, 243, .88);
+  border-bottom-color: #e4e0ea;
+  box-shadow: 0 8px 24px rgba(62, 55, 87, .025);
+  backdrop-filter: blur(18px);
+}
+
+.delivery-workspace {
+  padding-top: 42px;
+}
+
+.delivery-site-header {
+  position: sticky;
+}
+
+.delivery-app {
+  border-color: #dfdce6;
+  box-shadow: 0 24px 64px rgba(50, 43, 74, .09);
+}
+
+.boundary-note {
+  padding: 34px 28px;
+  border: 1px solid rgba(217, 212, 231, .7);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .52);
+  backdrop-filter: blur(10px);
+}
+
+.login-pending {
+  font-family: inherit;
+  background: #fff;
+  cursor: default;
+}
+
+.login-pending span {
+  margin-left: 5px;
+  color: #8a82a2;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.report-mark svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.result-heading {
+  padding: 28px 34px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.result-heading h1 {
+  margin: 0;
+  color: #343246;
+  font-family: var(--font-editorial);
+  font-size: clamp(23px, 2.7vw, 34px);
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -.025em;
+}
+
+@media (max-width: 650px) {
+  .delivery-workspace {
+    padding-top: 20px;
+  }
+
+  .result-heading {
+    padding: 23px 20px 19px;
+  }
+
+  .result-heading h1 {
+    font-size: 24px;
+  }
+}
