@@ -12,3 +12,5 @@ alwaysApply: true
 - Change a confirmed choice only after the user explicitly approves the replacement; update the JSON, source document, tests, and implementation together.
 - Items under `explicitly_deferred` must not enter the implementation unless the user explicitly reopens them.
 - Report separately: decision made, code completed, tests passed, deployed, and verified online. Never collapse these states into “done.”
+- Before giving the user a plan, operation step, code change, or completion claim, perform a professional self-review: check alignment with the decision contract, technical feasibility, cost, security, privacy, failure recovery, and an observable verification method.
+- For guided operations, explain the purpose, give the exact action, state the expected result, and verify the result before moving to the next step.

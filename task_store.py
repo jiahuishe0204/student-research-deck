@@ -129,6 +129,17 @@ class TaskStore:
                 return self.get_task(task_id)
             if status not in STATUS_TRANSITIONS[current]:
                 raise ValueError("任务不能从 %s 变更为 %s" % (current, status))
+            if status == "completed":
+                artifact = connection.execute("SELECT payload_json FROM artifacts WHERE task_id=? AND kind='final_delivery'", (task_id,)).fetchone()
+                if artifact is None:
+                    raise ValueError("最终交付尚未保存，不能标记任务完成")
+                final = json.loads(artifact["payload_json"])
+                if not isinstance(final, dict):
+                    raise ValueError("最终交付格式无效，不能标记任务完成")
+                report = final.get("final_report") or {}
+                ppt = final.get("final_ppt") or {}
+                if not isinstance(report, dict) or not isinstance(ppt, dict) or not str(report.get("markdown") or "").strip() or not isinstance(ppt.get("pages"), list) or not ppt["pages"]:
+                    raise ValueError("报告或 PPT 逐页内容缺失，不能标记任务完成")
             connection.execute("UPDATE tasks SET status=?,updated_at=? WHERE task_id=?", (status, now, task_id))
             connection.execute("INSERT INTO events(task_id,stage,event_type,payload_json,created_at) VALUES (?,?,?,?,?)", (task_id, task["current_stage"], "status_" + status, "{}", now))
         return self.get_task(task_id)

@@ -45,6 +45,9 @@ class RegressionMatrixTests(unittest.TestCase):
                     stage = "P%d" % number
                     load_contract(stage)
                     store.record_event(task["task_id"], stage, "offline_contract_passed", {"topic_id": topic["id"]})
+                store.record_event(task["task_id"], "P9", "offline_final_fixture",
+                                   {"final_report": {"markdown": "# 离线契约样本"},
+                                    "final_ppt": {"pages": [{"title": "离线样本页"}]}}, "final_delivery")
                 completed = store.set_status(task["task_id"], "completed")
                 self.assertEqual(completed["current_stage"], "P9")
                 self.assertEqual(completed["status"], "completed")

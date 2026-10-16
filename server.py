@@ -23,6 +23,7 @@ from research_sources import (
     plan_search_queries,
 )
 from task_store import TaskStore
+from task_public_view import delivery_view, progress_view
 from workflow_validation import (
     validate_claims,
     validate_evidence,
@@ -175,6 +176,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.require_task_access(task_id)
                 if len(parts) == 3:
                     self.send_json(HTTPStatus.OK, {"data": self.server.task_store.get_task(task_id)})
+                    return
+                if len(parts) == 4 and parts[3] == "progress":
+                    self.send_json(HTTPStatus.OK, {"data": progress_view(self.server.task_store.get_task(task_id))})
+                    return
+                if len(parts) == 4 and parts[3] == "delivery":
+                    self.send_json(HTTPStatus.OK, {"data": delivery_view(self.server.task_store.get_task(task_id))})
                     return
                 if len(parts) == 4 and parts[3] == "export.md":
                     markdown = self.server.task_store.export_markdown(task_id)

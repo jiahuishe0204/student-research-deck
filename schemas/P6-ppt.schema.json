@@ -14,6 +14,7 @@
         "properties": {
           "page_id": {"type": "string"},
           "title": {"type": "string"},
+          "navigation_title": {"type": "string", "minLength": 2, "maxLength": 24},
           "purpose": {"type": "string"},
           "on_slide_text": {"type": "array", "items": {"type": "string"}},
           "visual_suggestion": {"type": "string"},

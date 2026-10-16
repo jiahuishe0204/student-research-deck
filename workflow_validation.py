@@ -22,6 +22,29 @@ CASUAL_SPEAKER_LANGUAGE = (
     "这一页想说明", "我们先看", "那这些", "刚才讲了", "刚才的",
     "这一页告诉我们", "大家可以看到", "下面来看", "简单来说", "说白了",
 )
+COMPARISON_LIMITS = (
+    "未说明比较条件", "未提供比较条件", "比较条件未说明",
+    "样本量未说明", "统计方法未说明", "比较条件、样本量",
+)
+EFFICACY_OVERCLAIM = re.compile(r"(?:电荷注入)?效率优于|刺激效率优于")
+NEGATED_SUPERIORITY = re.compile(r"(?:不等同于|不能|无法|尚不足以|并非|不意味着)[^。；\n]{0,35}优于")
+LIMITED_EFFICIENCY = re.compile(r"(?:不等同于|不能|无法|尚不足以|并非|不意味着)[^。；\n]{0,35}(?:电荷注入效率|刺激效率)")
+
+
+def presentation_boundary_issues(page):
+    """Shared repair triggers and final delivery gates must agree."""
+    bullets = page.get("on_slide_text", [])
+    notes = page.get("speaker_notes", "")
+    title = page.get("title", "")
+    issues = []
+    if any(str(item).rstrip().endswith(("，", "、")) for item in bullets):
+        issues.append("unfinished_bullet")
+    limited = any(LIMITED_EFFICIENCY.search(item) or (NEGATED_SUPERIORITY.search(item) and "效率" in item) for item in bullets)
+    if limited and any(EFFICACY_OVERCLAIM.search(sentence) and not NEGATED_SUPERIORITY.search(sentence) for sentence in re.split(r"[。；\n]", notes)):
+        issues.append("conflicting_comparison")
+    if "优于" in title and any(term in "\n".join(bullets + [notes]) for term in COMPARISON_LIMITS) and not any(term in title for term in ("该研究", "摘要报告", "在体外", "在离体")):
+        issues.append("unbounded_comparison_title")
+    return issues
 
 
 def validate_ppt_density(pages):
@@ -39,7 +62,7 @@ def validate_ppt_density(pages):
     return pages
 
 
-def validate_presentation_voice(pages):
+def validate_presentation_voice(pages, check_claim_boundaries=True):
     """Keep audit language and chatty scaffolding out of academic-defense notes."""
     ordinary_pages = []
     flagged_pages = []
@@ -47,23 +70,35 @@ def validate_presentation_voice(pages):
     for page in pages:
         title = str(page.get("title", ""))
         purpose = str(page.get("purpose", ""))
-        if any(term in title or term in purpose for term in LIMITATION_PAGE_TERMS):
-            continue
-        ordinary_pages.append(page)
+        is_limitation_page = any(term in title or term in purpose for term in LIMITATION_PAGE_TERMS)
+        if not is_limitation_page:
+            ordinary_pages.append(page)
         notes = str(page.get("speaker_notes", ""))
         bullets = [str(item).strip() for item in page.get("on_slide_text", [])]
         if any((len(item) < 20 and item.endswith(("：", ":"))) for item in bullets):
             raise ContractError("PPT 核验装配后留下空标签或残句，应在交付前清理")
+        boundary_issues = presentation_boundary_issues(page)
+        if "unfinished_bullet" in boundary_issues:
+            raise ContractError("PPT 上屏要点以逗号或顿号结尾，疑似截断残句")
         combined = "\n".join(bullets + [notes])
         if any(pattern in combined for pattern in ("。。", "。；", "；。", ".。")):
             raise ContractError("PPT 核验装配后出现断裂标点，应在交付前清理")
-        hits = sum(notes.count(term) for term in AUDIT_LANGUAGE)
-        if hits > 1:
-            raise ContractError("PPT 普通页面讲稿反复使用证据审计措辞，应改为可直接讲述的汇报语言")
-        if hits:
-            flagged_pages.append(page.get("page_id"))
-        if any(term in notes for term in CASUAL_SPEAKER_LANGUAGE):
-            casual_hits.append(page.get("page_id"))
+        if not is_limitation_page:
+            hits = sum(notes.count(term) for term in AUDIT_LANGUAGE)
+            if hits > 1:
+                raise ContractError("PPT 普通页面讲稿反复使用证据审计措辞，应改为可直接讲述的汇报语言")
+            if hits:
+                flagged_pages.append(page.get("page_id"))
+            if any(term in notes for term in CASUAL_SPEAKER_LANGUAGE):
+                casual_hits.append(page.get("page_id"))
+        if check_claim_boundaries:
+            # Check the same comparison, not unrelated results on the page.
+            # For example, an n=1 ex-vivo result must not invalidate a
+            # separate, better supported impedance comparison.
+            if "conflicting_comparison" in boundary_issues:
+                raise ContractError("同一PPT页的讲稿与要点对效率比较给出相反结论")
+            if "unbounded_comparison_title" in boundary_issues:
+                raise ContractError("PPT 标题把比较条件未明的单项结果写成无条件优于")
     if ordinary_pages and len(flagged_pages) / len(ordinary_pages) > 0.2:
         raise ContractError("PPT 讲稿中过多普通页面暴露内部证据审计语言，应集中到局限页")
     if len(casual_hits) > 1:
@@ -177,10 +212,11 @@ def validate_report(value, evidence_ids, tier="deep"):
     if value.get("status") == "draft" and len(markdown) < minimum:
         raise ContractError("P5 调研报告未达到完整交付的最低篇幅：%d/%d" % (len(markdown), minimum))
     required_sections = (("执行摘要", "摘要"), ("研究范围", "研究问题与范围", "问题界定", "研究目的"), ("方法", "证据基础", "资料基础"), ("综合结论", "结论"), ("局限", "证据边界"))
-    if any(not any(term in markdown for term in alternatives) for alternatives in required_sections):
-        raise ContractError("P5 调研报告缺少摘要、范围方法、结论或局限部分")
+    missing_sections = [alternatives[0] for alternatives in required_sections if not any(term in markdown for term in alternatives)]
+    if missing_sections:
+        raise ContractError("P5 调研报告缺少摘要、范围方法、结论或局限部分：" + "、".join(missing_sections))
     if not cited.issubset(set(evidence_ids)):
-        raise ContractError("P5 正文使用了不存在的 evidence_id")
+        raise ContractError("P5 正文使用了不存在的 evidence_id：" + "、".join(sorted(cited - set(evidence_ids)))[:200])
     return value
 
 
@@ -198,7 +234,7 @@ def validate_ppt(value, evidence_ids, figure_ids, source_ids=None):
         if allowed_sources and not {item["source_id"] for item in page["source_citations"]}.issubset(allowed_sources):
             raise ContractError("P6 页面使用了不存在的 source_id")
     validate_ppt_density(value["pages"])
-    validate_presentation_voice(value["pages"])
+    validate_presentation_voice(value["pages"], check_claim_boundaries=False)
     return value
 
 

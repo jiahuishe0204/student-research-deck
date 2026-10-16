@@ -8,6 +8,32 @@ import retrieval
 
 
 class ValidationTests(unittest.TestCase):
+    def test_delivery_endpoint_checks_task_access_before_reading(self):
+        handler = object.__new__(server.AppHandler)
+        handler.path = "/api/tasks/TASK-test/delivery"
+        handler.headers = {"X-Task-Token": "wrong"}
+        reads = []
+        handler.server = SimpleNamespace(task_store=SimpleNamespace(get_task=lambda task_id: reads.append(task_id)))
+        handler.require_task_access = lambda task_id: (_ for _ in ()).throw(PermissionError("任务访问凭据无效"))
+        replies = []
+        handler.send_json = lambda status, value: replies.append((status, value))
+        handler.do_GET()
+        self.assertEqual(replies[0][0], 403)
+        self.assertEqual(reads, [])
+
+    def test_progress_endpoint_omits_saved_artifacts(self):
+        handler = object.__new__(server.AppHandler)
+        handler.path = "/api/tasks/TASK-test/progress"
+        handler.headers = {"X-Task-Token": "owner"}
+        saved = {"status": "active", "current_stage": "P3", "updated_at": "now", "artifacts": {"secret": {"data": "private"}}}
+        handler.server = SimpleNamespace(task_store=SimpleNamespace(get_task=lambda task_id: saved))
+        handler.require_task_access = lambda task_id: task_id
+        replies = []
+        handler.send_json = lambda status, value: replies.append((status, value))
+        handler.do_GET()
+        self.assertEqual(replies[0][0], 200)
+        self.assertNotIn("artifacts", replies[0][1]["data"])
+
     def test_rate_limiter_blocks_after_configured_limit(self):
         limiter = server.RateLimiter(limit=2, window_seconds=60)
         self.assertTrue(limiter.allow("same-task"))

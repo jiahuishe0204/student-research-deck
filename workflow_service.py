@@ -12,6 +12,8 @@ from pathlib import Path
 from contracts import load_contract, validate_stage_output
 from model_client import deepseek_json
 from report_citations import render_linked_report
+from reviewed_page_revisions import apply_reviewed_page_revisions
+from ppt_boundary_repair import repair_verified_pages
 from workflow_validation import (
     PPT_DENSITY_LIMITS,
     validate_claims, validate_evidence, validate_final, validate_intent, validate_plan,
@@ -376,10 +378,13 @@ class WorkflowService:
         keys = ("source_id", "source", "title", "authors", "journal", "year", "url", "access", "pmcid")
         compact = {key: source_record.get(key) for key in keys}
         allowed_figure_ids = [item.get("figure_id") for item in source_record.get("figure_candidates", []) if item.get("figure_id")]
+        # Full-text evidence includes conditions, limitations and original
+        # multi-panel captions; the abstract-sized cap truncated valid JSON.
+        output_limit = 8000 if source_record.get("full_text") else 4500
         output, usage, _ = self.generate(
             "P4", tier,
             {"source_record": compact, "source_text": source_text, "figure_candidates": source_record.get("figure_candidates", []), "question_ids": question_ids, "limits": {"evidence_records_max": 8, "figure_records_max": 4}, "output_contract": load_contract("P4")},
-            lambda value: validate_evidence(value, source_id, source_record.get("access"), allowed_figure_ids, 8, 4), max_tokens=4500, max_attempts=2,
+            lambda value: validate_evidence(value, source_id, source_record.get("access"), allowed_figure_ids, 8, 4), max_tokens=output_limit, max_attempts=2,
         )
         # Each source is extracted independently, so model-local EV-001 style IDs
         # are not globally unique. Namespace them deterministically before they
@@ -389,6 +394,8 @@ class WorkflowService:
         candidates_by_id = {item.get("figure_id"): item for item in source_record.get("figure_candidates", [])}
         for figure in output["figure_records"]:
             candidate = candidates_by_id.get(figure["figure_id"], {})
+            if candidate.get("caption"):
+                figure["caption"] = candidate["caption"]
             figure_url = str(candidate.get("article_figure_url") or "").strip()
             # A model may describe why a figure is useful, but cannot grant
             # reuse rights or invent its authoritative source location.
@@ -516,7 +523,7 @@ class WorkflowService:
         )
         return output, usage
 
-    def assemble_final_deterministic(self, verification, report, ppt, claims, source_ids, evidence_ids, evidence_version="1.0", evidence_records=None, source_records=None, figure_records=None):
+    def assemble_final_deterministic(self, verification, report, ppt, claims, source_ids, evidence_ids, evidence_version="1.0", evidence_records=None, source_records=None, figure_records=None, reviewed_page_edits=None):
         """Apply verified edits without asking the model to reproduce the full delivery."""
         claim_ids = self._ids(claims, "claim_id", "最终装配声明编号缺失或重复")
         results = {item["claim_id"]: item for item in verification.get("results", [])}
@@ -741,6 +748,17 @@ class WorkflowService:
             "open_issues": list(dict.fromkeys(item for item in open_issues if item)),
             "source_ids": list(source_ids), "evidence_ids": list(evidence_ids), "change_log": change_log,
         }
+        output["final_ppt"]["pages"], page_repairs = repair_verified_pages(
+            output["final_ppt"]["pages"], claims, verification, evidence_records
+        )
+        if page_repairs:
+            output["verification_note"] += " 已使用P8核验句自动重建页面：" + ", ".join(item["page_id"] for item in page_repairs)
+            repaired_claims = {claim_id for item in page_repairs for claim_id in item["claim_ids"]}
+            for entry in output["change_log"]:
+                if entry["claim_id"] in repaired_claims:
+                    entry["reason"] += "；已同步用于整页要点和讲稿重建。"
+        if reviewed_page_edits is not None:
+            output = apply_reviewed_page_revisions(output, reviewed_page_edits, claims, verification)
         validate_final(output, claim_ids, source_ids, evidence_ids, verification)
         if evidence_records is not None and source_records is not None:
             output["final_report"]["markdown"] = render_linked_report(markdown, evidence_records, source_records, report.get("figure_recommendations", []), figure_records or [])

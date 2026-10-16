@@ -5,3 +5,10 @@ data/*.sqlite3-*
 data/private/
 *.log
 __pycache__/
+
+# 原始实验与回放产物保留在本地；可复用结论写入 docs 后同步。
+artifacts/automatic-boundary-replay/
+artifacts/claim-bound-pilot/
+artifacts/fresh-boundary-run/
+artifacts/narrative-bound-pilot/
+artifacts/narrative-loop/

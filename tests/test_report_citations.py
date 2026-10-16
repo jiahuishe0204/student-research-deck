@@ -34,7 +34,7 @@ class ReportCitationTests(unittest.TestCase):
             [{"figure_id": "FIG::S1::001", "locator": "Fig 1 https://example.org/article/fig1", "reuse_status": "permission_required"}],
         )
         self.assertIn("## 推荐配图", rendered)
-        self.assertIn("[查看原文图页](https://example.org/article/fig1)", rendered)
+        self.assertIn("[查看原文 Figure 1](https://example.org/article/fig1)", rendered)
         self.assertIn("复用状态：嵌入前需取得许可", rendered)
 
     def test_figure_reuse_status_cannot_be_improved_by_model(self):
@@ -45,6 +45,22 @@ class ReportCitationTests(unittest.TestCase):
                 [{"figure_id": "FIG::S1::001", "locator": "https://example.org/fig1", "reuse_status": "permission_required"}],
             )
 
+    def test_figure_source_cannot_be_reassigned_by_model(self):
+        with self.assertRaisesRegex(ValueError, "来源归属"):
+            render_linked_report(
+                "研究发现[EV::S1::001]。", self.evidence, self.sources,
+                [{"figure_id": "FIG::S1::001", "source_id": "S2", "reuse_status": "unknown"}],
+                [{"figure_id": "FIG::S1::001", "source_id": "S1", "article_figure_url": "https://example.org/fig1", "reuse_status": "unknown"}],
+            )
+
+    def test_figure_must_belong_to_a_saved_source(self):
+        with self.assertRaisesRegex(ValueError, "未保存的来源"):
+            render_linked_report(
+                "研究发现[EV::S1::001]。", self.evidence, self.sources,
+                [{"figure_id": "FIG::S2::001", "source_id": "S2", "reuse_status": "unknown"}],
+                [{"figure_id": "FIG::S2::001", "source_id": "S2", "article_figure_url": "https://example.org/fig2", "reuse_status": "unknown"}],
+            )
+
     def test_figure_uses_structured_url_and_deduplicates_same_image(self):
         recommendation = {"figure_id": "FIG::S1::001", "placement": "结果", "purpose": "解释数据", "reuse_status": "unknown"}
         rendered = render_linked_report(
@@ -52,15 +68,15 @@ class ReportCitationTests(unittest.TestCase):
             [recommendation, recommendation],
             [{"figure_id": "FIG::S1::001", "locator": "PMC123, Fig 1", "article_figure_url": "https://example.org/fig1", "reuse_status": "unknown"}],
         )
-        self.assertEqual(rendered.count("[查看原文图页](https://example.org/fig1)"), 1)
+        self.assertEqual(rendered.count("[查看原文 Figure 1](https://example.org/fig1)"), 1)
 
     def test_figure_purpose_with_terminal_stop_does_not_double_punctuate(self):
         rendered = render_linked_report(
             "研究发现[EV::S1::001]。", self.evidence, self.sources,
             [{"figure_id": "FIG::S1::001", "placement": "机制", "purpose": "展示研究设计。", "reuse_status": "unknown"}],
-            [{"figure_id": "FIG::S1::001", "article_figure_url": "https://example.org/fig1", "reuse_status": "unknown"}],
+            [{"figure_id": "FIG::S1::001", "label": "Figure 1", "article_figure_url": "https://example.org/fig1", "reuse_status": "unknown"}],
         )
-        self.assertIn("展示研究设计。[查看原文图页]", rendered)
+        self.assertIn("展示研究设计。[查看原文 Figure 1]", rendered)
         self.assertNotIn("。。", rendered)
 
     def test_internal_outline_markers_removed_but_biological_m2_kept(self):

@@ -1,0 +1,2 @@
+# Runtime dependency for Neon PostgreSQL access in Tencent SCF.
+psycopg[binary]>=3.2,<4

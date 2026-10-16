@@ -1,0 +1,18 @@
+{
+  "version": "pilot-2026-10-16-r5",
+  "production_enabled": false,
+  "scope": "claim-bound page narrative; original research plan retained",
+  "canonical_claim_module": "claim_bound_view.py",
+  "author_prompt": "prompts/experimental-narrative-bound.md",
+  "review_prompt": "prompts/experimental-unit-review.md",
+  "structure_contract": "narrative_contract.py",
+  "review_gate": "narrative_review_gate.py",
+  "max_local_author_attempts": 3,
+  "review_every_segment_and_selected_figure": true,
+  "no_figure_is_valid": true,
+  "review_invalidated_by": ["canonical_claims", "page_text", "source_figures", "research_plan", "policy"],
+  "development_cases": ["neural-interface", "correlation-vs-causality", "conditional-material-comparison"],
+  "held_out_topic": "Claudin18.2 CAR-T",
+  "held_out_source_task": "TASK-db61c065ba64",
+  "whole_pipeline_research_validation": false
+}

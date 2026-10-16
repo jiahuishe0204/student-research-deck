@@ -12,6 +12,17 @@ class FakeRouter:
 
 
 class WorkflowServiceTests(unittest.TestCase):
+    def test_full_text_evidence_has_room_for_complete_captions(self):
+        service = WorkflowService("", FakeRouter(), "system", {"P4": "evidence"})
+        limits = []
+        def generate(stage, tier, payload, validator, **options):
+            limits.append(options["max_tokens"])
+            return {"evidence_records": [], "figure_records": []}, {}, {}
+        service.generate = generate
+        for full_text in ("", "Full article with multi-panel figure captions"):
+            service.extract_evidence({"source_id": "S1", "abstract": "Abstract", "full_text": full_text}, ["Q1"])
+        self.assertEqual(limits, [4500, 8000])
+
     def test_screen_sources_batches_and_applies_global_keep_limit(self):
         calls = []
 
@@ -198,7 +209,7 @@ class WorkflowServiceTests(unittest.TestCase):
     def test_figure_provenance_overrides_model_claim_of_reuse_permission(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P4": "evidence"})
         source = {"source_id": "SRC-1", "source": "Europe PMC", "abstract": "Study result", "access": "full_text",
-                  "figure_candidates": [{"figure_id": "SRC-1:fig1", "label": "Figure 1", "caption": "Observed response",
+                  "figure_candidates": [{"figure_id": "SRC-1:fig1", "label": "Figure 1", "caption": "Original caption: (a) response, (b) control",
                                          "article_figure_url": "https://europepmc.org/articles/PMC123/figure/fig1", "reuse_status": "unknown"}]}
         model_output = {"evidence_version": "1", "source_id": "SRC-1", "extraction_status": "extracted", "reading_scope": "abstract",
                         "evidence_records": [], "figure_records": [{"figure_id": "SRC-1:fig1", "source_id": "SRC-1", "caption": "Observed response",
@@ -208,6 +219,7 @@ class WorkflowServiceTests(unittest.TestCase):
         output, _ = service.extract_evidence(source, ["Q1"], "fast")
 
         figure = output["figure_records"][0]
+        self.assertEqual(figure["caption"], "Original caption: (a) response, (b) control")
         self.assertEqual(figure["reuse_status"], "unknown")
         self.assertEqual(figure["article_figure_url"], "https://europepmc.org/articles/PMC123/figure/fig1")
         self.assertEqual(figure["label"], "Figure 1")

@@ -15,6 +15,15 @@ REUSE_LABELS = {
 }
 
 
+def figure_display_label(figure):
+    """Return a user-facing figure number instead of a generic image-page label."""
+    searchable = " ".join(str(figure.get(key) or "") for key in ("label", "locator", "figure_id", "article_figure_url"))
+    match = re.search(r"\b(?:figure|fig\.?)\s*[-.:]?\s*([A-Za-z]*\d+[A-Za-z0-9._-]*)", searchable, re.IGNORECASE)
+    if not match:
+        raise ValueError("报告推荐图片缺少可展示的原文 Figure/Fig. 编号")
+    return "Figure " + match.group(1)
+
+
 def render_linked_report(markdown, evidence_records, source_records, figure_recommendations=None, figure_records=None):
     """Replace internal evidence IDs with clickable source citations.
 
@@ -61,6 +70,12 @@ def render_linked_report(markdown, evidence_records, source_records, figure_reco
         figure = figure_by_id.get(figure_id)
         if not figure or figure.get("reuse_status") != recommendation.get("reuse_status"):
             raise ValueError("报告推荐了未核验或许可状态不一致的原文图片")
+        figure_source_id = figure.get("source_id")
+        recommended_source_id = recommendation.get("source_id")
+        if recommended_source_id and recommended_source_id != figure_source_id:
+            raise ValueError("报告推荐图片的来源归属与已保存图源不一致")
+        if figure_source_id and figure_source_id not in source_by_id:
+            raise ValueError("报告推荐图片引用了未保存的来源")
         if figure_id in seen_figures:
             continue
         seen_figures.add(figure_id)
@@ -70,8 +85,9 @@ def render_linked_report(markdown, evidence_records, source_records, figure_reco
         if not figure_url.startswith("https://"):
             raise ValueError("报告推荐图片缺少原文图页链接")
         purpose = str(recommendation.get("purpose") or "辅助说明").strip().rstrip("。.!！")
-        figure_lines.append("- %s：%s。[查看原文图页](%s)；网址：%s；复用状态：%s。" % (
-            recommendation.get("placement", "相关章节"), purpose,
+        display_label = figure_display_label(figure)
+        figure_lines.append("- %s：推荐使用原文 %s；%s。[查看原文 %s](%s)；网址：%s；复用状态：%s。" % (
+            recommendation.get("placement", "相关章节"), display_label, purpose, display_label,
             figure_url, figure_url, REUSE_LABELS.get(figure["reuse_status"], REUSE_LABELS["unknown"]),
         ))
     if figure_lines:

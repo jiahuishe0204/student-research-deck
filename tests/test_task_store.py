@@ -55,6 +55,7 @@ class TaskStoreTests(unittest.TestCase):
 
     def test_completed_task_is_terminal(self):
         task = self.store.create_task("RNA递送", "deep")
+        self.store.record_event(task["task_id"], "P9", "final", {"final_report": {"markdown": "# 报告"}, "final_ppt": {"pages": [{"title": "第一页"}]}}, "final_delivery")
         self.store.set_status(task["task_id"], "completed")
         with self.assertRaisesRegex(ValueError, "completed"):
             self.store.set_status(task["task_id"], "active")
@@ -63,11 +64,20 @@ class TaskStoreTests(unittest.TestCase):
 
     def test_completed_final_artifact_allows_metadata_repair(self):
         task = self.store.create_task("RNA递送", "fast")
-        self.store.record_event(task["task_id"], "P9", "final", {"old": True}, "final_delivery")
+        self.store.record_event(task["task_id"], "P9", "final", {"final_report": {"markdown": "# 报告"}, "final_ppt": {"pages": [{"title": "第一页"}]}}, "final_delivery")
         self.store.set_status(task["task_id"], "completed")
         repaired = self.store.repair_completed_artifact(task["task_id"], "final_delivery", {"new": True})
         self.assertEqual(repaired["status"], "completed")
         self.assertEqual(repaired["artifacts"]["final_delivery"]["data"], {"new": True})
+
+    def test_cannot_complete_without_usable_delivery(self):
+        task = self.store.create_task("RNA递送", "fast")
+        with self.assertRaisesRegex(ValueError, "最终交付"):
+            self.store.set_status(task["task_id"], "completed")
+        self.store.record_event(task["task_id"], "P9", "final", {"final_report": {"markdown": "# 报告"}, "final_ppt": {"pages": []}}, "final_delivery")
+        with self.assertRaisesRegex(ValueError, "PPT"):
+            self.store.set_status(task["task_id"], "completed")
+        self.assertEqual(self.store.get_task(task["task_id"])["status"], "active")
 
     def test_invalid_stage_and_large_payload_are_rejected(self):
         task = self.store.create_task("RNA递送", "fast")
