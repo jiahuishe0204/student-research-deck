@@ -149,6 +149,13 @@ class DeliveryReaderTests(unittest.TestCase):
         self.assertIn("min-height: 31px", theme)
         self.assertIn("min-height: 50px", theme)
 
+    def test_homepage_plan_prices_stay_on_one_line(self):
+        theme = (WEB / "home-delivery-theme.css").read_text(encoding="utf-8")
+        rules = (ROOT / "docs" / "界面视觉一致性规则.md").read_text(encoding="utf-8")
+        self.assertIn("flex-wrap: nowrap", theme)
+        self.assertIn("white-space: nowrap", theme)
+        self.assertIn("价格信息必须保持单行", rules)
+
     def test_delivery_page_inherits_homepage_lavender_background(self):
         result_css = (WEB / "delivery-result.css").read_text(encoding="utf-8")
         rules = (ROOT / "docs" / "界面视觉一致性规则.md").read_text(encoding="utf-8")

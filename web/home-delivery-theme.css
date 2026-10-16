@@ -148,6 +148,16 @@ body {
 .plan-grid li { color: #5f5b68; }
 .plan-grid li:before { color: var(--accent); }
 .price small, .price span, footer { color: var(--muted); }
+.price {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: clamp(5px, .7vw, 9px);
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.price b { flex: 0 0 auto; font-size: clamp(23px, 2.2vw, 28px); }
+.price small, .price span { flex: 0 0 auto; font-size: clamp(10px, .9vw, 12px); }
 
 .progress-line { background: #e5e1ea; }
 .progress-line i { background: #7567bb; box-shadow: none; }
@@ -171,6 +181,9 @@ footer { border-color: #e2dee7; }
   .stage-track article + article { min-height: 220px; padding: 21px 17px; border: 1px solid #e0dce8; }
   .stage-track h3 { font-size: 16px; }
   .stage-track p { font-size: 12px; }
+  .price { gap: 5px; }
+  .price b { font-size: 22px; }
+  .price small, .price span { font-size: 10px; }
 }
 
 @media (max-width: 620px) {
@@ -181,4 +194,7 @@ footer { border-color: #e2dee7; }
   .stage-track article,
   .stage-track article + article { min-height: 0; padding: 21px; }
   .stage-track h3 { min-height: 0; margin: 18px 0 9px; }
+  .price { justify-content: space-between; gap: 7px; }
+  .price b { font-size: 25px; }
+  .price small, .price span { font-size: 11px; }
 }
