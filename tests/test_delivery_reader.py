@@ -132,6 +132,17 @@ class DeliveryReaderTests(unittest.TestCase):
         self.assertIn("首页、题目确认、任务进行中、交付结果", rules)
         self.assertIn("不得只保留在样本", rules)
 
+    def test_roadmap_uses_the_same_lavender_visual_language(self):
+        html = (WEB / "roadmap.html").read_text(encoding="utf-8")
+        css = (WEB / "roadmap.css").read_text(encoding="utf-8")
+        rules = (ROOT / "docs" / "界面视觉一致性规则.md").read_text(encoding="utf-8")
+        self.assertIn("home-delivery-theme.css?v=7", html)
+        self.assertIn("brand-mark report-mark", html)
+        for token in ("#f7f6f3", "#f5f2fc", "var(--font-editorial)", "#b4aad8"):
+            self.assertIn(token, css)
+        self.assertNotIn("rgba(98,245,177", css)
+        self.assertIn("执行版图等辅助页面不得继续沿用历史绿色主题", rules)
+
     def test_homepage_ppt_preview_pages_are_interactive(self):
         script = (WEB / "app.js").read_text(encoding="utf-8")
         theme = (WEB / "home-delivery-theme.css").read_text(encoding="utf-8")
