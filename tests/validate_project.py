@@ -24,10 +24,16 @@ required = [
     "config/production-foundation.json",
     "production_config.py",
     "migrations/002_production_foundation.sql",
+    "migrations/003_delivery_outbox.sql",
+    "tencent_delivery.py",
+    "delivery_outbox.py",
+    "delivery_control.py",
+    "requirements-production.txt",
     "deploy/edgeone/edgeone.json",
     "deploy/edgeone/package.json",
     "deploy/edgeone/cloud-functions/api/health.js",
     "docs/生产底座融合实施与验收-2026-10-19.md",
+    "docs/SES与COS生产集成目标及验收标准-2026-10-19.md",
 ]
 
 for relative in required:

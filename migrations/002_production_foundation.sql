@@ -5,6 +5,8 @@
 CREATE TABLE IF NOT EXISTS users (
     user_id UUID PRIMARY KEY,
     email_hash TEXT NOT NULL UNIQUE,
+    email_ciphertext BYTEA NOT NULL,
+    email_key_version SMALLINT NOT NULL,
     verified_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -62,12 +64,19 @@ CREATE TABLE IF NOT EXISTS free_entitlements (
 
 CREATE TABLE IF NOT EXISTS task_artifacts (
     artifact_id UUID PRIMARY KEY,
-    task_id TEXT NOT NULL REFERENCES research_tasks(task_id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL REFERENCES research_tasks(task_id) ON DELETE RESTRICT,
     kind TEXT NOT NULL CHECK (kind IN ('report','ppt_content','references','export')),
     object_key TEXT NOT NULL UNIQUE,
     sha256 TEXT NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    size_bytes BIGINT NOT NULL CHECK (size_bytes > 0),
+    content_type TEXT NOT NULL,
+    etag TEXT,
+    status TEXT NOT NULL DEFAULT 'prepared' CHECK (status IN ('prepared','uploaded','published','delete_pending','deleted','superseded')),
+    downloadable BOOLEAN NOT NULL DEFAULT FALSE,
+    published_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMPTZ NOT NULL
+    expires_at TIMESTAMPTZ NOT NULL,
+    CHECK ((status = 'published' AND published_at IS NOT NULL AND downloadable) OR status <> 'published')
 );
 
 CREATE TABLE IF NOT EXISTS security_audit_events (

@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS task_stage_attempts (
     attempt INTEGER NOT NULL CHECK (attempt >= 1),
     status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed')),
     lease_until DOUBLE PRECISION NOT NULL,
+    lease_token UUID NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (task_id, stage, attempt)
 );

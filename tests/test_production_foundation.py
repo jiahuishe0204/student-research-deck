@@ -22,6 +22,11 @@ class ProductionFoundationTests(unittest.TestCase):
             "PUBLIC_ORIGIN": "https://research.example.com",
             "MODEL_TASK_MAX_TOTAL_TOKENS": "120000",
             "MODEL_TASK_MAX_COST_CNY": "2.0",
+            "SES_SECRET_ID": "ses-id", "SES_SECRET_KEY": "ses-key",
+            "COS_SECRET_ID": "cos-id", "COS_SECRET_KEY": "cos-key",
+            "SES_REGION": "ap-guangzhou", "SES_TEMPLATE_OTP": "101",
+            "SES_TEMPLATE_COMPLETED": "102", "SES_TEMPLATE_EXPIRY": "103",
+            "COS_REGION": "ap-guangzhou", "COS_BUCKET": "delivery-1234567890",
         }
 
     def test_production_config_fails_closed(self):
@@ -56,6 +61,13 @@ class ProductionFoundationTests(unittest.TestCase):
             self.assertIn(phrase, sql)
         self.assertNotIn("email TEXT", sql)
         self.assertNotIn("session_token", sql)
+
+        outbox = (ROOT / "migrations/003_delivery_outbox.sql").read_text()
+        self.assertIn("idempotency_key TEXT NOT NULL UNIQUE", outbox)
+        self.assertIn("retryable_failed", outbox)
+        self.assertIn("delete_artifact", outbox)
+        self.assertIn("lease_token UUID", outbox)
+        self.assertNotIn("ON DELETE CASCADE", outbox)
 
     def test_edgeone_gateway_has_security_headers_and_no_business_workflow(self):
         deploy = ROOT / "deploy/edgeone"

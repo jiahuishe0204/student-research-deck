@@ -1,0 +1,3 @@
+psycopg[binary]>=3.2,<4
+tencentcloud-sdk-python-ses>=3.0,<4
+cos-python-sdk-v5>=1.9,<2

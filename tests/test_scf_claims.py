@@ -1,6 +1,6 @@
 import unittest
 
-from scf_claims import CLAIMS_MIGRATION_SQL, claim_stage
+from scf_claims import CLAIMS_MIGRATION_SQL, claim_stage, finish_stage
 
 
 class Cursor:
@@ -40,6 +40,14 @@ class ScfClaimTests(unittest.TestCase):
 
     def test_migration_has_unique_claim_key(self):
         self.assertIn("PRIMARY KEY (task_id, stage, attempt)", CLAIMS_MIGRATION_SQL)
+        self.assertIn("lease_token UUID NOT NULL", CLAIMS_MIGRATION_SQL)
+
+    def test_finish_requires_current_fencing_token(self):
+        connection = Connection([("TASK-1",)])
+        self.assertTrue(finish_stage(connection, "TASK-1", "P1", 1, "token-current", "succeeded"))
+        sql, params = connection.cursor_value.statements[0]
+        self.assertIn("lease_token = %s", sql)
+        self.assertEqual(params[-1], "token-current")
 
 
 if __name__ == "__main__":

@@ -23,6 +23,16 @@ class ProductionConfig:
     public_origin: str
     task_max_total_tokens: int
     task_max_cost_cny: float
+    ses_secret_id: str
+    ses_secret_key: str
+    cos_secret_id: str
+    cos_secret_key: str
+    ses_region: str
+    ses_template_otp: int
+    ses_template_completed: int
+    ses_template_expiry: int
+    cos_region: str
+    cos_bucket: str
 
 
 def _required(values, name):
@@ -44,6 +54,16 @@ def load_production_config(environ=None):
         public_origin=_required(values, "PUBLIC_ORIGIN").rstrip("/"),
         task_max_total_tokens=int(_required(values, "MODEL_TASK_MAX_TOTAL_TOKENS")),
         task_max_cost_cny=float(_required(values, "MODEL_TASK_MAX_COST_CNY")),
+        ses_secret_id=_required(values, "SES_SECRET_ID"),
+        ses_secret_key=_required(values, "SES_SECRET_KEY"),
+        cos_secret_id=_required(values, "COS_SECRET_ID"),
+        cos_secret_key=_required(values, "COS_SECRET_KEY"),
+        ses_region=_required(values, "SES_REGION"),
+        ses_template_otp=int(_required(values, "SES_TEMPLATE_OTP")),
+        ses_template_completed=int(_required(values, "SES_TEMPLATE_COMPLETED")),
+        ses_template_expiry=int(_required(values, "SES_TEMPLATE_EXPIRY")),
+        cos_region=_required(values, "COS_REGION"),
+        cos_bucket=_required(values, "COS_BUCKET"),
     )
     origin = urlparse(config.public_origin)
     if origin.scheme != "https" or not origin.netloc or origin.path not in ("", "/"):
@@ -64,6 +84,9 @@ def readiness(environ=None):
         "EMAIL_PROVIDER_API_KEY", "EMAIL_FROM", "ARTIFACT_BUCKET",
         "PUBLIC_ORIGIN", "MODEL_TASK_MAX_TOTAL_TOKENS",
         "MODEL_TASK_MAX_COST_CNY",
+        "SES_SECRET_ID", "SES_SECRET_KEY", "COS_SECRET_ID", "COS_SECRET_KEY", "SES_REGION",
+        "SES_TEMPLATE_OTP", "SES_TEMPLATE_COMPLETED", "SES_TEMPLATE_EXPIRY",
+        "COS_REGION", "COS_BUCKET",
     )
     return {name: bool(str(values.get(name, "")).strip()) for name in names}
 

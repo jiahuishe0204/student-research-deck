@@ -11,7 +11,7 @@ class Cursor:
         self.calls += 1
 
     def fetchone(self):
-        return ("TASK-1",) if self.calls in (1, 3) else None
+        return ("TASK-1",) if self.calls in (1, 2) else None
 
 
 class Connection:

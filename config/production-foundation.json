@@ -6,6 +6,8 @@
   "workflow_worker": "tencent_cloud_scf",
   "system_of_record": "managed_postgresql",
   "artifact_storage": "private_object_storage",
+  "email_provider": "tencent_ses",
+  "artifact_provider": "tencent_cos",
   "workflow": "P1-P9_only",
   "security": {
     "https_required": true,
