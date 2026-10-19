@@ -41,7 +41,7 @@
 - `model_client.py` 与 `model_routing.py`：可校验重试的 DeepSeek 调用以及配置驱动的模型选择。
 - `model_usage.py`：逐次记录模型、阶段、成功/失败和 Tokens；可在下一次请求发出前按人民币费用、任务总 Tokens、Pro 调用次数或 Pro Tokens 上限停止。费用停止器按官方高峰价并假设输入全部缓存未命中进行保守预留。运行环境可配置 `MODEL_TASK_MAX_COST_CNY`、`MODEL_TASK_MAX_TOTAL_TOKENS`、`MODEL_PRO_MAX_CALLS`、`MODEL_PRO_MAX_OUTPUT_TOKENS`、`MODEL_PRO_MAX_TOTAL_TOKENS`，值为 `0` 表示暂不启用该项上限。
 - `workflow_validation.py` 与 `contracts.py`：P1—P9 的跨阶段业务校验和 JSON 结构契约。
-- `retrieval.py` 与 `epo_ops.py`：PubMed / Europe PMC / Crossref / EPO OPS 检索、去重及 EPO 周额度保护。
+- `retrieval.py` 与 `epo_ops.py`：PubMed / Europe PMC / Crossref / EPO OPS 检索、去重及 EPO 周额度保护；配置 `PATSNAP_API_KEY` 后，额外调用智慧芽医学文献检索并合并去重。智慧芽失败时只记录来源错误，不中断其他数据源。
 - `docs/公开数据源与边界.md`：数据源限速、版权、失败降级与上线边界。
 
 ## 本地预览
@@ -52,8 +52,12 @@ python3 server.py
 
 确保上级目录 `.env` 中已设置 `DEEPSEEK_API_KEY`，然后打开 `http://127.0.0.1:4180`。密钥只在本地服务端读取，不会发送到浏览器。如果使用兼容网关，可在同一文件中设置 `DEEPSEEK_BASE_URL`。
 
+智慧芽为可选数据源：在同一 `.env` 中设置 `PATSNAP_API_KEY` 后启用。当前接入 B011 医学文献检索与 B030 文献详情；未设置时保持原有公共数据源流程。密钥仅用于服务端 `Authorization: Bearer` 请求，不写入任务产物或前端。
+
 执行版图可通过首页导航进入，也可以直接打开 `http://127.0.0.1:4180/roadmap.html`。它是静态网页，查看和筛选不会调用模型；阶段内容集中维护在 `web/roadmap-data.js`。
 
 ## 当前状态
 
 这是从原“生命科学科研调研工作台”派生的商业化升级项目。已完成产品定义、P1—P9 工作流、任务持久化与归属令牌、公开论文数据源和 EPO OPS 本地接入、证据底稿、报告、PPT 内容包及独立引用核验的本地 MVP。EPO 采用 3 GB 创建者提醒、接近 4 GB 原子预留停止，并由 EPO 官方上限兜底。公开仓库与静态产品演示已经建立；剩余真实主题回归、线上 EPO 强一致计量写入、真实支付、PPTX、完整用户登录和生产环境部署尚未完成。
+
+生产版本只保留本仓库的 P1—P9 业务流程。旧原型中已验证的 EdgeOne 同域入口、安全响应头、健康探针、审计与备份要求正在迁入本仓库；旧四步生成、Blob 任务结构和旧客户界面不再继承。融合边界、部署位置和完成判定见 `docs/生产底座融合实施与验收-2026-10-19.md`。

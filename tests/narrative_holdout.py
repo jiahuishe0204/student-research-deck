@@ -21,7 +21,7 @@ def holdout(task='TASK-db61c065ba64'):
         figures=[f for g in data['evidence']['groups'] for f in g['figure_records'] if f['figure_id'] in ids]
         if {f['figure_id'] for f in figures}!=ids:
             raise ValueError('保留主题图源缺失，不能换页规避')
-        return {'task':task,'page_id':page['page_id'],'topic_key':page['title'],
+        return {'task':task,'page_id':page['page_id'],'topic_key':'研究证据与适用边界',
                 'purpose':page['purpose'],'canonical':canonical,'source_figures':figures,
                 'evidence_sources':{e['evidence_id']:e['source_id'] for g in data['evidence']['groups'] for e in g['evidence_records']},
                 'plan':data['plan'],'previous_title':pages[i-1]['title'],

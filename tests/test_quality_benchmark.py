@@ -103,3 +103,9 @@ class QualityBenchmarkTests(unittest.TestCase):
         value = {"report_version":"1","report_title":"报告","report_markdown":"正文" * 4000,"used_evidence_ids":[],"figure_recommendations":[],"status":"draft","open_issues":[]}
         with self.assertRaises(ContractError):
             validate_report(value, [], "deep")
+
+    def test_report_rejects_figure_label_masquerading_as_evidence_id(self):
+        markdown = "# 报告\n## 执行摘要\n结论。\n## 研究问题与范围\n问题。\n## 方法与证据基础\n方法。\n## 主要发现\n发现[EV::PMID:12345678::Fig2]。\n## 综合结论\n结论。\n## 局限与下一步\n局限。"
+        value = {"report_version":"1","report_title":"报告","report_markdown":markdown,"used_evidence_ids":[],"figure_recommendations":[],"status":"draft","open_issues":[]}
+        with self.assertRaisesRegex(ContractError, "图号或其他标记"):
+            validate_report(value, ["EV::PMID:12345678::001"], "deep")

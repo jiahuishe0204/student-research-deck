@@ -1,6 +1,6 @@
 import copy
 import unittest
-from narrative_review_gate import render,units,validate_checks,seal,validate_seal,normalize_envelope
+from narrative_review_gate import render,units,validate_checks,seal,validate_seal,normalize_envelope,normalize_checks
 
 class NarrativeReviewGateTests(unittest.TestCase):
     def setUp(self):
@@ -9,6 +9,20 @@ class NarrativeReviewGateTests(unittest.TestCase):
         self.review={'checks':[{'location':u['location'],'status':'pass','quote':'','reason':'符合','evidence':'C','repair':''} for u in units(self.case,self.page)]}
     def test_no_figure_is_valid(self):
         self.assertTrue(seal(self.case,self.page,self.review,'v1'))
+    def test_uncertain_cause_not_reversed_even_with_later_caveat(self):
+        for entity in ('电极本身','干预A','材料配方'):
+            self.case['canonical']['C']['text']='未证明由'+entity+'直接引起。'
+            self.page['segments'][2]['value']='效应归因于调控而非'+entity+'；尚未回答其可能性。'
+            with self.assertRaisesRegex(ValueError,'未知被改写'):render(self.case,self.page)
+            self.page['segments'][2]['value']='不能断言并非由'+entity+'引起。'
+            render(self.case,self.page)
+    def test_only_missing_empty_pass_repair_is_normalized(self):
+        self.review['checks'][0].pop('repair')
+        self.assertEqual(normalize_checks(self.review)['checks'][0]['repair'],'')
+        self.assertNotIn('repair',self.review['checks'][0])
+        self.review['checks'][0]['status']='fail'
+        self.assertNotIn('repair',normalize_checks(self.review)['checks'][0])
+        with self.assertRaises(ValueError):validate_checks(normalize_checks(self.review),units(self.case,self.page))
     def test_harmless_format_repair_does_not_remove_unknown_text(self):
         page=copy.deepcopy(self.page);page.pop('figure_choices')
         raw={'type':'json_object','pages':[page]}

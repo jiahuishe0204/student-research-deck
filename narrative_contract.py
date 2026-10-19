@@ -22,6 +22,8 @@ def validate_author(value, inputs):
                 seen.append(cid)
                 text.append(fact)
             elif segment['kind'] == 'bridge':
+                if 'allowed_bridges' in case and segment['value'] not in case['allowed_bridges']:
+                    raise ValueError('转场必须逐字选自allowed_bridges；科学解释须先进入主张核验，不能在转场新增')
                 text.append(segment['value'])
             else:
                 raise ValueError('未知片段类型')

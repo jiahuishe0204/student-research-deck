@@ -54,7 +54,13 @@ class WorkflowService:
             if not stage or not prompt_path or stage in stage_prompts:
                 raise ValueError("提示词阶段注册表无效")
             stage_prompts[stage] = (root / prompt_path).read_text(encoding="utf-8")
-        return cls(api_key, model_router, system_prompt, stage_prompts, model_client, usage_ledger, model_limits, root / "data" / "private" / "model-response-cache")
+        # The deployed SCF package is read-only; only /tmp is writable at runtime.
+        # Keep the local-project default for development, while allowing SCF to
+        # override it explicitly and avoid writing under the deployment bundle.
+        cache_dir = os.environ.get("SCF_RESPONSE_CACHE_DIR")
+        if not cache_dir:
+            cache_dir = "/tmp/model-response-cache" if os.environ.get("SCF_RUNTIME") or os.environ.get("TENCENTCLOUD_RUNENV") else str(root / "data" / "private" / "model-response-cache")
+        return cls(api_key, model_router, system_prompt, stage_prompts, model_client, usage_ledger, model_limits, cache_dir)
 
     def set_task_context(self, task_id):
         self._context.task_id = task_id
@@ -277,7 +283,7 @@ class WorkflowService:
             "P2B", tier, {
                 "intent": planning_intent,
                 "research_architecture": architecture,
-                "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS", "official"],
+                "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS"] + (["Patsnap"] if os.environ.get("PATSNAP_API_KEY", "").strip() else []) + ["official"],
                 "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
                 "output_contract": load_contract("P2B"),
             }, validate_blueprint_output,
@@ -312,7 +318,9 @@ class WorkflowService:
             raise ValueError("候选资料数量必须为 1—30 条")
         candidate_ids = self._ids(candidates, "source_id", "候选资料 source_id 缺失或重复")
         keep_max = 8 if tier == "deep" else 4
-        keys = ("source_id", "source", "title", "abstract", "year", "access", "url")
+        keys = ("source_id", "source", "title", "abstract", "year", "access", "url",
+                "canonical_identity", "source_type", "publication_level", "independence_group",
+                "reading_scope", "retrieved_at", "intended_uses", "also_found_in")
         compact = [{key: item.get(key) for key in keys} for item in candidates]
         compact_plan = {key: plan.get(key) for key in ("research_scope", "questions", "source_plan", "selection_criteria")}
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
@@ -435,7 +443,10 @@ class WorkflowService:
         output, usage, _ = self.generate(
             "P5", tier,
             {"intent": intent, "plan": plan, "evidence_records": evidence_records, "evidence_contexts": evidence_contexts or [], "figure_records": figure_records, "tier": tier, "output_contract": load_contract("P5")},
-            validate_report_output, max_tokens=7500, max_attempts=2,
+            # Deep reports can include many source-bound evidence records; the
+            # former 7,500 cap truncated complete drafts. Give only this stage
+            # enough room, while the request-time task budget remains enforced.
+            validate_report_output, max_tokens=10000 if tier == "deep" else 5000, max_attempts=2,
         )
         return output, usage
 
@@ -446,7 +457,16 @@ class WorkflowService:
         source_records = [] if source_records is None else source_records
         if not isinstance(intent, dict) or not isinstance(report, dict) or not isinstance(evidence_records, list) or not isinstance(figure_records, list) or not isinstance(source_records, list) or not isinstance(constraints, dict) or (plan is not None and not isinstance(plan, dict)):
             raise ValueError("PPT 内容包输入无效")
-        evidence_ids = self._ids(evidence_records, "evidence_id", "PPT 输入包含无效证据编号", unique=False)
+        all_evidence_ids = self._ids(evidence_records, "evidence_id", "PPT 输入包含无效证据编号", unique=False)
+        report_text = str(report.get("report_markdown") or "")
+        cited_in_report = set(re.findall(r"EV::.+?::\d{3}", report_text))
+        report_evidence_ids = [item for item in all_evidence_ids if item in cited_in_report]
+        # The deck may only draw evidence already cited by the validated report.
+        # This both narrows the model's choices and prevents unsupported IDs
+        # from entering the customer-facing storyboard.
+        evidence_ids = report_evidence_ids or all_evidence_ids
+        allowed_evidence = set(evidence_ids)
+        evidence_records = [item for item in evidence_records if item.get("evidence_id") in allowed_evidence]
         figure_ids = self._ids(figure_records, "figure_id", "PPT 输入包含无效图片编号", unique=False)
         source_ids = self._ids(source_records, "source_id", "PPT 输入包含无效来源编号", unique=False)
         payload = {"intent": intent, "plan": plan or {}, "report": report, "evidence_records": evidence_records,
@@ -454,6 +474,24 @@ class WorkflowService:
                    "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids,
                    "allowed_source_ids": source_ids, "presentation_limits": PPT_DENSITY_LIMITS,
                    "constraints": constraints, "output_contract": load_contract("P6")}
+
+        def generate_ppt_batch(batch_payload, token_limit, validator):
+            try:
+                return self.generate("P6", tier, batch_payload, validator,
+                                     max_tokens=token_limit, max_attempts=1)
+            except ValueError as exc:
+                message = str(exc)
+                if "P6 页面使用了不存在的 evidence_id" not in message:
+                    raise
+                corrected_payload = dict(batch_payload)
+                corrected_payload["validation_feedback"] = (
+                    "上次页面因证据编号不在 allowed_evidence_ids 白名单而被拒绝。"
+                    "只可逐字使用白名单中的编号；若某条判断没有可用编号，应删除或收窄该判断，不得自造编号。"
+                    "校验信息：" + message[:400]
+                )
+                return self.generate("P6", tier, corrected_payload, validator,
+                                     max_tokens=token_limit, max_attempts=1)
+
         arc = (plan or {}).get("ppt_story_arc", [])
         split_long_report = tier == "deep" and len(str(report.get("report_markdown") or "")) > 7000 and len(arc) >= 4
         if split_long_report:
@@ -463,10 +501,9 @@ class WorkflowService:
             for index, subset in enumerate((arc[:midpoint], arc[midpoint:]), 1):
                 batch_payload = {**payload, "page_batch": {"index": index, "total": 2,
                     "assigned_arc": subset, "target_pages": "4—6", "complete_arc": arc}}
-                partial, partial_usage, _ = self.generate(
-                    "P6", tier, batch_payload,
+                partial, partial_usage, _ = generate_ppt_batch(
+                    batch_payload, 7000,
                     lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids),
-                    max_tokens=7000, max_attempts=2,
                 )
                 parts.append(partial)
                 add_usage(usage, partial_usage)
@@ -476,10 +513,9 @@ class WorkflowService:
                 page["page_id"] = "SL-%02d" % index
             validate_ppt(output, evidence_ids, figure_ids, source_ids)
         else:
-            output, usage, _ = self.generate(
-                "P6", tier, payload,
+            output, usage, _ = generate_ppt_batch(
+                payload, 9000,
                 lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids),
-                max_tokens=9000, max_attempts=2,
             )
         source_by_id = {item.get("source_id"): item for item in source_records}
         figure_by_id = {item.get("figure_id"): item for item in figure_records}
@@ -536,6 +572,8 @@ class WorkflowService:
         original_pages = copy.deepcopy(pages_by_id)
         open_issues = list(report.get("open_issues", []))
         change_log = []
+        overflow_revisions = []
+        resolved_page_claim_text = {}
         action_names = {"keep": "kept", "revise": "revised", "remove": "removed", "mark_unverified": "marked_unverified"}
 
         def replace_once(text, original, replacement):
@@ -581,6 +619,14 @@ class WorkflowService:
             page["speaker_notes"] = candidate
             return True
 
+        def defer_page_revision(claim, replacement, result):
+            overflow_revisions.append({
+                "page_id": claim.get("section_or_page_id"),
+                "claim_id": claim.get("claim_id"),
+                "text": str(replacement or "").strip(),
+                "evidence_ids": list(result.get("valid_evidence_ids", [])),
+            })
+
         def unique_embedded_numeric_line(page, claim_text):
             """Locate one longer slide bullet that conservatively contains a numeric claim."""
             numeric_anchors = re.findall(r"(?:[IVX]+期|\d+(?:\.\d+)?%?)", claim_text)
@@ -596,13 +642,35 @@ class WorkflowService:
                     matches.append(index)
             return matches[0] if len(matches) == 1 else None
 
-        def slide_replacement(page, index, candidate, replacement, claim_id):
+        def slide_replacement(page, index, candidate, replacement, claim, result):
             other_characters = sum(len(str(line)) for position, line in enumerate(page.get("on_slide_text", [])) if position != index)
             if len(replacement) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and len(candidate) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and other_characters + len(candidate) <= PPT_DENSITY_LIMITS["page_characters_max"]:
                 return candidate
-            if append_verification_note(page, claim_id, replacement):
+            if append_verification_note(page, claim["claim_id"], replacement):
                 return ""
+            defer_page_revision(claim, replacement, result)
             return ""
+
+        def replace_note_verification(page, claim, replacement, result):
+            """Replace the exact note claim or defer the full revision intact."""
+            notes = str(page.get("speaker_notes", ""))
+            revised, located = replace_once(notes, claim["original_text"], replacement)
+            atomic = str(claim.get("atomic_claim") or "").strip()
+            if not located and atomic:
+                revised, located = replace_once(notes, atomic, replacement)
+            if not located:
+                revised, located = replace_unique_similar_sentence(
+                    notes, atomic or claim["original_text"], replacement
+                )
+            if not located:
+                return False
+            if len(revised) <= PPT_DENSITY_LIMITS["speaker_notes_max"]:
+                page["speaker_notes"] = revised
+            else:
+                # Retain the original notes and put the complete verified
+                # replacement on a supplementary page; never truncate it.
+                defer_page_revision(claim, replacement, result)
+            return True
 
         for claim in claims:
             result = results[claim["claim_id"]]
@@ -612,15 +680,26 @@ class WorkflowService:
                 continue
             original = claim["original_text"]
             atomic = str(claim.get("atomic_claim") or "").strip()
+            page = None
             if claim["location_type"] == "report_section":
                 search_space = markdown
             else:
                 search_page = pages_by_id.get(claim["section_or_page_id"], {})
-                search_space = "\n".join([
-                    str(search_page.get("title", "")), str(search_page.get("purpose", "")),
-                    "\n".join(search_page.get("on_slide_text", [])),
-                    str(search_page.get("visual_suggestion", "")), str(search_page.get("speaker_notes", "")),
-                ])
+                if claim["location_type"] == "ppt_speaker_note":
+                    search_space = str(search_page.get("speaker_notes", ""))
+                elif claim["location_type"] == "ppt_visual":
+                    search_space = str(search_page.get("visual_suggestion", ""))
+                elif claim["location_type"] == "ppt_slide":
+                    search_space = "\n".join([
+                        str(search_page.get("title", "")), str(search_page.get("purpose", "")),
+                        "\n".join(search_page.get("on_slide_text", [])),
+                    ])
+                else:
+                    search_space = "\n".join([
+                        str(search_page.get("title", "")), str(search_page.get("purpose", "")),
+                        "\n".join(search_page.get("on_slide_text", [])),
+                        str(search_page.get("visual_suggestion", "")), str(search_page.get("speaker_notes", "")),
+                    ])
             if original not in search_space and atomic and atomic.rstrip("。；;，,") in search_space:
                 original = atomic
             replacement = result.get("revised_claim") or ""
@@ -659,64 +738,130 @@ class WorkflowService:
             else:
                 page = pages_by_id.get(claim["section_or_page_id"])
                 if page:
-                    field = "speaker_notes" if claim["location_type"] == "ppt_speaker_note" else "on_slide_text"
+                    field = "speaker_notes" if claim["location_type"] == "ppt_speaker_note" else "visual_suggestion" if claim["location_type"] == "ppt_visual" else "on_slide_text"
                     if field == "speaker_notes":
+                        located = replace_note_verification(page, claim, replacement, result)
+                    elif field == "visual_suggestion":
                         page[field], located = replace_once(page.get(field, ""), original, replacement)
                         if not located:
                             page[field], located = replace_unique_similar_sentence(page.get(field, ""), atomic or original, replacement)
-                        if not located:
-                            for index, line in enumerate(page.get("on_slide_text", [])):
-                                page["on_slide_text"][index], located = replace_once(line, original, replacement)
-                                if not located:
-                                    page["on_slide_text"][index], located = replace_unique_similar_sentence(line, atomic or original, replacement)
-                                if located:
-                                    break
                     else:
                         for index, line in enumerate(page.get(field, [])):
                             candidate, located = replace_once(line, original, replacement)
                             if not located:
                                 candidate, located = replace_unique_similar_sentence(line, atomic or original, replacement)
                             if located:
-                                page[field][index] = slide_replacement(page, index, candidate, replacement, claim["claim_id"])
+                                page[field][index] = slide_replacement(page, index, candidate, replacement, claim, result)
                                 break
-                        if not located:
-                            page["speaker_notes"], located = replace_once(page.get("speaker_notes", ""), original, replacement)
-                        if not located:
-                            page["speaker_notes"], located = replace_unique_similar_sentence(page.get("speaker_notes", ""), atomic or original, replacement)
                         if not located and action == "remove" and claim["location_type"] == "ppt_slide":
                             embedded_index = unique_embedded_numeric_line(page, atomic or original)
                             if embedded_index is not None:
                                 page["on_slide_text"].pop(embedded_index)
                                 located = True
             if not located:
+                if page and claim["location_type"].startswith("ppt_"):
+                    # P7 can occasionally label the right page but the wrong
+                    # customer-facing field. Recover only an exact, unique
+                    # occurrence on that same page; never search other pages.
+                    alternative_slide_matches = []
+                    for index, line in enumerate(page.get("on_slide_text", [])):
+                        for candidate_text in (original, atomic):
+                            if candidate_text and candidate_text in str(line):
+                                alternative_slide_matches.append((index, candidate_text))
+                                break
+                    if len(alternative_slide_matches) == 1:
+                        index, candidate_text = alternative_slide_matches[0]
+                        line = str(page["on_slide_text"][index])
+                        revised_line = line.replace(candidate_text, replacement, 1)
+                        page["on_slide_text"][index] = slide_replacement(
+                            page, index, revised_line, replacement, claim, result
+                        )
+                        located = True
+                    elif replacement:
+                        visual = str(page.get("visual_suggestion", ""))
+                        visual_match = next((item for item in (original, atomic) if item and item in visual), "")
+                        if visual_match:
+                            page["visual_suggestion"] = visual.replace(visual_match, "", 1).strip(" ，,；;")
+                            if (len(replacement) <= PPT_DENSITY_LIMITS["bullet_characters_max"]
+                                    and sum(len(str(line)) for line in page.get("on_slide_text", [])) + len(replacement)
+                                    <= PPT_DENSITY_LIMITS["page_characters_max"]):
+                                page.setdefault("on_slide_text", []).append(replacement)
+                            elif not append_verification_note(page, claim["claim_id"], replacement):
+                                defer_page_revision(claim, replacement, result)
+                            located = True
+                    page_text = "\n".join([
+                        str(page.get("title", "")), str(page.get("purpose", "")),
+                        "\n".join(page.get("on_slide_text", [])),
+                        str(page.get("visual_suggestion", "")), str(page.get("speaker_notes", "")),
+                    ])
+                    if not located and replacement and replacement.strip() in page_text:
+                        located = True
+                    elif not located and action == "remove":
+                        key = (claim["section_or_page_id"], claim["location_type"])
+                        prior = resolved_page_claim_text.get(key, set())
+                        if original in prior or (atomic and atomic in prior):
+                            located = True
+            if not located:
                 originally_located = False
                 if claim["location_type"] == "report_section":
                     _, originally_located = replace_once(original_markdown, original, "")
                 else:
                     original_page = original_pages.get(claim["section_or_page_id"], {})
-                    original_text = "\n".join([
-                        str(original_page.get("title", "")), str(original_page.get("purpose", "")),
-                        "\n".join(original_page.get("on_slide_text", [])),
-                        str(original_page.get("visual_suggestion", "")), str(original_page.get("speaker_notes", "")),
-                    ])
+                    if claim["location_type"] == "ppt_speaker_note":
+                        original_text = str(original_page.get("speaker_notes", ""))
+                    elif claim["location_type"] == "ppt_visual":
+                        original_text = str(original_page.get("visual_suggestion", ""))
+                    elif claim["location_type"] == "ppt_slide":
+                        original_text = "\n".join([
+                            str(original_page.get("title", "")), str(original_page.get("purpose", "")),
+                            "\n".join(original_page.get("on_slide_text", [])),
+                        ])
+                    else:
+                        original_text = "\n".join([
+                            str(original_page.get("title", "")), str(original_page.get("purpose", "")),
+                            "\n".join(original_page.get("on_slide_text", [])),
+                            str(original_page.get("visual_suggestion", "")), str(original_page.get("speaker_notes", "")),
+                        ])
                     _, originally_located = replace_once(original_text, original, "")
                     if not originally_located and action == "remove" and claim["location_type"] == "ppt_slide":
                         originally_located = unique_embedded_numeric_line(original_page, atomic or original) is not None
                 if originally_located:
+                    if action == "remove":
+                        # An earlier overlapping claim may already have
+                        # removed the shared sentence. Treat that removal as
+                        # idempotent after proving the claim existed in the
+                        # immutable original page.
+                        located = True
                     if replacement and claim["location_type"] == "report_section":
                         markdown += "\n\n核验修订：%s" % replacement
                     elif replacement and page and claim["location_type"] == "ppt_speaker_note":
-                        page["speaker_notes"] = (page.get("speaker_notes", "") + " 核验修订：" + replacement).strip()
+                        current_notes = str(page.get("speaker_notes", ""))
+                        # A prior claim on the same page may already have
+                        # applied this exact shared revision. Do not duplicate
+                        # it merely because this claim's original wording is
+                        # no longer present.
+                        if replacement.strip() in current_notes:
+                            located = True
+                        else:
+                            located = replace_note_verification(page, claim, replacement, result)
+                    elif replacement and page and claim["location_type"] == "ppt_visual":
+                        page["visual_suggestion"] = str(page.get("visual_suggestion", "")).replace(original, replacement, 1)
+                        located = True
                     elif replacement and page:
                         candidate = replacement
                         if len(candidate) <= PPT_DENSITY_LIMITS["bullet_characters_max"] and sum(len(str(line)) for line in page.get("on_slide_text", [])) + len(candidate) <= PPT_DENSITY_LIMITS["page_characters_max"]:
                             page.setdefault("on_slide_text", []).append(candidate)
                         else:
-                            page.setdefault("on_slide_text", []).append("该结论已按证据限定，完整修订见备注。")
-                            append_verification_note(page, claim["claim_id"], replacement)
-                    located = True
+                            if append_verification_note(page, claim["claim_id"], replacement):
+                                page.setdefault("on_slide_text", []).append("该结论已按证据限定，完整修订见备注。")
+                            else:
+                                defer_page_revision(claim, replacement, result)
+                        located = True
                 if not located:
                     raise ValueError("无法在交付物中定位声明 %s，拒绝生成未落实核验结论的终稿" % claim["claim_id"])
+            if located and claim["location_type"].startswith("ppt_"):
+                key = (claim["section_or_page_id"], claim["location_type"])
+                resolved_page_claim_text.setdefault(key, set()).update(item for item in (original, atomic) if item)
 
         def clean_assembly_punctuation(value):
             text = str(value or "")
@@ -759,6 +904,37 @@ class WorkflowService:
                     entry["reason"] += "；已同步用于整页要点和讲稿重建。"
         if reviewed_page_edits is not None:
             output = apply_reviewed_page_revisions(output, reviewed_page_edits, claims, verification)
+        if overflow_revisions:
+            evidence_source_by_id = {item.get("evidence_id"): item.get("source_id") for item in (evidence_records or [])}
+            page_citations = {page.get("page_id"): page.get("source_citations", []) for page in pages}
+            groups = {}
+            for item in overflow_revisions:
+                if item["text"]:
+                    groups.setdefault(item["page_id"], []).append(item)
+            next_page = max([int(match.group(1)) for page in output["final_ppt"]["pages"]
+                             if (match := re.search(r"(\d+)$", str(page.get("page_id") or ""))) ] or [0]) + 1
+            for source_page_id, items in groups.items():
+                statements, used_ids, source_ids_for_page = [], [], set()
+                for item in items:
+                    if item["text"] not in statements:
+                        statements.append(item["text"])
+                    used_ids.extend(eid for eid in item["evidence_ids"] if eid in set(evidence_ids))
+                    source_ids_for_page.update(evidence_source_by_id.get(eid) for eid in item["evidence_ids"] if evidence_source_by_id.get(eid))
+                notes = "\n".join(statements)
+                if len(notes) > PPT_DENSITY_LIMITS["speaker_notes_max"]:
+                    raise ValueError("已核验的补充修订超出单页讲稿容量，不能截断科学限定：" + str(source_page_id))
+                source_citations = [citation for citation in page_citations.get(source_page_id, [])
+                                    if citation.get("source_id") in source_ids_for_page]
+                output["final_ppt"]["pages"].append({
+                    "page_id": "SL-%02d" % next_page, "title": "研究结果的适用条件",
+                    "purpose": "补充呈现经核验后必须保留的研究条件与范围",
+                    "on_slide_text": ["关键结果需结合研究对象、队列构成与预设条件解读。"],
+                    "visual_suggestion": "以简洁文字卡片呈现适用条件及对应来源。",
+                    "speaker_notes": notes, "evidence_ids": list(dict.fromkeys(used_ids)),
+                    "figure_refs": [], "source_citations": source_citations,
+                })
+                next_page += 1
+            output["verification_note"] += " 已将无法安全放回原页的核验修订完整放入补充页。"
         validate_final(output, claim_ids, source_ids, evidence_ids, verification)
         if evidence_records is not None and source_records is not None:
             output["final_report"]["markdown"] = render_linked_report(markdown, evidence_records, source_records, report.get("figure_recommendations", []), figure_records or [])

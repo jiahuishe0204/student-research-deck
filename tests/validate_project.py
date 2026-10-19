@@ -21,6 +21,13 @@ required = [
     "web/app.js",
     ".github/workflows/ci.yml",
     "tests/fixtures/live-regression-plan.json",
+    "config/production-foundation.json",
+    "production_config.py",
+    "migrations/002_production_foundation.sql",
+    "deploy/edgeone/edgeone.json",
+    "deploy/edgeone/package.json",
+    "deploy/edgeone/cloud-functions/api/health.js",
+    "docs/生产底座融合实施与验收-2026-10-19.md",
 ]
 
 for relative in required:

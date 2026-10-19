@@ -12,6 +12,26 @@ class FakeRouter:
 
 
 class WorkflowServiceTests(unittest.TestCase):
+    def test_deep_report_has_stage_specific_output_room(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P5": "report"})
+        limits = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            limits.append(options["max_tokens"])
+            body = ("执行摘要\n摘要。\n研究范围与资料方法\n范围与方法。\n正文\n"
+                    + ("结果与限制[EV::SRC-1::001]。" * 300)
+                    + "\n综合结论\n结论。\n局限与后续研究\n局限。")
+            value = {"report_version": "1", "report_title": "t", "report_markdown": body,
+                     "used_evidence_ids": ["EV::SRC-1::001"], "figure_recommendations": [],
+                     "status": "draft", "open_issues": []}
+            return validator(value), {"total_tokens": 1}, {}
+
+        service.generate = generate
+        evidence = [{"evidence_id": "EV::SRC-1::001"}]
+        service.create_report({}, {}, evidence, "fast")
+        service.create_report({}, {}, evidence, "deep")
+        self.assertEqual(limits, [5000, 10000])
+
     def test_full_text_evidence_has_room_for_complete_captions(self):
         service = WorkflowService("", FakeRouter(), "system", {"P4": "evidence"})
         limits = []
@@ -173,6 +193,42 @@ class WorkflowServiceTests(unittest.TestCase):
 
         self.assertEqual(captured["plan"], plan)
         self.assertEqual(captured["presentation_limits"]["page_characters_max"], 400)
+
+    def test_ppt_can_only_receive_evidence_cited_in_validated_report(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
+        captured = {}
+
+        def generate(stage, tier, payload, validator=None, **options):
+            captured.update(payload)
+            return {"deck_title": "deck", "storyline": "story", "pages": []}, {"total_tokens": 1}, {}
+
+        service.generate = generate
+        evidence = [{"evidence_id": "EV::SRC-1::001"}, {"evidence_id": "EV::SRC-2::001"}]
+        report = {"report_markdown": "结果支持[EV::SRC-1::001]。"}
+        service.create_ppt({}, report, evidence, [], {}, "fast")
+        self.assertEqual(captured["allowed_evidence_ids"], ["EV::SRC-1::001"])
+        self.assertEqual(captured["evidence_records"], [evidence[0]])
+
+    def test_ppt_revises_only_after_specific_evidence_id_validation_feedback(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
+        payloads = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            payloads.append(payload)
+            evidence_id = "EV::INVALID::001" if len(payloads) == 1 else "EV::SRC-1::001"
+            page = {"page_id": "SL-01", "title": "界面结论", "purpose": "解释机制",
+                    "on_slide_text": ["结论有证据支持"], "visual_suggestion": "机制示意图",
+                    "speaker_notes": "该结果仍需结合具体条件解释。", "evidence_ids": [evidence_id],
+                    "figure_refs": [], "source_citations": []}
+            return validator({"deck_title": "deck", "storyline": "story", "pages": [page]}), {"total_tokens": 1}, {}
+
+        service.generate = generate
+        evidence = [{"evidence_id": "EV::SRC-1::001"}]
+        report = {"report_markdown": "结论[EV::SRC-1::001]。"}
+        service.create_ppt({}, report, evidence, [], {}, "fast")
+        self.assertEqual(len(payloads), 2)
+        self.assertIn("validation_feedback", payloads[1])
+        self.assertIn("EV::INVALID::001", payloads[1]["validation_feedback"])
 
     def test_long_deep_ppt_uses_two_bounded_arc_batches_and_unique_page_ids(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
@@ -501,6 +557,61 @@ class WorkflowServiceTests(unittest.TestCase):
         page = output["final_ppt"]["pages"][0]
         self.assertLessEqual(len(page["speaker_notes"]), 800)
         self.assertEqual(page["on_slide_text"], [])
+
+    def test_final_assembly_does_not_duplicate_shared_note_revision(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claims = [{"claim_id": claim_id, "location_type": "ppt_speaker_note", "section_or_page_id": "P1",
+                   "original_text": "原句。", "atomic_claim": "原句。", "cited_evidence_ids": ["EV-1"]}
+                  for claim_id in ("CL-1", "CL-2")]
+        verification = {"results": [{"claim_id": claim_id, "support_status": "partially_supported", "action": "revise",
+                                     "revised_claim": "修订句。", "valid_evidence_ids": ["EV-1"], "explanation": "限定范围"}
+                                    for claim_id in ("CL-1", "CL-2")]}
+        report = {"report_title": "t", "report_markdown": "report", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "P1", "title": "t", "purpose": "p", "on_slide_text": [],
+            "visual_suggestion": "", "speaker_notes": "原句。", "evidence_ids": ["EV-1"],
+            "figure_refs": [], "source_citations": [],
+        }]}
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, [], ["EV-1"], "1")
+        self.assertEqual(output["final_ppt"]["pages"][0]["speaker_notes"], "修订句。")
+
+    def test_final_assembly_moves_verified_revision_to_supplement_when_page_is_full(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claim = {"claim_id": "CL-1", "location_type": "ppt_slide", "section_or_page_id": "SL-01",
+                 "original_text": "原结论", "atomic_claim": "原结论", "cited_evidence_ids": ["EV-1"]}
+        verification = {"results": [{"claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+                                     "revised_claim": "经核验的适用条件" * 20, "valid_evidence_ids": ["EV-1"], "explanation": "限定范围"}]}
+        report = {"report_title": "t", "report_markdown": "report", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "SL-01", "title": "t", "purpose": "p", "on_slide_text": ["原结论"],
+            "visual_suggestion": "", "speaker_notes": "背景说明" * 190, "evidence_ids": ["EV-1"],
+            "figure_refs": [], "source_citations": [],
+        }]}
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, [claim], ["SRC-1"], ["EV-1"], "1")
+        self.assertEqual(len(output["final_ppt"]["pages"]), 2)
+        supplemental = output["final_ppt"]["pages"][1]
+        self.assertIn("经核验的适用条件", supplemental["speaker_notes"])
+        self.assertEqual(supplemental["evidence_ids"], ["EV-1"])
+
+    def test_final_assembly_moves_overflowing_note_revision_without_deleting_original_notes(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        original = "原始临床数据描述。"
+        claim = {"claim_id": "CL-1", "location_type": "ppt_speaker_note", "section_or_page_id": "SL-01",
+                 "original_text": original, "atomic_claim": original, "cited_evidence_ids": ["EV-1"]}
+        revision = "核验后应保留的完整适用条件與统计限定。" * 5
+        verification = {"results": [{"claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+                                     "revised_claim": revision, "valid_evidence_ids": ["EV-1"], "explanation": "補充限定"}]}
+        report = {"report_title": "t", "report_markdown": "report", "used_evidence_ids": ["EV-1"], "open_issues": []}
+        notes = "背景。" * 255 + original
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "SL-01", "title": "t", "purpose": "p", "on_slide_text": ["可靠要点"],
+            "visual_suggestion": "", "speaker_notes": notes, "evidence_ids": ["EV-1"],
+            "figure_refs": [], "source_citations": [],
+        }]}
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, [claim], ["SRC-1"], ["EV-1"], "1")
+        self.assertEqual(output["final_ppt"]["pages"][0]["speaker_notes"], notes)
+        self.assertEqual(len(output["final_ppt"]["pages"]), 2)
+        self.assertEqual(output["final_ppt"]["pages"][1]["speaker_notes"], revision)
 
     def test_final_assembly_removes_unverified_claim_from_ordinary_spoken_notes(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})

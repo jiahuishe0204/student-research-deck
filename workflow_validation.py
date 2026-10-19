@@ -197,6 +197,14 @@ def validate_report(value, evidence_ids, tier="deep"):
     if not set(value["used_evidence_ids"]).issubset(set(evidence_ids)):
         raise ContractError("P5 使用了不存在的 evidence_id")
     markdown = str(value.get("report_markdown", ""))
+    # Figure labels are not evidence IDs. Catch malformed model-made citations
+    # such as [EV::PMID:12345678::Fig2] here, before the report reaches P9.
+    malformed_citations = [
+        candidate for candidate in re.findall(r"\[EV::[^\]\s]*\]", markdown)
+        if not re.fullmatch(r"\[EV::[^\]\s]+::\d{3}\]", candidate)
+    ]
+    if malformed_citations:
+        raise ContractError("P5 将图号或其他标记误作证据编号：" + "、".join(malformed_citations[:3]))
     if re.search(r"\[\d+\]", markdown):
         raise ContractError("P5 草稿使用了无法对应证据的数字脚注；必须先引用输入中的 EV 编号")
     cited = set(re.findall(r"EV::.+?::\d{3}", markdown))
@@ -226,8 +234,10 @@ def validate_ppt(value, evidence_ids, figure_ids, source_ids=None):
     allowed_figures = set(figure_ids)
     allowed_sources = set(source_ids or [])
     for page in value["pages"]:
-        if not set(page["evidence_ids"]).issubset(allowed_evidence):
-            raise ContractError("P6 页面使用了不存在的 evidence_id")
+        invalid_evidence = sorted(set(page["evidence_ids"]) - allowed_evidence)
+        if invalid_evidence:
+            safe_ids = [re.sub(r"[^A-Za-z0-9:_-]", "", item)[:120] for item in invalid_evidence[:8]]
+            raise ContractError("P6 页面使用了不存在的 evidence_id：" + ", ".join(safe_ids))
         for figure in page["figure_refs"]:
             if figure["figure_id"] not in allowed_figures:
                 raise ContractError("P6 页面使用了不存在的 figure_id")

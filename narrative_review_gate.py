@@ -2,6 +2,7 @@
 import hashlib
 import json
 import copy
+import re
 from narrative_contract import validate_author
 
 
@@ -14,6 +15,14 @@ def normalize_envelope(value, cases):
         for page,case in zip(result['pages'],cases):
             if isinstance(page,dict) and 'figure_choices' not in page and not case['source_figures']:
                 page['figure_choices']=[]
+            if isinstance(page,dict) and isinstance(page.get('segments'),list) and case.get('allowed_bridges'):
+                compact=[]
+                def approved(seg):
+                    return isinstance(seg,dict) and set(seg)=={'kind','value'} and seg['kind']=='bridge' and seg['value'] in case['allowed_bridges']
+                for seg in page['segments']:
+                    if compact and approved(seg) and approved(compact[-1]):compact[-1]=seg
+                    else:compact.append(seg)
+                page['segments']=compact
     return result
 
 
@@ -24,6 +33,9 @@ def fingerprint(case, page, policy):
 
 def render(case, page):
     result=validate_author({'pages':[page]},[case])[0]
+    conflicts=uncertainty_conflicts(case,page)
+    if conflicts:
+        raise ValueError('未知被改写为确定否定：'+json.dumps(conflicts,ensure_ascii=False))
     if not any(s['kind']=='bridge' and s['value'].strip() for s in page['segments']):
         raise ValueError('讲稿没有问题组织或解释片段')
     figures={f['figure_id']:f for f in case['source_figures']}
@@ -35,6 +47,24 @@ def render(case, page):
             if not figure.get('source_id') or figure['source_id'] not in sources:
                 raise ValueError('图源与主张来源不匹配')
     return result
+
+def uncertainty_conflicts(case,page):
+    """Narrow deterministic guard; entities come from current claims, not a topic list."""
+    uncertain=[]
+    for cid,item in case['canonical'].items():
+        for m in re.finditer(r'未证明由([^，。；（）]+?)(?:直接)?引起',item['text'] or ''):
+            uncertain.append((cid,m.group(1)))
+    errors=[]
+    for i,segment in enumerate(page['segments']):
+        if segment['kind']!='bridge':continue
+        for cid,entity in uncertain:
+            pattern=r'(?:而非|并非|不是)(?:由)?'+re.escape(entity)
+            for m in re.finditer(pattern,segment['value']):
+                prefix=segment['value'][max(0,m.start()-8):m.start()]
+                if re.search(r'(?:不能|不应|不可)(?:据此)?(?:断言|宣称|说|认为)[“"\s]*$',prefix):continue
+                errors.append({'location':f'segments/{i}','quote':m.group(),'claim_id':cid,
+                               'repair':'保留未证明的限定，不将未知改成否定因果。'})
+    return errors
 
 
 def units(case, page):
@@ -63,6 +93,14 @@ def validate_checks(value, expected):
                 raise ValueError('审查没有引用该位置的真实文字或修正办法')
         elif check['quote'] or check['repair']:
             raise ValueError('通过项仍带修正，结论不一致')
+    return value
+
+def normalize_checks(value):
+    value=copy.deepcopy(value)
+    if isinstance(value,dict) and isinstance(value.get('checks'),list):
+        for check in value['checks']:
+            if isinstance(check,dict) and check.get('status')=='pass' and 'repair' not in check:
+                check['repair']=''
     return value
 
 

@@ -35,13 +35,18 @@ def prepare_case(case):
     for item in result['canonical'].values():
         if item['text'] is None:
             continue
+        if item.get('reconciliation'):
+            # An evidence-reviewed revision supersedes archival raw_text.
+            # Never resurrect an older canonical sentence during revalidation.
+            spoken_text(item['text'],item['evidence_ids'])
+            continue
         raw=item.get('raw_text',item['text'])
         text=spoken_text(raw,item['evidence_ids'])
         conflicts=ratio_conflicts(text)
         item['raw_text']=raw
         if conflicts:
             pairs='；'.join(f"{x['percentage']}%与{x['numerator']}/{x['denominator']}不一致" for x in conflicts)
-            item['text']='该项来源记录存在内部数值矛盾。来源记载：“'+text.rstrip('。')+'”。其中'+pairs+'，因此这些有冲突的比例暂不用于定量结论，需回到原始研究核对。'
+            item['text']='该项表述存在内部数值矛盾。待核对表述为：“'+text.rstrip('。')+'”。其中'+pairs+'，因此这些有冲突的比例暂不用于定量结论，需回到原始研究核对。'
         else:
             item['text']=text
         item['source_warnings']=conflicts

@@ -55,8 +55,20 @@ def controls():
     numeric=prepare_case(numeric)
     bad_n=copy.deepcopy(np)
     bad_n['segments'][2]['value']='因此可以确认真实阳性率就是38.7%。'
+    uncertain,up=synthetic('CTRL-U','作用归属','效应能否归因于工具？',
+        ['假设性记录中观察到行为效应，未证明由电极本身直接引起。'],
+        ['这项观察能否支持归因？','目前不能确认电极本身是否直接产生该效应。'])
+    bad_u=copy.deepcopy(up)
+    bad_u['segments'][2]['value']='因此该效应并非由电极本身直接引起。'
+    bad_method=copy.deepcopy(gp)
+    bad_method['segments'][2]['value']='要比较效率，必须让两组都达到电荷注入极限。'
+    good_method=copy.deepcopy(gp)
+    good_method['segments'][2]['value']='该比较仍需在可比条件下进一步验证。'
     return [('positive-no-figure',ed,ep,[]),('positive-matched-figure',mat,mp,[]),
             ('negative-causality-generalization',ed,bad_e,['segments/3','segments/4']),
             ('negative-lifetime-wrong-panel',mat,bad_m,['segments/3','figure_choices/0']),
             ('positive-group-conditions',group,gp,[]),('negative-group-conditions',group,bad_g,['segments/2']),
-            ('positive-source-disclosure',numeric,np,[]),('negative-unsupported-rate',numeric,bad_n,['segments/2'])]
+            ('positive-source-disclosure',numeric,np,[]),('negative-unsupported-rate',numeric,bad_n,['segments/2']),
+            ('positive-uncertainty',uncertain,up,[]),('negative-uncertainty-reversal',uncertain,bad_u,['segments/2']),
+            ('negative-unsupported-method',group,bad_method,['segments/2']),
+            ('positive-generic-method',group,good_method,[])]

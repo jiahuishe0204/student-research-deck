@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0.0",
+  "single_product_root": "student-research-deck",
+  "public_demo": "github_pages",
+  "production_frontend_and_control_plane": "tencent_edgeone_same_origin",
+  "workflow_worker": "tencent_cloud_scf",
+  "system_of_record": "managed_postgresql",
+  "artifact_storage": "private_object_storage",
+  "workflow": "P1-P9_only",
+  "security": {
+    "https_required": true,
+    "cors": "same_origin_only",
+    "cookie_http_only": true,
+    "cookie_secure": true,
+    "cookie_same_site": "Lax",
+    "csrf_for_state_changes": true,
+    "secrets": "server_environment_only",
+    "default_response_headers": {
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "strict-origin-when-cross-origin"
+    }
+  },
+  "retention": {
+    "artifacts_days": 7,
+    "expiry_reminder_days_before": 1,
+    "security_audit_days": 30,
+    "aggregate_metrics_days": 90
+  },
+  "backup": {
+    "encrypted_outside_git": true,
+    "daily_copies": 7,
+    "weekly_copies": 4,
+    "manifest": "sha256",
+    "restore_test": "before_release_and_monthly"
+  },
+  "legacy_policy": {
+    "reuse": [
+      "edgeone_same_origin_entry",
+      "security_headers",
+      "health_probe_pattern",
+      "creator_session_security_requirements",
+      "audit_export_backup_restore_rules"
+    ],
+    "do_not_reuse": [
+      "legacy_four_step_generation",
+      "legacy_blob_job_schema",
+      "legacy_customer_frontend",
+      "legacy_green_visual_system"
+    ]
+  }
+}

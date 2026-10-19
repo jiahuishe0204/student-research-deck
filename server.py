@@ -17,10 +17,10 @@ from pathlib import Path
 from epo_ops import EPOClient
 from model_routing import ModelRouter
 from model_usage import ModelBudgetExceeded, ModelUsageLedger
-from retrieval import hydrate_europe_pmc_full_text, search_all
+from retrieval import hydrate_europe_pmc_full_text, search_all, search_patsnap_literature
 from research_sources import (
     assess_evidence_quality, assess_source_quality, enrich_kept_open_full_text, merge_search_results,
-    plan_search_queries,
+    plan_patsnap_queries, plan_search_queries,
 )
 from task_store import TaskStore
 from task_public_view import delivery_view, progress_view
@@ -265,7 +265,17 @@ class AppHandler(SimpleHTTPRequestHandler):
                     queries = plan_search_queries(plan, topic)
                     results = [search_all(item, per_source=4 if tier == "deep" else 3,
                                           epo_client=self.server.epo_client if index == 0 else None,
-                                          epo_query=epo_query) for index, item in enumerate(queries)]
+                                          epo_query=epo_query, include_patsnap=False) for index, item in enumerate(queries)]
+                    if os.environ.get("PATSNAP_API_KEY", "").strip():
+                        # Keep paid retrieval bounded: at most two simple queries, two papers each.
+                        patsnap_detail_cache = {}
+                        for patsnap_query in plan_patsnap_queries(plan, topic):
+                            try:
+                                results.append({"query": "Patsnap: " + patsnap_query,
+                                                "records": search_patsnap_literature(patsnap_query, 2, detail_cache=patsnap_detail_cache), "errors": []})
+                            except Exception as exc:
+                                results.append({"query": "Patsnap: " + patsnap_query, "records": [],
+                                                "errors": [{"source": "Patsnap", "error": type(exc).__name__}]})
                     output = merge_search_results(results, 24 if tier == "deep" else 12)
                 else:
                     output = search_all(query, per_source=6 if tier == "deep" else 4, epo_client=self.server.epo_client, epo_query=epo_query)
@@ -284,7 +294,15 @@ class AppHandler(SimpleHTTPRequestHandler):
                     extra_queries = [item for item in plan_search_queries(plan, topic, supplement=True, limit=3)
                                      if item not in previous_queries][:2]
                     if extra_queries:
-                        extra_results = [search_all(item, per_source=4) for item in extra_queries]
+                        extra_results = [search_all(item, per_source=4, include_patsnap=False) for item in extra_queries]
+                        if os.environ.get("PATSNAP_API_KEY", "").strip():
+                            for patsnap_query in plan_patsnap_queries(plan, topic, supplement=True, limit=1):
+                                try:
+                                    extra_results.append({"query": "Patsnap: " + patsnap_query,
+                                                          "records": search_patsnap_literature(patsnap_query, 1), "errors": []})
+                                except Exception as exc:
+                                    extra_results.append({"query": "Patsnap: " + patsnap_query, "records": [],
+                                                          "errors": [{"source": "Patsnap", "error": type(exc).__name__}]})
                         search_update = merge_search_results([{"query": "previous", "records": candidates, "errors": []}] + extra_results, 30)
                         updated = search_update["records"]
                         if {item["source_id"] for item in updated} != {item["source_id"] for item in candidates}:

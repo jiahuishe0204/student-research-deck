@@ -19,6 +19,8 @@ class CanonicalSurfaceTests(unittest.TestCase):
         case={'canonical':{'C':{'text':'文献报告38.7%（334/686）为阳性。','evidence_ids':['E']}}}
         prepared=prepare_case(case)
         self.assertIn('暂不用于定量结论',prepared['canonical']['C']['text'])
+        self.assertIn('待核对表述',prepared['canonical']['C']['text'])
+        self.assertNotIn('来源记载',prepared['canonical']['C']['text'])
         self.assertEqual(prepared['canonical']['C']['raw_text'],case['canonical']['C']['text'])
         self.assertEqual(prepare_case(prepared),prepared)
         self.assertNotIn('暂不',case['canonical']['C']['text'])

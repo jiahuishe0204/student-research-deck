@@ -12,9 +12,12 @@ def apply_reconciliation(case, value):
         raise ValueError('底稿修订遗漏或新增主张')
     result=copy.deepcopy(case)
     for item in value['claims']:
-        if set(item)!={'claim_id','text','reason','citations'} or not all(isinstance(item[k],str) and item[k].strip() for k in ('text','reason')) or not item['citations']:
+        if set(item)!={'claim_id','action','text','reason','citations'} or item['action'] not in ('keep','revise') or not all(isinstance(item[k],str) and item[k].strip() for k in ('text','reason')) or not item['citations']:
             raise ValueError('底稿修订缺少依据')
         old=active[item['claim_id']]
+        normalized=spoken_text(item['text'],[c.get('evidence_id') for c in item['citations']])
+        if (item['action']=='keep') != (normalized==old['text']):
+            raise ValueError('底稿行动与实际正文不一致：keep必须保留原句，revise必须实际改正文，不能只改reason')
         if old.get('source_warnings') and item['text']!=old['text']:
             raise ValueError('不得移除来源矛盾声明')
         cited=[]

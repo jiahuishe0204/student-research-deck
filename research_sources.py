@@ -2,7 +2,7 @@
 
 import re
 
-from retrieval import hydrate_frontiers_full_text, normalized_key, search_europe_pmc
+from retrieval import hydrate_frontiers_full_text, merge_source_records, search_europe_pmc
 
 
 def _phrases(value):
@@ -40,54 +40,31 @@ def plan_search_queries(plan, fallback, *, supplement=False, limit=6):
     return list(dict.fromkeys(queries))[:limit] or [fallback]
 
 
+def plan_patsnap_queries(plan, fallback, *, supplement=False, limit=2):
+    """Build short natural-language queries for Patsnap, not PubMed syntax."""
+    concepts = plan.get("search_concepts", {}) if isinstance(plan, dict) else {}
+    if not isinstance(concepts, dict):
+        concepts = {}
+    explicit = _phrases(concepts.get("patsnap_terms", []))
+    if not explicit:
+        core = _phrases(concepts.get("core_terms", []))
+        details = []
+        for key, value in concepts.items():
+            if key not in ("core_terms", "patsnap_terms"):
+                details.extend(_phrases(value))
+        explicit = core[:2] + details[:1]
+    if supplement and len(explicit) > 1:
+        explicit = explicit[1:]
+    return list(dict.fromkeys(explicit))[:limit] or [str(fallback).strip()]
+
+
 def merge_search_results(results, limit=30):
-    """Merge by DOI/PMID/title and preserve the richest open-access locator."""
-    records = {}
-    aliases = {}
-    for result in results:
-        for record in result.get("records", []):
-            title_key = "title:" + re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(record.get("title") or "").lower())
-            identifiers = [value for value in (
-                "doi:" + str(record.get("doi") or "").lower().strip() if record.get("doi") else "",
-                "pmid:" + str(record.get("pmid") or "").strip() if record.get("pmid") else "",
-                title_key if len(title_key) > 12 else "",
-            ) if value]
-            key = normalized_key(record)
-            for identifier in identifiers:
-                candidate_key = aliases.get(identifier)
-                if candidate_key is None:
-                    continue
-                candidate = records[candidate_key]
-                if record.get("doi") and candidate.get("doi") and str(record["doi"]).lower() != str(candidate["doi"]).lower():
-                    continue
-                if record.get("pmid") and candidate.get("pmid") and str(record["pmid"]) != str(candidate["pmid"]):
-                    continue
-                key = candidate_key
-                break
-            if key not in records:
-                records[key] = dict(record)
-                records[key]["also_found_in"] = list(record.get("also_found_in") or [record.get("source", "unknown")])
-                for value in identifiers:
-                    aliases[value] = key
-                continue
-            current = records[key]
-            for value in identifiers:
-                if value not in aliases:
-                    aliases[value] = key
-            current["also_found_in"] = list(dict.fromkeys(current["also_found_in"] + (record.get("also_found_in") or [record.get("source", "unknown")])))
-            for field in ("abstract", "title", "authors", "journal", "publication_types", "pmcid", "pmid", "doi", "volume", "issue", "pages"):
-                existing = current.get(field)
-                incoming = record.get(field)
-                if incoming and (not existing or field == "abstract" and len(str(incoming)) > len(str(existing))):
-                    current[field] = incoming
-            if record.get("pmcid") and record.get("access") == "full_text":
-                current["source"] = "Europe PMC"
-                current["access"] = "full_text"
-                current["url"] = record.get("url") or current.get("url")
+    """Merge duplicate representations conservatively and retain source provenance."""
+    merged = merge_source_records([record for result in results for record in result.get("records", [])])
     return {
         "query": " | ".join(item.get("query", "") for item in results),
         "queries": [item.get("query", "") for item in results],
-        "records": list(records.values())[:limit],
+        "records": merged[:limit],
         "errors": [error for item in results for error in item.get("errors", [])],
     }
 
