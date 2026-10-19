@@ -74,6 +74,18 @@ class TencentSesMailer:
         safe = {str(key): str(value) for key, value in dict(variables).items()}
         if any(len(value) > 500 for value in safe.values()):
             raise ValueError("邮件模板变量过长")
+        if hasattr(self.client, "send_email"):
+            try:
+                response = self.client.send_email({
+                    "from": self.from_address, "destination": destination,
+                    "template_id": int(self.template_ids[kind]), "variables": safe,
+                })
+            except Exception as exc:
+                marker = (type(exc).__name__ + " " + str(exc)).lower()
+                if any(term in marker for term in ("timeout", "connection", "socket", "closed")):
+                    raise SesDeliveryUncertain(exc) from exc
+                raise
+            return {"message_id": str(response["message_id"]), "request_id": str(response["request_id"])}
         try:
             from tencentcloud.ses.v20201002 import models
             request = models.SendEmailRequest()
@@ -91,19 +103,8 @@ class TencentSesMailer:
                     raise SesDeliveryUncertain(exc) from exc
                 raise
             return {"message_id": str(response.MessageId), "request_id": str(response.RequestId)}
-        except ImportError:
-            # Test clients accept a neutral payload and never see cloud secrets.
-            try:
-                response = self.client.send_email({
-                    "from": self.from_address, "destination": destination,
-                    "template_id": int(self.template_ids[kind]), "variables": safe,
-                })
-            except Exception as exc:
-                marker = (type(exc).__name__ + " " + str(exc)).lower()
-                if any(term in marker for term in ("timeout", "connection", "socket", "closed")):
-                    raise SesDeliveryUncertain(exc) from exc
-                raise
-            return {"message_id": str(response["message_id"]), "request_id": str(response["request_id"])}
+        except ImportError as exc:
+            raise RuntimeError("生产环境缺少腾讯 SES SDK") from exc
 
 
 class TencentCosArtifactStore:
