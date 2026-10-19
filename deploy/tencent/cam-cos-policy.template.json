@@ -1,0 +1,10 @@
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": ["cos:PutObject", "cos:GetObject", "cos:HeadObject", "cos:DeleteObject"],
+      "resource": ["qcs::cos:${REGION}:uid/${APP_ID}:${BUCKET}/deliveries/*"]
+    }
+  ]
+}

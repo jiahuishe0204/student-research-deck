@@ -16,9 +16,7 @@ class ProductionFoundationTests(unittest.TestCase):
             "DATABASE_URL": "postgresql://example.invalid/db",
             "DEEPSEEK_API_KEY": "secret",
             "IDENTITY_SECRET": "x" * 32,
-            "EMAIL_PROVIDER_API_KEY": "secret",
             "EMAIL_FROM": "delivery@example.com",
-            "ARTIFACT_BUCKET": "research-deliveries",
             "PUBLIC_ORIGIN": "https://research.example.com",
             "MODEL_TASK_MAX_TOTAL_TOKENS": "120000",
             "MODEL_TASK_MAX_COST_CNY": "2.0",
@@ -68,6 +66,10 @@ class ProductionFoundationTests(unittest.TestCase):
         self.assertIn("delete_artifact", outbox)
         self.assertIn("lease_token UUID", outbox)
         self.assertNotIn("ON DELETE CASCADE", outbox)
+        upgrade = (ROOT / "migrations/005_forward_production_upgrade.sql").read_text()
+        self.assertIn("email_ciphertext BYTEA", upgrade)
+        self.assertIn("delivery_events_status_check", upgrade)
+        self.assertIn("delete_lease_token UUID", upgrade)
 
     def test_edgeone_gateway_has_security_headers_and_no_business_workflow(self):
         deploy = ROOT / "deploy/edgeone"

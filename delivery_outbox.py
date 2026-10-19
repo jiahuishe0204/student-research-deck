@@ -18,16 +18,21 @@ def backoff_seconds(attempt, jitter=None):
     return int(base + base * 0.25 * max(0.0, min(fraction, 1.0)))
 
 
-def claim_event(connection, lease_seconds=120):
+def claim_event(connection, lease_seconds=120, event_types=None):
     if not 30 <= int(lease_seconds) <= 900:
         raise ValueError("事件租约必须为30—900秒")
     token = str(uuid.uuid4())
+    types = tuple(event_types or ("send_otp", "send_completed", "send_expiry",
+                                  "upload_artifact", "delete_artifact"))
+    if not types or any(not isinstance(value, str) for value in types):
+        raise ValueError("事件类型过滤器无效")
     cursor = connection.cursor()
     cursor.execute(
         """
         WITH candidate AS (
             SELECT event_id FROM delivery_events
              WHERE status IN ('pending','retryable_failed')
+               AND event_type = ANY(%s)
                AND available_at <= CURRENT_TIMESTAMP
                AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP)
                AND attempt_count < 8
@@ -41,7 +46,7 @@ def claim_event(connection, lease_seconds=120):
           FROM candidate WHERE e.event_id=candidate.event_id
         RETURNING e.event_id,e.event_type,e.task_id,e.user_id,e.payload,e.attempt_count
         """,
-        (token, int(lease_seconds)),
+        (list(types), token, int(lease_seconds)),
     )
     row = cursor.fetchone()
     connection.commit()
@@ -49,6 +54,21 @@ def claim_event(connection, lease_seconds=120):
         return None
     return {"lease_token": token, "event_id": row[0], "event_type": row[1],
             "task_id": row[2], "user_id": row[3], "payload": row[4], "attempt_count": row[5]}
+
+
+def recover_expired_email_leases(connection):
+    """Quarantine ambiguous sends; never automatically resend after a crash."""
+    cursor = connection.cursor()
+    cursor.execute(
+        """UPDATE delivery_events SET status='unknown',lease_token=NULL,lease_until=NULL,
+                  last_error_code='lease_expired_after_claim',updated_at=CURRENT_TIMESTAMP
+             WHERE status='running' AND lease_until<CURRENT_TIMESTAMP
+               AND event_type IN ('send_otp','send_completed','send_expiry')
+            RETURNING event_id""", ()
+    )
+    rows = cursor.fetchall()
+    connection.commit()
+    return [row[0] for row in rows]
 
 
 def finish_event(connection, event_id, lease_token, status, *, provider_request_id=None,
@@ -89,4 +109,5 @@ def classify_provider_failure(*, http_status=None, error_code="", ambiguous=Fals
     return "permanent_failed"
 
 
-__all__ = ["backoff_seconds", "claim_event", "finish_event", "classify_provider_failure"]
+__all__ = ["backoff_seconds", "claim_event", "finish_event", "classify_provider_failure",
+           "recover_expired_email_leases"]

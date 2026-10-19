@@ -45,22 +45,24 @@ class DeliveryLifecycle:
             published_at=published_at, expires_at=published_at + RETENTION,
             remind_at=published_at + RETENTION - REMINDER_LEAD,
             completion_idempotency_key="completed:%s" % task_id,
-            reminder_idempotency_key="expiry:%s:%s" % (artifact_id, int((published_at + RETENTION).timestamp())),
+            reminder_idempotency_key="expiry:%s" % task_id,
         )
 
-    def expire(self, artifact_id):
+    def expire(self, artifact_id, lease_token=None):
         """Disable download before attempting remote deletion."""
-        artifact = self.repository.mark_delete_pending(artifact_id, now=self.clock())
+        artifact = self.repository.mark_delete_pending(artifact_id, now=self.clock(), lease_token=lease_token)
         if not artifact or artifact.get("status") == "deleted":
             return "already_deleted"
         try:
             self.artifact_store.delete(artifact["object_key"])
-        except FileNotFoundError:
-            pass
         except Exception as exc:
-            self.repository.record_delete_failure(artifact_id, type(exc).__name__)
-            raise
-        self.repository.mark_deleted(artifact_id, now=self.clock())
+            code = str(getattr(exc, "code", getattr(exc, "error_code", "")))
+            if isinstance(exc, FileNotFoundError) or getattr(exc, "status_code", None) == 404 or code == "NoSuchKey":
+                pass
+            else:
+                self.repository.record_delete_failure(artifact_id, type(exc).__name__, lease_token=lease_token)
+                raise
+        self.repository.mark_deleted(artifact_id, now=self.clock(), lease_token=lease_token)
         return "deleted"
 
     def reconcile_prepared(self, limit=100):

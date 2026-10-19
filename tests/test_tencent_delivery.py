@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tencent_delivery import TencentCosArtifactStore, TencentSesMailer, private_object_key
+from tencent_delivery import SesDeliveryUncertain, TencentCosArtifactStore, TencentSesMailer, private_object_key
 
 
 class FakeSes:
@@ -14,6 +14,8 @@ class FakeSes:
     def send_email(self, payload):
         self.payloads.append(payload)
         return {"message_id": "m-1", "request_id": "r-1"}
+class TimeoutSes:
+    def send_email(self,payload): raise TimeoutError("socket timeout after request")
 
 
 class FakeCos:
@@ -38,6 +40,12 @@ class TencentDeliveryTests(unittest.TestCase):
         self.assertEqual(client.payloads[0]["template_id"], 101)
         with self.assertRaises(ValueError): mailer.send_template("unknown", "user@example.com", {})
         with self.assertRaises(ValueError): mailer.send_template("otp", "user@example.com", {"x": "a" * 501})
+
+    def test_ses_network_timeout_is_quarantined_as_uncertain(self):
+        mailer=TencentSesMailer(TimeoutSes(),"noreply@example.com",{"otp":101})
+        with self.assertRaises(SesDeliveryUncertain) as caught:
+            mailer.send_template("otp","user@example.com",{"code":"123456"})
+        self.assertTrue(caught.exception.ambiguous_delivery)
 
     def test_cos_encrypts_hashes_signs_and_deletes_private_artifact(self):
         client = FakeCos(); store = TencentCosArtifactStore(client, "bucket-123")

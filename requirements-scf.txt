@@ -1,2 +1,5 @@
 # Runtime dependency for Neon PostgreSQL access in Tencent SCF.
 psycopg[binary]>=3.2,<4
+cryptography>=43,<46
+tencentcloud-sdk-python-ses>=3.0,<4
+cos-python-sdk-v5>=1.9,<2

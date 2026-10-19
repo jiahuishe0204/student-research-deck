@@ -9,11 +9,18 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from urllib.parse import quote
 from dataclasses import dataclass
 
 
 ALLOWED_KINDS = frozenset({"otp", "completed", "expiry"})
 CONTENT_TYPES = frozenset({"application/pdf", "text/markdown; charset=utf-8", "application/json"})
+OBJECT_KEY_RE = re.compile(r"deliveries/[A-Za-z0-9_-]{8,80}/[A-Za-z0-9_-]{8,80}\.[a-z0-9]{1,8}\Z")
+
+
+def _valid_key(key):
+    if not OBJECT_KEY_RE.fullmatch(str(key)):
+        raise ValueError("对象键无效")
 
 
 def private_object_key(task_id, artifact_id, extension):
@@ -32,6 +39,14 @@ class StoredArtifact:
     sha256: str
     size_bytes: int
     etag: str
+
+
+class SesDeliveryUncertain(RuntimeError):
+    ambiguous_delivery = True
+
+    def __init__(self, cause):
+        super().__init__("SES 请求结果不确定")
+        self.error_code = type(cause).__name__
 
 
 class TencentSesMailer:
@@ -68,14 +83,26 @@ class TencentSesMailer:
             template.TemplateID = int(self.template_ids[kind])
             template.TemplateData = json.dumps(safe, ensure_ascii=False, separators=(",", ":"))
             request.Template = template
-            response = self.client.SendEmail(request)
+            try:
+                response = self.client.SendEmail(request)
+            except Exception as exc:
+                marker = (type(exc).__name__ + " " + str(exc)).lower()
+                if any(term in marker for term in ("timeout", "connection", "socket", "closed")):
+                    raise SesDeliveryUncertain(exc) from exc
+                raise
             return {"message_id": str(response.MessageId), "request_id": str(response.RequestId)}
         except ImportError:
             # Test clients accept a neutral payload and never see cloud secrets.
-            response = self.client.send_email({
-                "from": self.from_address, "destination": destination,
-                "template_id": int(self.template_ids[kind]), "variables": safe,
-            })
+            try:
+                response = self.client.send_email({
+                    "from": self.from_address, "destination": destination,
+                    "template_id": int(self.template_ids[kind]), "variables": safe,
+                })
+            except Exception as exc:
+                marker = (type(exc).__name__ + " " + str(exc)).lower()
+                if any(term in marker for term in ("timeout", "connection", "socket", "closed")):
+                    raise SesDeliveryUncertain(exc) from exc
+                raise
             return {"message_id": str(response["message_id"]), "request_id": str(response["request_id"])}
 
 
@@ -92,8 +119,7 @@ class TencentCosArtifactStore:
         return cls(CosS3Client(cos_config), config.cos_bucket)
 
     def upload(self, key, body, content_type):
-        if not key.startswith("deliveries/") or ".." in key:
-            raise ValueError("对象键无效")
+        _valid_key(key)
         if content_type not in CONTENT_TYPES:
             raise ValueError("交付文件类型无效")
         payload = body.encode("utf-8") if isinstance(body, str) else bytes(body)
@@ -107,20 +133,19 @@ class TencentCosArtifactStore:
         return StoredArtifact(key, digest, len(payload), str(response.get("ETag", "")).strip('"'))
 
     def signed_download(self, key, filename, expires_seconds=600):
-        if not key.startswith("deliveries/") or ".." in key:
-            raise ValueError("对象键无效")
+        _valid_key(key)
         if not 30 <= int(expires_seconds) <= 600:
             raise ValueError("下载链接有效期必须为30—600秒")
-        safe_name = re.sub(r"[^0-9A-Za-z._-]+", "_", str(filename))[:100] or "delivery"
+        safe_name = re.sub(r"[\r\n\\/]+", "_", str(filename)).strip()[:100] or "delivery"
+        disposition = "attachment; filename*=UTF-8''%s" % quote(safe_name, safe="._-")
         return self.client.get_presigned_download_url(
             Bucket=self.bucket, Key=key,
-            Params={"response-content-disposition": 'attachment; filename="%s"' % safe_name},
+            Params={"response-content-disposition": disposition},
             Expired=int(expires_seconds),
         )
 
     def stat(self, key):
-        if not key.startswith("deliveries/") or ".." in key:
-            raise ValueError("对象键无效")
+        _valid_key(key)
         response = self.client.head_object(Bucket=self.bucket, Key=key)
         metadata = response.get("Metadata") or {}
         return {
@@ -146,9 +171,8 @@ class TencentCosArtifactStore:
         return self.signed_download(key, filename, min(600, remaining))
 
     def delete(self, key):
-        if not key.startswith("deliveries/") or ".." in key:
-            raise ValueError("对象键无效")
+        _valid_key(key)
         self.client.delete_object(Bucket=self.bucket, Key=key)
 
 
-__all__ = ["StoredArtifact", "TencentSesMailer", "TencentCosArtifactStore", "private_object_key"]
+__all__ = ["SesDeliveryUncertain", "StoredArtifact", "TencentSesMailer", "TencentCosArtifactStore", "private_object_key"]

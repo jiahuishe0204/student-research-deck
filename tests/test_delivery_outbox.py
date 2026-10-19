@@ -1,12 +1,13 @@
 import unittest
 
-from delivery_outbox import backoff_seconds, claim_event, classify_provider_failure, finish_event
+from delivery_outbox import backoff_seconds, claim_event, classify_provider_failure, finish_event, recover_expired_email_leases
 
 
 class Cursor:
     def __init__(self, rows): self.rows=iter(rows); self.calls=[]
     def execute(self, sql, params): self.calls.append((sql, params))
     def fetchone(self): return next(self.rows)
+    def fetchall(self): return list(self.rows)
 class Connection:
     def __init__(self, rows): self.c=Cursor(rows); self.commits=0
     def cursor(self): return self.c
@@ -19,6 +20,7 @@ class OutboxTests(unittest.TestCase):
         event=claim_event(db)
         self.assertEqual(event["event_id"],"e1")
         self.assertIn("FOR UPDATE SKIP LOCKED",db.c.calls[0][0])
+        self.assertIn("event_type = ANY",db.c.calls[0][0])
         self.assertTrue(event["lease_token"])
 
     def test_finish_requires_current_lease(self):
@@ -35,6 +37,11 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(classify_provider_failure(ambiguous=True),"unknown")
         self.assertEqual(classify_provider_failure(http_status=429),"retryable_failed")
         self.assertEqual(classify_provider_failure(http_status=400),"permanent_failed")
+
+    def test_expired_email_lease_is_quarantined_not_resent(self):
+        db=Connection([("e1",)])
+        self.assertEqual(recover_expired_email_leases(db),["e1"])
+        self.assertIn("status='unknown'",db.c.calls[0][0])
 
 
 if __name__ == "__main__": unittest.main()

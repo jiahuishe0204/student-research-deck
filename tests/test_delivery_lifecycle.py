@@ -9,8 +9,8 @@ class Repo:
     def __init__(self): self.calls=[]; self.prepared={"status":"prepared"}
     def prepare_artifact(self, **kw): self.calls.append(("prepare",kw)); return self.prepared
     def publish_artifact_and_complete(self, **kw): self.calls.append(("publish",kw)); return {"status":"published",**kw}
-    def mark_delete_pending(self, artifact_id, now): self.calls.append(("disable",artifact_id)); return {"status":"delete_pending","object_key":"deliveries/TASK_12345678/ART_12345678.pdf"}
-    def record_delete_failure(self,*a): self.calls.append(("delete_failed",a))
+    def mark_delete_pending(self, artifact_id, now, lease_token=None): self.calls.append(("disable",artifact_id)); return {"status":"delete_pending","object_key":"deliveries/TASK_12345678/ART_12345678.pdf"}
+    def record_delete_failure(self,*a,**kw): self.calls.append(("delete_failed",a))
     def mark_deleted(self,*a,**kw): self.calls.append(("deleted",a))
     def stale_prepared(self,**kw): return []
 class Store:
@@ -44,6 +44,11 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.repo.calls[0][0],"disable")
         self.assertEqual(self.store.calls[0],"delete")
         self.assertEqual(self.repo.calls[-1][0],"deleted")
+
+    def test_lost_delete_lease_never_touches_cos(self):
+        self.repo.mark_delete_pending=lambda artifact_id,now,lease_token=None:None
+        self.assertEqual(self.life.expire("ART_12345678",lease_token="stale"),"already_deleted")
+        self.assertEqual(self.store.calls,[])
 
 
 if __name__ == "__main__": unittest.main()

@@ -17,9 +17,7 @@ class ProductionConfig:
     database_url: str
     deepseek_api_key: str
     identity_secret: str
-    email_provider_api_key: str
     email_from: str
-    artifact_bucket: str
     public_origin: str
     task_max_total_tokens: int
     task_max_cost_cny: float
@@ -48,9 +46,7 @@ def load_production_config(environ=None):
         database_url=_required(values, "DATABASE_URL"),
         deepseek_api_key=_required(values, "DEEPSEEK_API_KEY"),
         identity_secret=_required(values, "IDENTITY_SECRET"),
-        email_provider_api_key=_required(values, "EMAIL_PROVIDER_API_KEY"),
         email_from=_required(values, "EMAIL_FROM"),
-        artifact_bucket=_required(values, "ARTIFACT_BUCKET"),
         public_origin=_required(values, "PUBLIC_ORIGIN").rstrip("/"),
         task_max_total_tokens=int(_required(values, "MODEL_TASK_MAX_TOTAL_TOKENS")),
         task_max_cost_cny=float(_required(values, "MODEL_TASK_MAX_COST_CNY")),
@@ -80,8 +76,7 @@ def load_production_config(environ=None):
 def readiness(environ=None):
     values = os.environ if environ is None else environ
     names = (
-        "DATABASE_URL", "DEEPSEEK_API_KEY", "IDENTITY_SECRET",
-        "EMAIL_PROVIDER_API_KEY", "EMAIL_FROM", "ARTIFACT_BUCKET",
+        "DATABASE_URL", "DEEPSEEK_API_KEY", "IDENTITY_SECRET", "EMAIL_FROM",
         "PUBLIC_ORIGIN", "MODEL_TASK_MAX_TOTAL_TOKENS",
         "MODEL_TASK_MAX_COST_CNY",
         "SES_SECRET_ID", "SES_SECRET_KEY", "COS_SECRET_ID", "COS_SECRET_KEY", "SES_REGION",
