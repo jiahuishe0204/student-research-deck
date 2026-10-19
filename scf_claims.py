@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import uuid
 
 from scf_handler import VALID_STAGES, WorkerEventError
 
@@ -11,8 +12,9 @@ def claim_stage(connection, task_id: str, stage: str, attempt: int, lease_second
     """Atomically claim one task-stage-attempt.
 
     The caller supplies an open PostgreSQL connection. The function commits only
-    its own claim transaction and returns True when this worker owns the lease.
-    A duplicate claim returns False; an expired lease may be reclaimed.
+    its own claim transaction and returns a unique fencing token when this
+    worker owns the lease. A duplicate claim returns None; an expired lease may
+    be reclaimed with a new token so the old worker can no longer finalize it.
     """
 
     task_id = str(task_id or "").strip()
@@ -23,38 +25,39 @@ def claim_stage(connection, task_id: str, stage: str, attempt: int, lease_second
         raise WorkerEventError("lease_seconds 必须在 30-86400 秒之间")
 
     now = datetime.now(timezone.utc)
+    lease_token = str(uuid.uuid4())
     cursor = connection.cursor()
     cursor.execute(
         """
         INSERT INTO task_stage_attempts
-            (task_id, stage, attempt, status, lease_until, updated_at)
-        VALUES (%s, %s, %s, 'running', %s, %s)
+            (task_id, stage, attempt, status, lease_until, lease_token, updated_at)
+        VALUES (%s, %s, %s, 'running', %s, %s, %s)
         ON CONFLICT (task_id, stage, attempt) DO NOTHING
         RETURNING task_id
         """,
-        (task_id, stage, attempt, now.timestamp() + lease_seconds, now),
+        (task_id, stage, attempt, now.timestamp() + lease_seconds, lease_token, now),
     )
     inserted = cursor.fetchone()
     if inserted:
         connection.commit()
-        return True
+        return lease_token
 
     cursor.execute(
         """
         UPDATE task_stage_attempts
-           SET status = 'running', lease_until = %s, updated_at = %s
+           SET status = 'running', lease_until = %s, lease_token = %s, updated_at = %s
          WHERE task_id = %s AND stage = %s AND attempt = %s
            AND status = 'running' AND lease_until < %s
         RETURNING task_id
         """,
-        (now.timestamp() + lease_seconds, now, task_id, stage, attempt, now.timestamp()),
+        (now.timestamp() + lease_seconds, lease_token, now, task_id, stage, attempt, now.timestamp()),
     )
     reclaimed = cursor.fetchone()
     connection.commit()
-    return bool(reclaimed)
+    return lease_token if reclaimed else None
 
 
-def finish_stage(connection, task_id: str, stage: str, attempt: int, status: str):
+def finish_stage(connection, task_id: str, stage: str, attempt: int, lease_token: str, status: str):
     """Mark an owned attempt as succeeded or failed."""
     if status not in {"succeeded", "failed"}:
         raise WorkerEventError("阶段结束状态无效")
@@ -64,9 +67,10 @@ def finish_stage(connection, task_id: str, stage: str, attempt: int, status: str
         UPDATE task_stage_attempts
            SET status = %s, lease_until = 0, updated_at = CURRENT_TIMESTAMP
          WHERE task_id = %s AND stage = %s AND attempt = %s AND status = 'running'
+           AND lease_token = %s AND lease_until >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)
         RETURNING task_id
         """,
-        (status, str(task_id), str(stage).upper(), attempt),
+        (status, str(task_id), str(stage).upper(), attempt, str(lease_token)),
     )
     updated = cursor.fetchone()
     connection.commit()
@@ -80,6 +84,7 @@ CREATE TABLE IF NOT EXISTS task_stage_attempts (
     attempt INTEGER NOT NULL CHECK (attempt >= 1),
     status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed')),
     lease_until DOUBLE PRECISION NOT NULL,
+    lease_token UUID NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (task_id, stage, attempt)
 );
