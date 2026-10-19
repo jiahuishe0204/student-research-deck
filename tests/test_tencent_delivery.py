@@ -21,6 +21,8 @@ class FakeCos:
     def put_object(self, **kwargs): self.puts.append(kwargs); return {"ETag": '"etag"'}
     def get_presigned_download_url(self, **kwargs): self.signed = kwargs; return "https://signed.invalid/object"
     def delete_object(self, **kwargs): self.deletes.append(kwargs)
+    def head_object(self, **kwargs):
+        return {"Metadata":{"sha256":"a"*64},"Content-Length":3,"Content-Type":"application/pdf","x-cos-server-side-encryption":"AES256","ETag":'"etag"'}
 
 
 class TencentDeliveryTests(unittest.TestCase):
@@ -52,6 +54,7 @@ class TencentDeliveryTests(unittest.TestCase):
             store.signed_download_before(saved.key, "report.pdf", now + timedelta(seconds=10), now)
         store.delete(saved.key)
         self.assertEqual(client.deletes[0]["Key"], saved.key)
+        self.assertEqual(store.stat(saved.key)["encryption"], "AES256")
 
     def test_cos_rejects_public_or_oversized_inputs(self):
         store = TencentCosArtifactStore(FakeCos(), "bucket-123")

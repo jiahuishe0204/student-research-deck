@@ -118,6 +118,27 @@ class TencentCosArtifactStore:
             Expired=int(expires_seconds),
         )
 
+    def stat(self, key):
+        if not key.startswith("deliveries/") or ".." in key:
+            raise ValueError("对象键无效")
+        response = self.client.head_object(Bucket=self.bucket, Key=key)
+        metadata = response.get("Metadata") or {}
+        return {
+            "sha256": metadata.get("sha256"),
+            "size_bytes": int(response.get("Content-Length", response.get("ContentLength", -1))),
+            "content_type": response.get("Content-Type", response.get("ContentType")),
+            "encryption": response.get("x-cos-server-side-encryption", response.get("ServerSideEncryption")),
+            "etag": str(response.get("ETag", "")).strip('"'),
+        }
+
+    def stat_or_none(self, key):
+        try:
+            return self.stat(key)
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404 or isinstance(exc, FileNotFoundError):
+                return None
+            raise
+
     def signed_download_before(self, key, filename, expires_at, now):
         remaining = int((expires_at - now).total_seconds())
         if remaining < 30:
