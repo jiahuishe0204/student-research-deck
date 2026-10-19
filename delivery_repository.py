@@ -136,9 +136,6 @@ class PostgresDeliveryRepository:
             (str(artifact_id), task_id, object_key),
         )
         result = _one(cursor)
-        if lease_token is not None and not result:
-            self.connection.rollback()
-            return None
         if not result:
             self.connection.rollback()
             raise ValueError("任务不存在或产物标识冲突")
@@ -284,6 +281,9 @@ class PostgresDeliveryRepository:
             (str(artifact_id), lease_token, lease_token),
         )
         result = _one(cursor)
+        if lease_token is not None and not result:
+            self.connection.rollback()
+            return None
         if not result:
             cursor.execute("SELECT jsonb_build_object('status',status,'object_key',object_key) FROM task_artifacts WHERE artifact_id=%s", (str(artifact_id),))
             result = _one(cursor)

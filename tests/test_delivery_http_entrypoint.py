@@ -5,10 +5,11 @@ from delivery_http_entrypoint import main_handler
 
 
 class Otp:
-    def issue(self,email,ip): self.issued=(email,ip)
+    def issue(self,email,ip): self.issued=(email,ip); return "challenge-1"
     def verify(self,challenge,code): return {"session_token":"session-secret","csrf_token":"csrf-secret"}
 class Auth:
     def revoke(self,token): self.token=token
+    def authenticate(self,*args,**kwargs): return "u1"
 
 
 class HttpEntrypointTests(unittest.TestCase):
@@ -16,7 +17,9 @@ class HttpEntrypointTests(unittest.TestCase):
     def test_request_uses_trusted_gateway_ip_not_forwarded_header(self):
         event={"httpMethod":"POST","path":"/auth/otp/request","body":json.dumps({"email":"u@example.com"}),
                "headers":{"x-forwarded-for":"attacker"},"requestContext":{"sourceIp":"203.0.113.2"}}
-        self.assertEqual(main_handler(event,services=self.services)["statusCode"],202)
+        response=main_handler(event,services=self.services)
+        self.assertEqual(response["statusCode"],202)
+        self.assertEqual(json.loads(response["body"])["challenge_id"],"challenge-1")
         self.assertEqual(self.otp.issued[1],"203.0.113.2")
     def test_verify_sets_only_secure_http_only_session_cookie(self):
         event={"httpMethod":"POST","path":"/auth/otp/verify","body":json.dumps({"challenge_id":"c","code":"123456"})}

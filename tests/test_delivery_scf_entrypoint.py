@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from delivery_scf_entrypoint import main_handler
+from delivery_scf_entrypoint import DeliveryAttentionRequired, main_handler
 
 
 class DeliveryScfEntrypointTests(unittest.TestCase):
@@ -17,6 +17,12 @@ class DeliveryScfEntrypointTests(unittest.TestCase):
     def test_retention_timer(self,run):
         result=main_handler({"action":"retention"},dependencies={"repository":object(),"lifecycle":object()})
         self.assertEqual(result["expired"],2)
+
+    @patch("delivery_scf_entrypoint.execute_one",return_value={"status":"unknown"})
+    @patch("delivery_scf_entrypoint.recover_expired_email_leases",return_value=[])
+    def test_current_unknown_mail_fails_for_cloud_alert(self,recover,execute):
+        with self.assertRaises(DeliveryAttentionRequired):
+            main_handler({"action":"outbox"},dependencies={"connection":object(),"vault":object(),"mailer":object()})
 
 
 if __name__ == "__main__": unittest.main()

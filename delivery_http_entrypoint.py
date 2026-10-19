@@ -62,13 +62,16 @@ def main_handler(event, context=None, *, services=None):
             source_ip = str((event.get("requestContext") or {}).get("sourceIp", ""))
             if not source_ip:
                 raise PermissionError("请求来源无效")
-            services["otp"].issue(payload.get("email", ""), source_ip)
-            return _response(202, {"ok": True, "message": "若地址有效，验证码将很快送达"})
+            challenge_id = services["otp"].issue(payload.get("email", ""), source_ip)
+            return _response(202, {"ok": True, "challenge_id": challenge_id,
+                                   "message": "若地址有效，验证码将很快送达"})
         if method == "POST" and path.endswith("/auth/otp/verify"):
             result = services["otp"].verify(payload.get("challenge_id", ""), payload.get("code", ""))
             cookie = "%s=%s; %s; Max-Age=604800" % (SESSION_COOKIE, result["session_token"], COOKIE_ATTRIBUTES)
             return _response(200, {"ok": True, "csrf_token": result["csrf_token"]}, {"Set-Cookie": cookie})
         if method == "POST" and path.endswith("/auth/logout"):
+            services["auth"].authenticate(_session_cookie(event), csrf_token=headers.get("x-csrf-token", ""),
+                                          require_csrf=True)
             services["auth"].revoke(_session_cookie(event))
             return _response(200, {"ok": True}, {"Set-Cookie": "%s=; %s; Max-Age=0" % (SESSION_COOKIE, COOKIE_ATTRIBUTES)})
         if method == "POST" and path.endswith("/delivery/download"):

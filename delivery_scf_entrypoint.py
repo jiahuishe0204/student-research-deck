@@ -40,6 +40,8 @@ def main_handler(event, context=None, *, dependencies=None):
             result = execute_one(deps["connection"], deps["vault"], deps["mailer"])
             if quarantined:
                 raise DeliveryAttentionRequired("发现邮件发送结果未知事件：%d" % len(quarantined))
+            if result.get("status") in ("unknown", "permanent_failed"):
+                raise DeliveryAttentionRequired("邮件事件需要人工处理：%s" % result["status"])
             return {"ok": True, "action": action, "quarantined_count": len(quarantined), **result}
         if action == "retention":
             result = run_retention_cycle(deps["repository"], deps["lifecycle"])

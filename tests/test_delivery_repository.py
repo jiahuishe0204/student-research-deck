@@ -35,5 +35,14 @@ class DeliveryRepositoryTests(unittest.TestCase):
         self.assertIn("FOR UPDATE SKIP LOCKED",sql)
         self.assertEqual(db.commits,1)
 
+    def test_stale_delete_lease_never_falls_back_to_current_object(self):
+        class LostCursor(Cursor):
+            def fetchone(self): return None
+        db=Connection([]); db.c=LostCursor([])
+        repo=PostgresDeliveryRepository(db,"https://example.com")
+        self.assertIsNone(repo.mark_delete_pending("a1","now",lease_token="stale"))
+        self.assertEqual(len(db.c.calls),1)
+        self.assertEqual(db.rollbacks,1)
+
 
 if __name__ == "__main__": unittest.main()
