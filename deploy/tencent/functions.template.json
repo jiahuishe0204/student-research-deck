@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "functions": [
+    {
+      "name": "research-auth-api",
+      "entrypoint": "delivery_http_entrypoint.main_handler",
+      "trigger": {"type": "api-gateway", "https_only": true, "path_prefix": "/auth/"},
+      "memory_mb": 256,
+      "timeout_seconds": 15,
+      "role": "database-auth-role",
+      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN"]
+    },
+    {
+      "name": "research-download-api",
+      "entrypoint": "delivery_http_entrypoint.main_handler",
+      "trigger": {"type": "api-gateway", "https_only": true, "path_prefix": "/delivery/download"},
+      "memory_mb": 256,
+      "timeout_seconds": 15,
+      "role": "cos-delivery-role",
+      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "COS_SECRET_ID", "COS_SECRET_KEY", "COS_REGION", "COS_BUCKET"]
+    },
+    {
+      "name": "research-ses-outbox",
+      "entrypoint": "delivery_scf_entrypoint.main_handler",
+      "event": {"action": "outbox"},
+      "trigger": {"type": "timer", "cron": "0 */1 * * * * *"},
+      "memory_mb": 128,
+      "timeout_seconds": 30,
+      "max_concurrency": 1,
+      "role": "ses-delivery-role",
+      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EMAIL_FROM", "SES_SECRET_ID", "SES_SECRET_KEY", "SES_REGION", "SES_TEMPLATE_OTP", "SES_TEMPLATE_COMPLETED", "SES_TEMPLATE_EXPIRY"]
+    },
+    {
+      "name": "research-cos-retention",
+      "entrypoint": "delivery_scf_entrypoint.main_handler",
+      "events": [{"action": "retention"}, {"action": "reconcile"}],
+      "triggers": [{"type": "timer", "cron": "0 */5 * * * * *"}, {"type": "timer", "cron": "0 0 * * * * *"}],
+      "memory_mb": 128,
+      "timeout_seconds": 60,
+      "max_concurrency": 1,
+      "role": "cos-delivery-role",
+      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "COS_SECRET_ID", "COS_SECRET_KEY", "COS_REGION", "COS_BUCKET"]
+    },
+    {
+      "name": "research-delivery-monitor",
+      "entrypoint": "delivery_scf_entrypoint.main_handler",
+      "event": {"action": "monitor"},
+      "trigger": {"type": "timer", "cron": "0 */5 * * * * *"},
+      "memory_mb": 128,
+      "timeout_seconds": 15,
+      "max_concurrency": 1,
+      "role": "database-monitor-role",
+      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN"]
+    }
+  ]
+}

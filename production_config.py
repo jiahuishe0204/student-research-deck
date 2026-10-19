@@ -33,6 +33,32 @@ class ProductionConfig:
     cos_bucket: str
 
 
+@dataclass(frozen=True)
+class DeliveryCommonConfig:
+    database_url: str
+    identity_secret: str
+    public_origin: str
+
+
+@dataclass(frozen=True)
+class SesConfig:
+    email_from: str
+    ses_secret_id: str
+    ses_secret_key: str
+    ses_region: str
+    ses_template_otp: int
+    ses_template_completed: int
+    ses_template_expiry: int
+
+
+@dataclass(frozen=True)
+class CosConfig:
+    cos_secret_id: str
+    cos_secret_key: str
+    cos_region: str
+    cos_bucket: str
+
+
 def _required(values, name):
     value = str(values.get(name, "")).strip()
     if not value:
@@ -73,6 +99,47 @@ def load_production_config(environ=None):
     return config
 
 
+def load_delivery_common_config(environ=None):
+    values = os.environ if environ is None else environ
+    config = DeliveryCommonConfig(
+        database_url=_required(values, "DATABASE_URL"),
+        identity_secret=_required(values, "IDENTITY_SECRET"),
+        public_origin=_required(values, "PUBLIC_ORIGIN").rstrip("/"),
+    )
+    origin = urlparse(config.public_origin)
+    if origin.scheme != "https" or not origin.netloc or origin.path not in ("", "/"):
+        raise RuntimeError("PUBLIC_ORIGIN 必须是无路径的 HTTPS 来源")
+    if len(config.identity_secret) < 32:
+        raise RuntimeError("IDENTITY_SECRET 至少需要 32 个字符")
+    return config
+
+
+def load_ses_config(environ=None):
+    values = os.environ if environ is None else environ
+    config = SesConfig(
+        email_from=_required(values, "EMAIL_FROM"),
+        ses_secret_id=_required(values, "SES_SECRET_ID"),
+        ses_secret_key=_required(values, "SES_SECRET_KEY"),
+        ses_region=_required(values, "SES_REGION"),
+        ses_template_otp=int(_required(values, "SES_TEMPLATE_OTP")),
+        ses_template_completed=int(_required(values, "SES_TEMPLATE_COMPLETED")),
+        ses_template_expiry=int(_required(values, "SES_TEMPLATE_EXPIRY")),
+    )
+    if "@" not in config.email_from:
+        raise RuntimeError("EMAIL_FROM 格式无效")
+    return config
+
+
+def load_cos_config(environ=None):
+    values = os.environ if environ is None else environ
+    return CosConfig(
+        cos_secret_id=_required(values, "COS_SECRET_ID"),
+        cos_secret_key=_required(values, "COS_SECRET_KEY"),
+        cos_region=_required(values, "COS_REGION"),
+        cos_bucket=_required(values, "COS_BUCKET"),
+    )
+
+
 def readiness(environ=None):
     values = os.environ if environ is None else environ
     names = (
@@ -86,4 +153,6 @@ def readiness(environ=None):
     return {name: bool(str(values.get(name, "")).strip()) for name in names}
 
 
-__all__ = ["ProductionConfig", "load_production_config", "readiness"]
+__all__ = ["CosConfig", "DeliveryCommonConfig", "ProductionConfig", "SesConfig",
+           "load_cos_config", "load_delivery_common_config", "load_production_config",
+           "load_ses_config", "readiness"]

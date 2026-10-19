@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from production_config import load_production_config, readiness
+from production_config import load_cos_config, load_delivery_common_config, load_production_config, load_ses_config, readiness
 
 
 class ProductionFoundationTests(unittest.TestCase):
@@ -44,6 +44,16 @@ class ProductionFoundationTests(unittest.TestCase):
         result = readiness(self.valid())
         self.assertTrue(all(value is True for value in result.values()))
         self.assertNotIn("secret", json.dumps(result))
+
+    def test_delivery_roles_load_only_their_own_cloud_credentials(self):
+        values=self.valid()
+        common={key:values[key] for key in ("DATABASE_URL","IDENTITY_SECRET","PUBLIC_ORIGIN")}
+        self.assertEqual(load_delivery_common_config(common).public_origin,"https://research.example.com")
+        ses={key:values[key] for key in ("EMAIL_FROM","SES_SECRET_ID","SES_SECRET_KEY","SES_REGION",
+                                         "SES_TEMPLATE_OTP","SES_TEMPLATE_COMPLETED","SES_TEMPLATE_EXPIRY")}
+        self.assertEqual(load_ses_config(ses).ses_secret_id,"ses-id")
+        cos={key:values[key] for key in ("COS_SECRET_ID","COS_SECRET_KEY","COS_REGION","COS_BUCKET")}
+        self.assertEqual(load_cos_config(cos).cos_secret_id,"cos-id")
 
     def test_manifest_keeps_one_workflow_and_excludes_legacy_generation(self):
         manifest = json.loads((ROOT / "config/production-foundation.json").read_text())

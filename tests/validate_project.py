@@ -40,6 +40,7 @@ required = [
     "production_session.py",
     "private_delivery_api.py",
     "delivery_http_entrypoint.py",
+    "deploy/tencent/functions.template.json",
     "requirements-production.txt",
     "deploy/edgeone/edgeone.json",
     "deploy/edgeone/package.json",

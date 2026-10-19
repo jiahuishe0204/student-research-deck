@@ -10,7 +10,7 @@ from delivery_repository import PostgresDeliveryRepository
 from identity_vault import IdentityVault
 from otp_service import OtpService
 from private_delivery_api import authenticated_download
-from production_config import load_production_config
+from production_config import load_cos_config, load_delivery_common_config
 from production_session import COOKIE_ATTRIBUTES
 from production_session import SessionAuthenticator
 from tencent_delivery import TencentCosArtifactStore
@@ -37,23 +37,27 @@ def _session_cookie(event):
     return cookie[SESSION_COOKIE].value if SESSION_COOKIE in cookie else ""
 
 
-def _services():  # pragma: no cover - real SCF smoke path
+def _services(path):  # pragma: no cover - real SCF smoke path
     import psycopg
-    config = load_production_config()
-    connection = psycopg.connect(config.database_url)
-    repository = PostgresDeliveryRepository(connection, config.public_origin)
-    vault = IdentityVault(config.identity_secret, repository)
-    auth = SessionAuthenticator(connection, config.identity_secret)
-    store = TencentCosArtifactStore.from_config(config)
-    return {"connection": connection, "otp": OtpService(connection, repository, vault, config.identity_secret),
-            "auth": auth, "download": partial(authenticated_download, auth, repository, store)}
+    common = load_delivery_common_config()
+    connection = psycopg.connect(common.database_url)
+    repository = PostgresDeliveryRepository(connection, common.public_origin)
+    vault = IdentityVault(common.identity_secret, repository)
+    auth = SessionAuthenticator(connection, common.identity_secret)
+    services = {"connection": connection, "auth": auth}
+    if "/auth/otp/" in path:
+        services["otp"] = OtpService(connection, repository, vault, common.identity_secret)
+    if path.endswith("/delivery/download"):
+        store = TencentCosArtifactStore.from_config(load_cos_config())
+        services["download"] = partial(authenticated_download, auth, repository, store)
+    return services
 
 
 def main_handler(event, context=None, *, services=None):
-    owned = services is None
-    services = services or _services()
-    method = str(event.get("httpMethod", "GET")).upper()
     path = str(event.get("path", ""))
+    owned = services is None
+    services = services or _services(path)
+    method = str(event.get("httpMethod", "GET")).upper()
     payload = _body(event)
     headers = {str(k).lower(): str(v) for k, v in (event.get("headers") or {}).items()}
     try:

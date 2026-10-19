@@ -7,7 +7,7 @@ from delivery_outbox import recover_expired_email_leases
 from delivery_repository import PostgresDeliveryRepository
 from delivery_worker import execute_one
 from identity_vault import IdentityVault
-from production_config import load_production_config
+from production_config import load_cos_config, load_delivery_common_config, load_ses_config
 from retention_worker import run_retention_cycle
 from tencent_delivery import TencentCosArtifactStore, TencentSesMailer
 
@@ -16,24 +16,26 @@ class DeliveryAttentionRequired(RuntimeError):
     pass
 
 
-def _dependencies():  # pragma: no cover - real SCF smoke path
+def _dependencies(action):  # pragma: no cover - real SCF smoke path
     import psycopg
-    config = load_production_config()
-    connection = psycopg.connect(config.database_url)
-    repository = PostgresDeliveryRepository(connection, config.public_origin)
-    store = TencentCosArtifactStore.from_config(config)
-    return {
+    common = load_delivery_common_config()
+    connection = psycopg.connect(common.database_url)
+    repository = PostgresDeliveryRepository(connection, common.public_origin)
+    deps = {
         "connection": connection,
         "repository": repository,
-        "vault": IdentityVault(config.identity_secret, repository),
-        "mailer": TencentSesMailer.from_config(config),
-        "lifecycle": DeliveryLifecycle(repository, store),
+        "vault": IdentityVault(common.identity_secret, repository),
     }
+    if action == "outbox":
+        deps["mailer"] = TencentSesMailer.from_config(load_ses_config())
+    elif action in ("retention", "reconcile"):
+        deps["lifecycle"] = DeliveryLifecycle(repository, TencentCosArtifactStore.from_config(load_cos_config()))
+    return deps
 
 
 def main_handler(event, context=None, *, dependencies=None):
-    deps = dependencies or _dependencies()
     action = str((event or {}).get("action", "outbox"))
+    deps = dependencies or _dependencies(action)
     try:
         if action == "outbox":
             quarantined = recover_expired_email_leases(deps["connection"])
