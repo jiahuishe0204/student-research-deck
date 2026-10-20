@@ -55,6 +55,19 @@ class DeliveryReaderTests(unittest.TestCase):
             self.assertIn(phrase, p6)
         self.assertIn("保留 navigation_title", p9)
 
+    def test_customer_ppt_hides_internal_evidence_ids_but_keeps_traceability(self):
+        script = (WEB / "app.js").read_text(encoding="utf-8")
+        p6 = (ROOT / "prompts" / "P6-ppt.md").read_text(encoding="utf-8")
+        p9 = (ROOT / "prompts" / "P9-final.md").read_text(encoding="utf-8")
+        package = (ROOT / "docs" / "项目总内容包.md").read_text(encoding="utf-8")
+        self.assertIn("data-evidence-ids", script)
+        self.assertIn("evidence_ids||[]", script)
+        self.assertNotIn("<span>${escapeHtml((page.evidence_ids||[]).join", script)
+        for text in (p6, p9, package):
+            self.assertIn("EV::...", text)
+            self.assertIn("客户可见", text)
+            self.assertIn("evidence_ids", text)
+
     def test_source_projection_has_six_papers_and_five_figure_pages(self):
         markdown = REPORT_SOURCE.read_text(encoding="utf-8") + PPT_SOURCE.read_text(encoding="utf-8")
         urls = {normalized_url(value) for value in re.findall(r"\[[^\]]+\]\((https?://[^\s)]+)\)", markdown)}
