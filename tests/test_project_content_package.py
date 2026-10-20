@@ -35,6 +35,20 @@ class ProjectContentPackageTests(unittest.TestCase):
         ):
             self.assertIn(path, ignore)
 
+    def test_title_pairing_contract_is_persisted(self):
+        prompt = (ROOT / "prompts" / "P6-ppt.md").read_text(encoding="utf-8")
+        final_prompt = (ROOT / "prompts" / "P9-final.md").read_text(encoding="utf-8")
+        package = (ROOT / "docs" / "项目总内容包.md").read_text(encoding="utf-8")
+        for text in (prompt, final_prompt, package):
+            self.assertIn("navigation_title", text)
+            self.assertIn("同一证据边界", text)
+        self.assertIn("同一研究对象", prompt)
+        self.assertIn("同一对象", final_prompt)
+        self.assertIn("同一对象", package)
+        self.assertIn("页面主标题", prompt)
+        self.assertIn("下方小标题", package)
+        self.assertIn("不得把长标题机械截断", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()
