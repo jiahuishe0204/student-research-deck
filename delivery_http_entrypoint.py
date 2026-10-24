@@ -11,6 +11,7 @@ from identity_vault import IdentityVault
 from otp_service import OtpService
 from private_delivery_api import authenticated_download
 from production_config import load_cos_config, load_delivery_common_config
+from production_task_queue import PostgresTaskQueue
 from production_session import COOKIE_ATTRIBUTES
 from production_session import SessionAuthenticator
 from tencent_delivery import TencentCosArtifactStore
@@ -45,6 +46,8 @@ def _services(path):  # pragma: no cover - real SCF smoke path
     vault = IdentityVault(common.identity_secret, repository)
     auth = SessionAuthenticator(connection, common.identity_secret)
     services = {"connection": connection, "auth": auth}
+    if path.rstrip("/").endswith("/tasks") or "/tasks/" in path:
+        services["tasks"] = PostgresTaskQueue(connection)
     if "/auth/otp/" in path:
         services["otp"] = OtpService(connection, repository, vault, common.identity_secret)
     if path.endswith("/delivery/download"):
@@ -78,6 +81,19 @@ def main_handler(event, context=None, *, services=None):
                                           require_csrf=True)
             services["auth"].revoke(_session_cookie(event))
             return _response(200, {"ok": True}, {"Set-Cookie": "%s=; %s; Max-Age=0" % (SESSION_COOKIE, COOKIE_ATTRIBUTES)})
+        if method == "POST" and path.rstrip("/").endswith("/tasks"):
+            user_id = services["auth"].authenticate(
+                _session_cookie(event), csrf_token=headers.get("x-csrf-token", ""), require_csrf=True,
+            )
+            task = services["tasks"].create_task(
+                user_id=user_id, topic=payload.get("topic", ""), tier=payload.get("tier", "fast"),
+            )
+            return _response(201, {"ok": True, "data": task}, {"Cache-Control": "no-store"})
+        parts = path.strip("/").split("/")
+        if method == "GET" and len(parts) >= 3 and parts[-1] == "progress" and parts[-3] == "tasks":
+            user_id = services["auth"].authenticate(_session_cookie(event))
+            progress = services["tasks"].task_progress(user_id=user_id, task_id=parts[-2])
+            return _response(200, {"ok": True, "data": progress}, {"Cache-Control": "no-store"})
         if method == "POST" and path.endswith("/delivery/download"):
             url = services["download"](
                 session_token=_session_cookie(event), csrf_token=headers.get("x-csrf-token", ""),
