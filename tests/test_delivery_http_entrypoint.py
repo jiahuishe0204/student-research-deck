@@ -14,6 +14,7 @@ class Tasks:
     def create_task(self,**values): self.created=values; return {"task_id":"TASK-1","status":"queued"}
     def task_progress(self,**values): self.progress=values; return {"task_id":"TASK-1","status":"running"}
     def continue_after_intent(self,**values): self.continued=values; return {"task_id":"TASK-1","current_stage":"P2"}
+    def task_delivery(self,**values): self.delivery=values; return {"task_id":"TASK-1","artifacts":[]}
 
 
 class HttpEntrypointTests(unittest.TestCase):
@@ -61,6 +62,12 @@ class HttpEntrypointTests(unittest.TestCase):
         self.assertEqual(response["statusCode"],202)
         self.assertEqual(self.tasks.continued,{"user_id":"u1","task_id":"TASK-1","clarification":"聚焦检测机制"})
         self.assertTrue(self.auth.auth_args[1]["require_csrf"])
+
+    def test_delivery_is_owner_scoped(self):
+        event={"httpMethod":"GET","path":"/tasks/TASK-1/delivery","headers":{"cookie":"research_session=s1"}}
+        response=main_handler(event,services=self.services)
+        self.assertEqual(response["statusCode"],200)
+        self.assertEqual(self.tasks.delivery,{"user_id":"u1","task_id":"TASK-1"})
 
 
 if __name__ == "__main__": unittest.main()

@@ -94,8 +94,17 @@ class ProductionOrchestratorTests(unittest.TestCase):
     def test_p9_marks_task_complete(self):
         queue = Queue()
         job = {"task_id": "TASK-1", "stage": "P9", "payload": {}}
-        self.assertEqual(advance(queue, job, wrapped({"final_report": {}}), root=Path(".")), "completed")
-        self.assertEqual(queue.completed, ["TASK-1"])
+        calls = []
+        self.assertEqual(advance(queue, job, wrapped({"final_report": {}}), root=Path("."),
+                                 publisher=lambda *args: calls.append(args)), "completed")
+        self.assertEqual(calls[0][0], "TASK-1")
+        self.assertEqual(queue.completed, [])
+
+    def test_p9_never_completes_without_private_publisher(self):
+        queue = Queue()
+        job = {"task_id": "TASK-1", "stage": "P9", "payload": {}}
+        with self.assertRaisesRegex(RuntimeError, "发布器"):
+            advance(queue, job, wrapped({"final_report": {}}), root=Path("."))
 
 
 if __name__ == "__main__":

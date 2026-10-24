@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 
 from production_task_queue import PostgresTaskQueue
 
@@ -110,6 +111,19 @@ class ProductionTaskQueueTests(unittest.TestCase):
             PostgresTaskQueue(connection).continue_after_intent(
                 user_id="u1", task_id="TASK-1", clarification="")
         self.assertEqual(connection.rollbacks, 1)
+
+    def test_delivery_requires_owner_completed_p9_and_three_artifacts(self):
+        expires = datetime(2026, 10, 31, tzinfo=timezone.utc)
+        connection = Connection([
+            ("Topic", "fast", {"data": {"final_report": {"markdown": "ok"}}}),
+            ("a1", "ppt_content", "application/json", expires),
+            ("a2", "references", "application/json", expires),
+            ("a3", "report", "text/markdown; charset=utf-8", expires),
+        ])
+        delivery = PostgresTaskQueue(connection).task_delivery(user_id="u1", task_id="TASK-1")
+        self.assertEqual(len(delivery["artifacts"]), 3)
+        self.assertIn("T", delivery["artifacts"][0]["expires_at"])
+        self.assertIn("t.user_id=%s", connection.cursor_value.calls[0][0])
 
 
 if __name__ == "__main__":

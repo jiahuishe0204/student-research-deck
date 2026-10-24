@@ -32,11 +32,13 @@ def _dispatch(workflow, job, root):
     return {"screening": screening, "sources": sources}, usage
 
 
-def execute_next_job(queue, workflow, *, root=None, advance_job=advance):
+def execute_next_job(queue, workflow, *, root=None, advance_job=advance, publisher_factory=None):
     transition = queue.claim_transition()
     if transition is not None:
         try:
-            next_stage = advance_job(queue, transition, transition["result"], root=Path(root or "."))
+            publisher = publisher_factory() if transition["stage"] == "P9" and publisher_factory else None
+            next_stage = advance_job(queue, transition, transition["result"],
+                                     root=Path(root or "."), publisher=publisher)
         except Exception as exc:
             queue.finish_transition(transition, error_code=type(exc).__name__)
             raise

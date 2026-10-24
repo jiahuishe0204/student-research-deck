@@ -102,6 +102,10 @@ def main_handler(event, context=None, *, services=None):
             user_id = services["auth"].authenticate(_session_cookie(event))
             progress = services["tasks"].task_progress(user_id=user_id, task_id=parts[-2])
             return _response(200, {"ok": True, "data": progress}, {"Cache-Control": "no-store"})
+        if method == "GET" and len(parts) >= 3 and parts[-1] == "delivery" and parts[-3] == "tasks":
+            user_id = services["auth"].authenticate(_session_cookie(event))
+            delivery = services["tasks"].task_delivery(user_id=user_id, task_id=parts[-2])
+            return _response(200, {"ok": True, "data": delivery}, {"Cache-Control": "no-store"})
         if method == "POST" and path.endswith("/delivery/download"):
             url = services["download"](
                 session_token=_session_cookie(event), csrf_token=headers.get("x-csrf-token", ""),

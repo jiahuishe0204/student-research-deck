@@ -58,7 +58,7 @@ def retrieve_sources(topic, plan, tier, *, root):
     return result
 
 
-def advance(queue, job, result, *, root):
+def advance(queue, job, result, *, root, publisher=None):
     """Persist only the next inputs; never let a model choose the transition."""
     task_id, stage, payload = job["task_id"], job["stage"], job["payload"]
     data = _data(result)
@@ -146,7 +146,9 @@ def advance(queue, job, result, *, root):
         })
         return "P9"
     if stage == "P9":
-        queue.complete_task(task_id)
+        if publisher is None:
+            raise RuntimeError("P9 缺少私有交付物发布器")
+        publisher(task_id, data, payload)
         return "completed"
     raise ValueError("未知生产阶段")
 

@@ -82,6 +82,33 @@ class PostgresTaskQueue:
                 result[name] = result[name].isoformat()
         return result
 
+    def task_delivery(self, *, user_id, task_id):
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """SELECT t.topic,t.tier,j.result
+                 FROM research_tasks t JOIN research_task_jobs j ON j.task_id=t.task_id
+                WHERE t.task_id=%s AND t.user_id=%s AND t.status='completed'
+                  AND j.job_key='P9' AND j.status='succeeded'""",
+            (str(task_id), str(user_id)),
+        )
+        row = cursor.fetchone()
+        if not row or not isinstance(row[2], dict) or not isinstance(row[2].get("data"), dict):
+            raise LookupError("交付物不存在")
+        cursor.execute(
+            """SELECT artifact_id,kind,content_type,expires_at
+                 FROM task_artifacts WHERE task_id=%s AND status='published' AND downloadable=TRUE
+                 ORDER BY kind""", (str(task_id),),
+        )
+        artifacts = []
+        for artifact_id, kind, content_type, expires_at in cursor.fetchall():
+            artifacts.append({"artifact_id": str(artifact_id), "kind": kind,
+                              "content_type": content_type,
+                              "expires_at": expires_at.isoformat() if hasattr(expires_at, "isoformat") else expires_at})
+        if len({item["kind"] for item in artifacts}) < 3:
+            raise RuntimeError("交付文件尚未全部发布")
+        return {"task_id": str(task_id), "topic": row[0], "tier": row[1],
+                "final_delivery": row[2]["data"], "artifacts": artifacts}
+
     def continue_after_intent(self, *, user_id, task_id, clarification):
         clarification = str(clarification or "").strip()
         cursor = self.connection.cursor()
