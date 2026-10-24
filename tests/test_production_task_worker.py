@@ -82,6 +82,25 @@ class ProductionTaskWorkerTests(unittest.TestCase):
         self.assertEqual(result["next"], "P3")
         self.assertEqual(queue.transition_finished[1], {})
 
+    def test_p9_transition_builds_publisher_lazily(self):
+        transition = {"job_id": "j9", "task_id": "TASK-1", "stage": "P9", "attempt": 1,
+                      "payload": {}, "result": {"data": {"final_report": {}}},
+                      "transition_attempt": 1, "lease_token": "transition-lease"}
+        class TransitionQueue(Queue):
+            def claim_transition(self): return transition
+            def finish_transition(self, job, **values): return True
+        publishers = []
+        def factory():
+            publishers.append(True)
+            return lambda *args: None
+        def advance_p9(queue, job, result, **values):
+            self.assertTrue(callable(values["publisher"]))
+            return "completed"
+        result = execute_next_job(TransitionQueue(None), Workflow(), advance_job=advance_p9,
+                                  publisher_factory=factory)
+        self.assertEqual(result["next"], "completed")
+        self.assertEqual(publishers, [True])
+
 
 if __name__ == "__main__":
     unittest.main()
