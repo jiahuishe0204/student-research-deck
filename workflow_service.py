@@ -283,7 +283,9 @@ class WorkflowService:
             "P2B", tier, {
                 "intent": planning_intent,
                 "research_architecture": architecture,
-                "available_sources": ["PubMed", "Europe PMC", "Crossref", "EPO OPS"] + (["Patsnap"] if os.environ.get("PATSNAP_API_KEY", "").strip() else []) + ["official"],
+                "available_sources": ["PubMed", "Europe PMC", "Crossref"]
+                + (["智慧芽 MCP 专利"] if os.environ.get("PATSNAP_MCP_API_KEY", "").strip() else ["EPO OPS"])
+                + (["Patsnap"] if os.environ.get("PATSNAP_API_KEY", "").strip() else []) + ["official"],
                 "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
                 "output_contract": load_contract("P2B"),
             }, validate_blueprint_output,
