@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from delivery_http_entrypoint import main_handler
 
@@ -15,6 +16,11 @@ class Tasks:
     def task_progress(self,**values): self.progress=values; return {"task_id":"TASK-1","status":"running"}
     def continue_after_intent(self,**values): self.continued=values; return {"task_id":"TASK-1","current_stage":"P2"}
     def task_delivery(self,**values): self.delivery=values; return {"task_id":"TASK-1","artifacts":[]}
+class Cursor:
+    def execute(self,sql): self.sql=sql
+    def fetchone(self): return (1,)
+class Connection:
+    def cursor(self): return Cursor()
 
 
 class HttpEntrypointTests(unittest.TestCase):
@@ -68,6 +74,18 @@ class HttpEntrypointTests(unittest.TestCase):
         response=main_handler(event,services=self.services)
         self.assertEqual(response["statusCode"],200)
         self.assertEqual(self.tasks.delivery,{"user_id":"u1","task_id":"TASK-1"})
+
+    def test_health_checks_database_without_exposing_configuration(self):
+        services={**self.services,"connection":Connection()}
+        response=main_handler({"httpMethod":"GET","path":"/health"},services=services)
+        body=json.loads(response["body"])
+        self.assertEqual(response["statusCode"],200); self.assertEqual(body["database"],"ok")
+        self.assertNotIn("DATABASE_URL",response["body"])
+
+    def test_real_entrypoint_rejects_missing_gateway_secret_before_connecting(self):
+        with patch.dict("os.environ",{"EDGEONE_GATEWAY_SECRET":"expected"},clear=True):
+            response=main_handler({"httpMethod":"GET","path":"/health","headers":{}})
+        self.assertEqual(response["statusCode"],403)
 
 
 if __name__ == "__main__": unittest.main()
