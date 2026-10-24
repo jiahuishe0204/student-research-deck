@@ -487,7 +487,12 @@ def _merge_record_group(current_group, incoming_group):
     return {"record": current, "provenance": provenance}
 
 
-def search_all(query, per_source=5, epo_client=None, epo_query=None, include_patsnap=True, patsnap_query=None):
+def search_all(query, per_source=5, patent_client=None, patent_query=None,
+               include_patsnap=True, patsnap_query=None, epo_client=None, epo_query=None):
+    """Search literature plus one configured patent provider.
+
+    ``epo_client``/``epo_query`` remain accepted for backward compatibility.
+    """
     results, errors = [], []
     searchers = [("PubMed", search_pubmed), ("Europe PMC", search_europe_pmc), ("Crossref", search_crossref)]
     if include_patsnap and os.environ.get("PATSNAP_API_KEY", "").strip():
@@ -497,9 +502,12 @@ def search_all(query, per_source=5, epo_client=None, epo_query=None, include_pat
             results.extend(searcher(query, per_source))
         except Exception as exc:
             errors.append({"source": name, "error": type(exc).__name__})
-    if epo_client is not None:
+    patent_client = patent_client or epo_client
+    patent_query = patent_query or epo_query or query
+    if patent_client is not None:
         try:
-            results.extend(epo_client.search(epo_query or query, min(per_source, 3)))
+            results.extend(patent_client.search(patent_query, min(per_source, 3)))
         except Exception as exc:
-            errors.append({"source": "EPO OPS", "error": type(exc).__name__})
+            errors.append({"source": getattr(patent_client, "provider_name", "Patent provider"),
+                           "error": type(exc).__name__})
     return {"query": query, "records": merge_source_records(results), "errors": errors}

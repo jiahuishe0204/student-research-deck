@@ -15,6 +15,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from epo_ops import EPOClient
+from patsnap_mcp import DEFAULT_MCP_URL, PatsnapMCPClient
 from model_routing import ModelRouter
 from model_usage import ModelBudgetExceeded, ModelUsageLedger
 from retrieval import hydrate_europe_pmc_full_text, search_all, search_patsnap_literature
@@ -163,10 +164,13 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = self.request_path()
         if path == "/api/health":
+            patent_client = getattr(self.server, "patent_client", getattr(self.server, "epo_client", None))
             self.send_json(
                 HTTPStatus.OK,
                 {"ok": True, "deepseek_configured": bool(self.server.api_key),
-                 "epo_ops_configured": self.server.epo_client is not None},
+                 "patent_provider": getattr(patent_client, "provider_name", None),
+                 "patsnap_mcp_configured": isinstance(patent_client, PatsnapMCPClient),
+                 "epo_ops_configured": isinstance(patent_client, EPOClient)},
             )
             return
         parts = path.strip("/").split("/")
@@ -250,6 +254,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/search":
+                patent_client = getattr(self.server, "patent_client", getattr(self.server, "epo_client", None))
                 topic = str(body.get("topic", "")).strip()
                 query = str(body.get("query", "")).strip() or topic
                 epo_query = str(body.get("epo_query", "")).strip() or query
@@ -264,8 +269,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 if plan:
                     queries = plan_search_queries(plan, topic)
                     results = [search_all(item, per_source=4 if tier == "deep" else 3,
-                                          epo_client=self.server.epo_client if index == 0 else None,
-                                          epo_query=epo_query, include_patsnap=False) for index, item in enumerate(queries)]
+                                          patent_client=patent_client if index == 0 else None,
+                                          patent_query=epo_query, include_patsnap=False) for index, item in enumerate(queries)]
                     if os.environ.get("PATSNAP_API_KEY", "").strip():
                         # Keep paid retrieval bounded: at most two simple queries, two papers each.
                         patsnap_detail_cache = {}
@@ -278,7 +283,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                                                 "errors": [{"source": "Patsnap", "error": type(exc).__name__}]})
                     output = merge_search_results(results, 24 if tier == "deep" else 12)
                 else:
-                    output = search_all(query, per_source=6 if tier == "deep" else 4, epo_client=self.server.epo_client, epo_query=epo_query)
+                    output = search_all(query, per_source=6 if tier == "deep" else 4,
+                                        patent_client=patent_client, patent_query=epo_query)
                 output["topic"] = topic
                 self.send_json(HTTPStatus.OK, {"data": output})
                 return
@@ -444,6 +450,29 @@ class AppHandler(SimpleHTTPRequestHandler):
         print("[%s] %s" % (self.log_date_time_string(), format % args))
 
 
+def create_patent_client(root=ROOT, environ=None):
+    """Select one patent provider without mixing literature and MCP keys."""
+    environ = environ or os.environ
+    provider = environ.get("PATENT_PROVIDER", "").strip().lower()
+    mcp_key = environ.get("PATSNAP_MCP_API_KEY", "").strip()
+    mcp_client = PatsnapMCPClient(
+        mcp_key,
+        environ.get("PATSNAP_MCP_URL", DEFAULT_MCP_URL),
+        int(environ.get("PATSNAP_MCP_TIMEOUT_SECONDS", "30") or 30),
+    ) if mcp_key else None
+    if provider in ("patsnap", "patsnap_mcp", "patsnap_mcp_cn"):
+        if mcp_client is None:
+            raise RuntimeError("PATENT_PROVIDER 已选择智慧芽 MCP，但未配置 PATSNAP_MCP_API_KEY")
+        return mcp_client
+    if provider == "":
+        return mcp_client or EPOClient.from_environment(root / "data" / "private" / "epo-usage.sqlite3")
+    if provider in ("epo", "epo_ops"):
+        return EPOClient.from_environment(root / "data" / "private" / "epo-usage.sqlite3")
+    if provider in ("none", "disabled"):
+        return None
+    raise RuntimeError("未知的 PATENT_PROVIDER：" + provider)
+
+
 def create_server(host="127.0.0.1", port=4180, api_key=None):
     load_dotenv(ROOT.parent / ".env")
     server = ThreadingHTTPServer((host, port), AppHandler)
@@ -451,7 +480,8 @@ def create_server(host="127.0.0.1", port=4180, api_key=None):
     server.rate_limiter = RateLimiter()
     server.model_router = ModelRouter.from_file()
     server.api_key = api_key if api_key is not None else os.environ.get("DEEPSEEK_API_KEY", "").strip()
-    server.epo_client = EPOClient.from_environment(ROOT / "data" / "private" / "epo-usage.sqlite3")
+    server.patent_client = create_patent_client(ROOT)
+    server.epo_client = server.patent_client if isinstance(server.patent_client, EPOClient) else None
     server.model_usage = ModelUsageLedger(ROOT / "data" / "private" / "model-usage.sqlite3")
     server.workflow = WorkflowService.from_project(server.api_key, server.model_router, ROOT, usage_ledger=server.model_usage, model_limits={
         "task_max_cost_cny": float(os.environ.get("MODEL_TASK_MAX_COST_CNY", "0") or 0),

@@ -125,6 +125,8 @@ def _children_text(node, suffix):
 
 
 class EPOClient:
+    provider_name = "EPO OPS"
+
     def __init__(self, consumer_key, consumer_secret, *, usage_path=None,
                  weekly_warning_bytes=DEFAULT_WEEKLY_WARNING_BYTES,
                  weekly_hard_stop_bytes=DEFAULT_WEEKLY_HARD_STOP_BYTES,
