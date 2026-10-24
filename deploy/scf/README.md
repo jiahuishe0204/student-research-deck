@@ -53,6 +53,13 @@ requests that do not carry it. EdgeOne overwrites `X-EdgeOne-Client-IP` from
 its trusted runtime context before proxying, so OTP rate limits use the actual
 client IP instead of an EdgeOne egress address.
 
+The HTTP entry points use SCF Function URLs, not the retired API Gateway
+trigger. Configure the URLs as HTTPS public endpoints with SCF CORS disabled;
+the shared gateway secret is still mandatory at the application layer. Store
+the four URL origins in EdgeOne as `HEALTH_API_BASE_URL`, `AUTH_API_BASE_URL`,
+`TASK_API_BASE_URL`, and `DELIVERY_API_BASE_URL`. Do not expose them to browser
+code or reuse the COS-enabled download function for auth/task routes.
+
 ## Dependencies
 
 Install the contents of `requirements-scf.txt` into the deployment package.

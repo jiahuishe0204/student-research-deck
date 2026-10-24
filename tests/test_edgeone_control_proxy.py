@@ -11,6 +11,9 @@ class EdgeOneControlProxyTests(unittest.TestCase):
         base = ROOT / "deploy" / "edgeone" / "cloud-functions"
         for relative in ("auth/[[path]].js", "tasks/index.js", "tasks/[[path]].js", "delivery/download.js"):
             self.assertIn("proxyControlApi", (base / relative).read_text())
+        self.assertIn('"AUTH_API_BASE_URL"', (base / "auth/[[path]].js").read_text())
+        self.assertIn('"TASK_API_BASE_URL"', (base / "tasks/index.js").read_text())
+        self.assertIn('"DELIVERY_API_BASE_URL"', (base / "delivery/download.js").read_text())
 
     def test_proxy_forwards_only_required_identity_headers(self):
         source = (ROOT / "deploy/edgeone/cloud-functions/_proxy.js").read_text()
@@ -23,11 +26,12 @@ class EdgeOneControlProxyTests(unittest.TestCase):
 
     def test_every_http_control_function_receives_gateway_secret(self):
         manifest = json.loads((ROOT / "deploy/tencent/functions.template.json").read_text())
-        http = [item for item in manifest["functions"] if item.get("trigger", {}).get("type") == "api-gateway"]
+        http = [item for item in manifest["functions"] if item.get("trigger", {}).get("type") == "function-url"]
         self.assertEqual({item["name"] for item in http}, {
             "research-health-api", "research-auth-api", "research-download-api", "research-task-api"
         })
         self.assertTrue(all("EDGEONE_GATEWAY_SECRET" in item["environment"] for item in http))
+        self.assertTrue(all(item["trigger"]["cors"] is False for item in http))
 
 
 if __name__ == "__main__":

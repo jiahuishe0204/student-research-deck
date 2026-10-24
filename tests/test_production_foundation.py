@@ -87,7 +87,7 @@ class ProductionFoundationTests(unittest.TestCase):
         headers = {item["key"]: item["value"] for item in config["headers"][0]["headers"]}
         self.assertEqual(headers["X-Frame-Options"], "DENY")
         health = (deploy / "cloud-functions/api/health.js").read_text()
-        self.assertIn("CONTROL_API_BASE_URL", health)
+        self.assertIn("HEALTH_API_BASE_URL", health)
         for legacy in ("search_query", "generateReport", "jobs/"):
             self.assertNotIn(legacy, health)
 
