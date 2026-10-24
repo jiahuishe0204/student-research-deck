@@ -29,6 +29,7 @@ MODEL_TASK_MAX_COST_CNY
 IDENTITY_SECRET
 EMAIL_FROM
 PUBLIC_ORIGIN
+EDGEONE_GATEWAY_SECRET
 SES_SECRET_ID
 SES_SECRET_KEY
 SES_REGION
@@ -45,6 +46,12 @@ Secrets must be injected by the Tencent Cloud server-side secret facility or
 SCF role. They must not be committed to Git, placed in public EdgeOne code, or
 pasted into chat messages. SES and COS credentials must belong to separate
 least-privilege CAM identities.
+
+`EDGEONE_GATEWAY_SECRET` must be the same high-entropy secret in the EdgeOne
+project and the four HTTP control-plane functions. The SCF endpoints reject
+requests that do not carry it. EdgeOne overwrites `X-EdgeOne-Client-IP` from
+its trusted runtime context before proxying, so OTP rate limits use the actual
+client IP instead of an EdgeOne egress address.
 
 ## Dependencies
 

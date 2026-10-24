@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 from http.cookies import SimpleCookie
 from functools import partial
 
@@ -18,6 +20,13 @@ from tencent_delivery import TencentCosArtifactStore
 
 
 SESSION_COOKIE = "research_session"
+
+
+def _gateway_allowed(event):
+    expected = os.environ.get("EDGEONE_GATEWAY_SECRET", "")
+    headers = {str(key).lower(): str(value) for key, value in (event.get("headers") or {}).items()}
+    supplied = headers.get("x-gateway-secret", "")
+    return bool(expected) and secrets.compare_digest(expected, supplied)
 
 
 def _response(status, body, headers=None):
@@ -59,14 +68,23 @@ def _services(path):  # pragma: no cover - real SCF smoke path
 def main_handler(event, context=None, *, services=None):
     path = str(event.get("path", ""))
     owned = services is None
+    if owned and not _gateway_allowed(event):
+        return _response(403, {"ok": False, "message": "请求来源无效"}, {"Cache-Control": "no-store"})
     services = services or _services(path)
     method = str(event.get("httpMethod", "GET")).upper()
     payload = _body(event)
     headers = {str(k).lower(): str(v) for k, v in (event.get("headers") or {}).items()}
     try:
+        if method == "GET" and path.rstrip("/").endswith("/health"):
+            cursor = services["connection"].cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            return _response(200, {"ok": True, "database": "ok", "worker": "configured"},
+                             {"Cache-Control": "no-store"})
         if method == "POST" and path.endswith("/auth/otp/request"):
             # Trust only SCF's connection metadata, never client-supplied X-Forwarded-For.
-            source_ip = str((event.get("requestContext") or {}).get("sourceIp", ""))
+            source_ip = (headers.get("x-edgeone-client-ip", "") if owned else
+                         str((event.get("requestContext") or {}).get("sourceIp", "")))
             if not source_ip:
                 raise PermissionError("请求来源无效")
             challenge_id = services["otp"].issue(payload.get("email", ""), source_ip)

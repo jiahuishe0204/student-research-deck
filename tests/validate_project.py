@@ -45,6 +45,11 @@ required = [
     "deploy/edgeone/edgeone.json",
     "deploy/edgeone/package.json",
     "deploy/edgeone/cloud-functions/api/health.js",
+    "deploy/edgeone/cloud-functions/_proxy.js",
+    "deploy/edgeone/cloud-functions/auth/[[path]].js",
+    "deploy/edgeone/cloud-functions/tasks/index.js",
+    "deploy/edgeone/cloud-functions/tasks/[[path]].js",
+    "deploy/edgeone/cloud-functions/delivery/download.js",
     "docs/生产底座融合实施与验收-2026-10-19.md",
     "docs/SES与COS生产集成目标及验收标准-2026-10-19.md",
 ]
