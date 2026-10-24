@@ -21,7 +21,7 @@ from model_usage import ModelBudgetExceeded, ModelUsageLedger
 from retrieval import hydrate_europe_pmc_full_text, search_all, search_patsnap_literature
 from research_sources import (
     assess_evidence_quality, assess_source_quality, enrich_kept_open_full_text, merge_search_results,
-    plan_patsnap_queries, plan_search_queries,
+    plan_patsnap_queries, plan_search_queries, screen_sources_with_quality,
 )
 from task_store import TaskStore
 from task_public_view import delivery_view, progress_view
@@ -291,39 +291,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             if path == "/api/screen":
                 topic, plan, tier = body.get("topic"), body.get("plan"), body.get("tier", "fast")
                 candidates = body.get("candidates")
-                output, usage = self.server.workflow.screen_sources(topic, plan, candidates, tier)
-                candidates, enrichment = enrich_kept_open_full_text(candidates, output) if tier == "deep" else (candidates, {"lookups": 0, "enriched_source_ids": [], "errors": []})
-                quality = assess_source_quality(plan, candidates, output, tier)
-                search_update = None
-                if tier == "deep" and not quality["passed"] and body.get("supplement", True):
-                    previous_queries = set(body.get("queries") or [])
-                    extra_queries = [item for item in plan_search_queries(plan, topic, supplement=True, limit=3)
-                                     if item not in previous_queries][:2]
-                    if extra_queries:
-                        extra_results = [search_all(item, per_source=4, include_patsnap=False) for item in extra_queries]
-                        if os.environ.get("PATSNAP_API_KEY", "").strip():
-                            for patsnap_query in plan_patsnap_queries(plan, topic, supplement=True, limit=1):
-                                try:
-                                    extra_results.append({"query": "Patsnap: " + patsnap_query,
-                                                          "records": search_patsnap_literature(patsnap_query, 1), "errors": []})
-                                except Exception as exc:
-                                    extra_results.append({"query": "Patsnap: " + patsnap_query, "records": [],
-                                                          "errors": [{"source": "Patsnap", "error": type(exc).__name__}]})
-                        search_update = merge_search_results([{"query": "previous", "records": candidates, "errors": []}] + extra_results, 30)
-                        updated = search_update["records"]
-                        if {item["source_id"] for item in updated} != {item["source_id"] for item in candidates}:
-                            candidates = updated
-                            output, additional_usage = self.server.workflow.screen_sources(topic, plan, candidates, tier)
-                            candidates, additional_enrichment = enrich_kept_open_full_text(candidates, output)
-                            enrichment["lookups"] += additional_enrichment["lookups"]
-                            enrichment["publisher_lookups"] = enrichment.get("publisher_lookups", 0) + additional_enrichment.get("publisher_lookups", 0)
-                            enrichment["enriched_source_ids"].extend(additional_enrichment["enriched_source_ids"])
-                            enrichment["errors"].extend(additional_enrichment["errors"])
-                            for key in ("prompt_tokens", "completion_tokens", "total_tokens", "attempts"):
-                                usage[key] = usage.get(key, 0) + additional_usage.get(key, 0)
-                            quality = assess_source_quality(plan, candidates, output, tier)
-                output["quality_gate"] = quality
-                output["full_text_enrichment"] = enrichment
+                output, usage, candidates, search_update = screen_sources_with_quality(
+                    self.server.workflow, topic, plan, candidates, tier,
+                    queries=body.get("queries") if body.get("supplement", True) else plan_search_queries(plan, topic, supplement=True, limit=3),
+                )
                 if search_update:
                     search_update["topic"] = topic
                     search_update["records"] = candidates

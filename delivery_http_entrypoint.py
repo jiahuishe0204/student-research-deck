@@ -90,6 +90,14 @@ def main_handler(event, context=None, *, services=None):
             )
             return _response(201, {"ok": True, "data": task}, {"Cache-Control": "no-store"})
         parts = path.strip("/").split("/")
+        if method == "POST" and len(parts) >= 3 and parts[-1] == "continue" and parts[-3] == "tasks":
+            user_id = services["auth"].authenticate(
+                _session_cookie(event), csrf_token=headers.get("x-csrf-token", ""), require_csrf=True,
+            )
+            task = services["tasks"].continue_after_intent(
+                user_id=user_id, task_id=parts[-2], clarification=payload.get("clarification", ""),
+            )
+            return _response(202, {"ok": True, "data": task}, {"Cache-Control": "no-store"})
         if method == "GET" and len(parts) >= 3 and parts[-1] == "progress" and parts[-3] == "tasks":
             user_id = services["auth"].authenticate(_session_cookie(event))
             progress = services["tasks"].task_progress(user_id=user_id, task_id=parts[-2])

@@ -19,7 +19,7 @@ def main_handler(event, context=None, *, connection=None, workflow=None):
     owned = connection is None
     connection = connection or _connect_database(config.database_url)
     try:
-        return execute_next_job(PostgresTaskQueue(connection), workflow or build_workflow(ROOT))
+        return execute_next_job(PostgresTaskQueue(connection), workflow or build_workflow(ROOT), root=ROOT)
     finally:
         if owned:
             connection.close()
