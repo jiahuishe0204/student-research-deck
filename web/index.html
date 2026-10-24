@@ -6,10 +6,10 @@
     <meta name="description" content="首次免费体验生命科学 AI 调研：输入一个主题，得到有来源的报告和 PPT 逐页内容。" />
     <title>调研交付台｜把题目变成能讲的内容</title>
     <link rel="stylesheet" href="./styles.css?v=7" />
-    <link rel="stylesheet" href="./mvp.css?v=7" />
+    <link rel="stylesheet" href="./mvp.css?v=8" />
     <link rel="stylesheet" href="./prototype-typography.css?v=7" />
     <link rel="stylesheet" href="./home-delivery-theme.css?v=7" />
-    <script src="./app.js?v=3" defer></script>
+    <script src="./app.js?v=4" defer></script>
   </head>
   <body>
     <div class="ambient" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
@@ -28,6 +28,12 @@
         </div>
         <form id="intent-form" class="command-panel">
           <div class="panel-head"><span>NEW RESEARCH</span><span class="status-dot">系统就绪</span></div>
+          <section id="production-auth" class="production-auth" hidden aria-label="邮箱验证">
+            <strong>先验证邮箱，再开始免费任务</strong>
+            <div class="auth-row"><input id="auth-email" type="email" autocomplete="email" placeholder="你的邮箱" maxlength="254" /><button id="request-code" type="button">发送验证码</button></div>
+            <div id="code-row" class="auth-row" hidden><input id="auth-code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码" maxlength="6" /><button id="verify-code" type="button">确认登录</button></div>
+            <small id="auth-status" role="status">邮箱仅用于登录、完成通知和七天到期提醒。</small>
+          </section>
           <label for="task">输入调研主题</label>
           <textarea id="task" maxlength="500" rows="6" placeholder="例如：CAR-T 用于实体瘤的主要技术路线"></textarea>
           <div class="examples" aria-label="示例主题">
