@@ -14,14 +14,14 @@ function json(payload, status = 200) {
 export async function onRequestGet(context) {
   const env = context.env || process.env;
   const configured = {
-    CONTROL_API_BASE_URL: Boolean(env.CONTROL_API_BASE_URL),
+    HEALTH_API_BASE_URL: Boolean(env.HEALTH_API_BASE_URL),
     EDGEONE_GATEWAY_SECRET: Boolean(env.EDGEONE_GATEWAY_SECRET)
   };
-  if (!configured.CONTROL_API_BASE_URL || !configured.EDGEONE_GATEWAY_SECRET) {
+  if (!configured.HEALTH_API_BASE_URL || !configured.EDGEONE_GATEWAY_SECRET) {
     return json({ ok: false, runtime: "edgeone-gateway", configured }, 503);
   }
   try {
-    const response = await fetch(`${String(env.CONTROL_API_BASE_URL).replace(/\/$/, "")}/health`, {
+    const response = await fetch(`${String(env.HEALTH_API_BASE_URL).replace(/\/$/, "")}/health`, {
       headers: { "X-Gateway-Secret": env.EDGEONE_GATEWAY_SECRET },
       signal: AbortSignal.timeout(10_000)
     });

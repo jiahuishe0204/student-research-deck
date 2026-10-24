@@ -12,9 +12,9 @@ function runtime(context) {
   return context.env || process.env;
 }
 
-function upstreamUrl(context) {
+function upstreamUrl(context, baseVariable) {
   const env = runtime(context);
-  const base = String(env.CONTROL_API_BASE_URL || "").replace(/\/$/, "");
+  const base = String(env[baseVariable] || "").replace(/\/$/, "");
   if (!base || !env.EDGEONE_GATEWAY_SECRET) throw new Error("GatewayNotConfigured");
   const parsed = new URL(base);
   if (parsed.protocol !== "https:") throw new Error("GatewayOriginNotHttps");
@@ -22,7 +22,7 @@ function upstreamUrl(context) {
   return `${base}${incoming.pathname}${incoming.search}`;
 }
 
-export async function proxyControlApi(context) {
+export async function proxyControlApi(context, baseVariable) {
   const method = context.request.method.toUpperCase();
   if (!new Set(["GET", "POST"]).has(method)) return json({ ok: false, message: "请求方法不允许" }, 405);
   try {
@@ -35,7 +35,7 @@ export async function proxyControlApi(context) {
     headers.set("X-Gateway-Secret", String(env.EDGEONE_GATEWAY_SECRET));
     headers.set("X-EdgeOne-Client-IP", String(context.clientIp || ""));
     const body = method === "GET" ? undefined : await context.request.arrayBuffer();
-    const upstream = await fetch(upstreamUrl(context), {
+    const upstream = await fetch(upstreamUrl(context, baseVariable), {
       method,
       headers,
       body,

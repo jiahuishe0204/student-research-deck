@@ -4,7 +4,7 @@
     {
       "name": "research-health-api",
       "entrypoint": "delivery_http_entrypoint.main_handler",
-      "trigger": {"type": "api-gateway", "https_only": true, "path_prefix": "/health"},
+      "trigger": {"type": "function-url", "https_only": true, "auth_type": "open", "cors": false},
       "memory_mb": 128,
       "timeout_seconds": 10,
       "role": "database-health-role",
@@ -13,7 +13,7 @@
     {
       "name": "research-auth-api",
       "entrypoint": "delivery_http_entrypoint.main_handler",
-      "trigger": {"type": "api-gateway", "https_only": true, "path_prefix": "/auth/"},
+      "trigger": {"type": "function-url", "https_only": true, "auth_type": "open", "cors": false},
       "memory_mb": 256,
       "timeout_seconds": 15,
       "role": "database-auth-role",
@@ -22,7 +22,7 @@
     {
       "name": "research-download-api",
       "entrypoint": "delivery_http_entrypoint.main_handler",
-      "trigger": {"type": "api-gateway", "https_only": true, "path_prefix": "/delivery/download"},
+      "trigger": {"type": "function-url", "https_only": true, "auth_type": "open", "cors": false},
       "memory_mb": 256,
       "timeout_seconds": 15,
       "role": "cos-delivery-role",
@@ -31,7 +31,7 @@
     {
       "name": "research-task-api",
       "entrypoint": "delivery_http_entrypoint.main_handler",
-      "trigger": {"type": "api-gateway", "https_only": true, "path_prefix": "/tasks"},
+      "trigger": {"type": "function-url", "https_only": true, "auth_type": "open", "cors": false},
       "memory_mb": 256,
       "timeout_seconds": 15,
       "role": "database-task-role",
