@@ -10,6 +10,7 @@ The production deployment contains three explicit entry points:
 
 ```text
 scf_entrypoint.main_handler             # P1-P9 stage worker
+task_scf_entrypoint.main_handler        # PostgreSQL queued-task timer worker
 delivery_http_entrypoint.main_handler   # OTP/session/private-download API
 delivery_scf_entrypoint.main_handler    # SES outbox/COS retention/reconcile/monitor timers
 ```

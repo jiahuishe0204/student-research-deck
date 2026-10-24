@@ -9,11 +9,14 @@ class Otp:
     def verify(self,challenge,code): return {"session_token":"session-secret","csrf_token":"csrf-secret"}
 class Auth:
     def revoke(self,token): self.token=token
-    def authenticate(self,*args,**kwargs): return "u1"
+    def authenticate(self,*args,**kwargs): self.auth_args=(args,kwargs); return "u1"
+class Tasks:
+    def create_task(self,**values): self.created=values; return {"task_id":"TASK-1","status":"queued"}
+    def task_progress(self,**values): self.progress=values; return {"task_id":"TASK-1","status":"running"}
 
 
 class HttpEntrypointTests(unittest.TestCase):
-    def setUp(self): self.otp=Otp(); self.auth=Auth(); self.services={"otp":self.otp,"auth":self.auth,"download":lambda **kw:"https://signed"}
+    def setUp(self): self.otp=Otp(); self.auth=Auth(); self.tasks=Tasks(); self.services={"otp":self.otp,"auth":self.auth,"tasks":self.tasks,"download":lambda **kw:"https://signed"}
     def test_request_uses_trusted_gateway_ip_not_forwarded_header(self):
         event={"httpMethod":"POST","path":"/auth/otp/request","body":json.dumps({"email":"u@example.com"}),
                "headers":{"x-forwarded-for":"attacker"},"requestContext":{"sourceIp":"203.0.113.2"}}
@@ -34,6 +37,20 @@ class HttpEntrypointTests(unittest.TestCase):
                "body":json.dumps({"task_id":"t","artifact_id":"a","filename":"报告.pdf"})}
         response=main_handler(event,services=self.services)
         self.assertEqual(response["statusCode"],200); self.assertEqual(captured["session_token"],"s1")
+
+    def test_create_task_requires_session_and_csrf_and_enqueues(self):
+        event={"httpMethod":"POST","path":"/tasks","headers":{"cookie":"research_session=s1","x-csrf-token":"c1"},
+               "body":json.dumps({"topic":"CRISPR diagnostics","tier":"fast"})}
+        response=main_handler(event,services=self.services)
+        self.assertEqual(response["statusCode"],201)
+        self.assertEqual(self.tasks.created["user_id"],"u1")
+        self.assertTrue(self.auth.auth_args[1]["require_csrf"])
+
+    def test_progress_is_owner_scoped(self):
+        event={"httpMethod":"GET","path":"/tasks/TASK-1/progress","headers":{"cookie":"research_session=s1"}}
+        response=main_handler(event,services=self.services)
+        self.assertEqual(response["statusCode"],200)
+        self.assertEqual(self.tasks.progress,{"user_id":"u1","task_id":"TASK-1"})
 
 
 if __name__ == "__main__": unittest.main()
