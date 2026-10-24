@@ -8,6 +8,9 @@ class Queue:
         self.job = job
         self.finished = []
 
+    def claim_transition(self):
+        return None
+
     def claim_next(self):
         return self.job
 
@@ -36,10 +39,11 @@ class ProductionTaskWorkerTests(unittest.TestCase):
         job = {"job_id": "j1", "task_id": "TASK-1", "stage": "P1", "attempt": 1,
                "payload": {"topic": "CRISPR", "tier": "fast"}, "lease_token": "lease"}
         queue, workflow = Queue(job), Workflow()
-        result = execute_next_job(queue, workflow)
+        result = execute_next_job(queue, workflow, advance_job=lambda *args, **kwargs: "awaiting_clarification")
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(workflow.task_id, "TASK-1")
-        self.assertEqual(queue.finished[0][1]["result"]["topic"], "CRISPR")
+        self.assertEqual(queue.finished[0][1]["result"]["data"]["topic"], "CRISPR")
+        self.assertEqual(result["next"], "transition_pending")
 
     def test_failure_is_requeued_without_payload_or_secret_in_error(self):
         class BrokenWorkflow(Workflow):
@@ -49,7 +53,7 @@ class ProductionTaskWorkerTests(unittest.TestCase):
                "payload": {"topic": "CRISPR", "tier": "fast"}, "lease_token": "lease"}
         queue = Queue(job)
         with self.assertRaises(RuntimeError):
-            execute_next_job(queue, BrokenWorkflow())
+            execute_next_job(queue, BrokenWorkflow(), advance_job=lambda *args, **kwargs: None)
         self.assertEqual(queue.finished[0][1], {"error_code": "RuntimeError", "retry_delay_seconds": 60})
 
     def test_third_failure_is_terminal(self):
@@ -60,8 +64,23 @@ class ProductionTaskWorkerTests(unittest.TestCase):
                "payload": {"topic": "CRISPR", "tier": "fast"}, "lease_token": "lease"}
         queue = Queue(job)
         with self.assertRaises(RuntimeError):
-            execute_next_job(queue, BrokenWorkflow())
+            execute_next_job(queue, BrokenWorkflow(), advance_job=lambda *args, **kwargs: None)
         self.assertEqual(queue.finished[0][1], {"error_code": "RuntimeError", "retry_delay_seconds": None})
+
+    def test_transition_is_retried_without_rerunning_model(self):
+        transition = {"job_id": "j1", "task_id": "TASK-1", "stage": "P2", "attempt": 1,
+                      "payload": {}, "result": {"data": {"plan": True}},
+                      "transition_attempt": 1, "lease_token": "transition-lease"}
+        class TransitionQueue(Queue):
+            def claim_transition(self): return transition
+            def claim_next(self): raise AssertionError("model job must not be claimed")
+            def finish_transition(self, job, **values): self.transition_finished=(job,values); return True
+        queue = TransitionQueue(None)
+        result = execute_next_job(queue, Workflow(),
+                                  advance_job=lambda *args, **kwargs: "P3")
+        self.assertEqual(result["status"], "advanced")
+        self.assertEqual(result["next"], "P3")
+        self.assertEqual(queue.transition_finished[1], {})
 
 
 if __name__ == "__main__":

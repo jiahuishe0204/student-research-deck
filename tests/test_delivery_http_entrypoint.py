@@ -13,6 +13,7 @@ class Auth:
 class Tasks:
     def create_task(self,**values): self.created=values; return {"task_id":"TASK-1","status":"queued"}
     def task_progress(self,**values): self.progress=values; return {"task_id":"TASK-1","status":"running"}
+    def continue_after_intent(self,**values): self.continued=values; return {"task_id":"TASK-1","current_stage":"P2"}
 
 
 class HttpEntrypointTests(unittest.TestCase):
@@ -51,6 +52,15 @@ class HttpEntrypointTests(unittest.TestCase):
         response=main_handler(event,services=self.services)
         self.assertEqual(response["statusCode"],200)
         self.assertEqual(self.tasks.progress,{"user_id":"u1","task_id":"TASK-1"})
+
+    def test_continue_requires_csrf_and_submits_clarification(self):
+        event={"httpMethod":"POST","path":"/tasks/TASK-1/continue",
+               "headers":{"cookie":"research_session=s1","x-csrf-token":"c1"},
+               "body":json.dumps({"clarification":"聚焦检测机制"})}
+        response=main_handler(event,services=self.services)
+        self.assertEqual(response["statusCode"],202)
+        self.assertEqual(self.tasks.continued,{"user_id":"u1","task_id":"TASK-1","clarification":"聚焦检测机制"})
+        self.assertTrue(self.auth.auth_args[1]["require_csrf"])
 
 
 if __name__ == "__main__": unittest.main()

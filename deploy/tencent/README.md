@@ -30,11 +30,13 @@
 
 ## 尚需真实云端完成
 
-1. 在 PostgreSQL 执行 `migrations/006_research_task_queue.sql` 并保存迁移证据。
+1. 按顺序在 PostgreSQL 执行 `migrations/006_research_task_queue.sql` 和 `migrations/007_workflow_transitions.sql`，并保存迁移证据。
 2. 确认 SCF/COS 地域和已备案或可验证的发信域名。
 3. 创建私有桶、生命周期规则、最小权限角色和三个 SES 模板。
 4. 通过服务端环境注入配置，执行快速版、深入版各一次端到端冒烟。
 5. 保存不含邮箱、验证码、密钥和签名链接的请求编号、对象哈希与删除证据。
+
+任务 Worker 将模型执行和阶段推进拆成两个持久步骤。模型结果成功落库后，推进失败只重试编排，不重复调用已经成功的模型或专利检索。P1 完成后等待用户确认方向；调用 `POST /tasks/{task_id}/continue` 后，服务端依次编排 P2—P9，其中 P4 按保留来源扇出并在全部成功后汇总。
 
 ## 告警、恢复与回滚
 
