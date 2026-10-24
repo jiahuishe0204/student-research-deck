@@ -1,6 +1,6 @@
 const byId = id => document.getElementById(id);
 const SAMPLE_FILES = { report: './sample-delivery/report.md', slides: './sample-delivery/ppt-content.md' };
-const state = { report: '', slides: '', reportSections: [], slidePages: [], sources: [], view: 'report', selectedSlide: 0, sourceFilter: '全部' };
+const state = { report: '', slides: '', reportSections: [], slidePages: [], sources: [], view: 'report', selectedSlide: 0, sourceFilter: '全部', taskId: '', topic: '', artifacts: [], production: false };
 const VIEW_ORDER = ['report', 'slides', 'sources'];
 let viewTransitionId = 0;
 
@@ -61,6 +61,32 @@ function parseSlides(markdown) {
     const navigationTitle = body.match(/^目录标题：\s*(.+)$/m)?.[1]?.trim() || match[2].trim();
     return { number: Number(match[1]), title: match[2].trim(), navigationTitle, raw: `${match[0]}\n\n${body}\n`, blocks };
   });
+}
+function pptToMarkdown(ppt) {
+  return (ppt?.pages || []).map((page, index) => {
+    const lines = [`## 第 ${index + 1} 页｜${page.title || page.navigation_title || `页面 ${index + 1}`}`];
+    if (page.navigation_title) lines.push(`目录标题：${page.navigation_title}`);
+    lines.push('', '上屏文字：', ...(page.on_slide_text || []).map(item => `- ${item}`));
+    lines.push('', '配图建议：', page.visual_suggestion || '无');
+    lines.push('', '讲稿：', page.speaker_notes || '');
+    const citations = (page.source_citations || []).map(item => {
+      const label = item.short_vancouver || item.source_id || '来源';
+      return item.url ? `- [${label}](${item.url})` : `- ${label}`;
+    });
+    lines.push('', '来源：', ...(citations.length ? citations : ['- 见参考文献交付文件']));
+    return lines.join('\n');
+  }).join('\n\n');
+}
+function artifact(kind) { return state.artifacts.find(item => item.kind === kind); }
+async function requestPrivateDownload(kind, filename) {
+  const item = artifact(kind); const csrf = sessionStorage.getItem('research_csrf_token') || '';
+  if (!item || !csrf) throw new Error('登录状态或下载凭证已过期，请重新通过邮箱进入任务页');
+  const response = await fetch('/delivery/download', { method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify({ task_id: state.taskId, artifact_id: item.artifact_id, filename }) });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.download_url) throw new Error(payload.message || '下载链接生成失败');
+  location.assign(payload.download_url);
 }
 function extractSources(report, slides) {
   const found = new Map(); const referenceNames = new Map();
@@ -182,9 +208,10 @@ function currentMarkdown() {
   return `# 引用与图源\n\n${state.sources.map(source => `- ${source.kind}｜${source.label}：${source.url}`).join('\n')}\n`;
 }
 function currentFilename() {
-  if (state.view === 'report') return '慢性植入神经接口-调研报告.md';
-  if (state.view === 'slides') return `慢性植入神经接口-PPT-第${state.slidePages[state.selectedSlide].number}页.md`;
-  return '慢性植入神经接口-引用与图源.md';
+  const prefix = state.production ? (state.topic || state.taskId) : '慢性植入神经接口';
+  if (state.view === 'report') return `${prefix}-调研报告.md`;
+  if (state.view === 'slides') return `${prefix}-PPT-第${state.slidePages[state.selectedSlide].number}页.md`;
+  return `${prefix}-引用与图源.md`;
 }
 function currentBaseFilename() {
   return currentFilename().replace(/\.md$/, '');
@@ -241,7 +268,25 @@ function setDownloadMenu(open, focusFirst = false) {
 async function loadDelivery() {
   byId('load-error').hidden = true; byId('loading-state').hidden = false; byId('delivery-body').hidden = true; document.querySelector('.delivery-app').setAttribute('aria-busy', 'true');
   try {
-    if (window.DELIVERY_SAMPLE?.report && window.DELIVERY_SAMPLE?.slides) {
+    const taskId = new URL(location.href).searchParams.get('task') || '';
+    if (taskId) {
+      if (!/^TASK-[A-Za-z0-9_-]{6,64}$/.test(taskId)) throw new Error('invalid task id');
+      const response = await fetch(`/tasks/${encodeURIComponent(taskId)}/delivery`, { credentials: 'include', cache: 'no-store' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.data?.final_delivery) throw new Error(payload.message || 'delivery unavailable');
+      const delivery = payload.data; const final = delivery.final_delivery;
+      state.taskId = taskId; state.topic = delivery.topic || ''; state.production = true; state.artifacts = delivery.artifacts || [];
+      state.report = final.final_report?.markdown || '';
+      state.slides = pptToMarkdown(final.final_ppt || {});
+      document.querySelector('.result-heading h1').textContent = delivery.topic || final.final_report?.title || '调研交付';
+      document.title = `${delivery.topic || '调研交付'}｜调研交付台`;
+      const account = document.querySelector('.header-action');
+      if (account) { account.textContent = '已验证邮箱'; account.classList.remove('login-pending'); account.removeAttribute('aria-disabled'); account.removeAttribute('title'); }
+      document.querySelector('.boundary-note h2').textContent = '内容已完成，引用边界仍需核对。';
+      document.querySelector('.boundary-note p').textContent = '本页读取当前账户的私有交付结果。报告与 PPT 使用同一套核验证据；正式提交课程或比赛前，仍应复核原文与图片许可。';
+      const footerCopy = document.querySelector('footer p');
+      if (footerCopy) footerCopy.textContent = '私有交付阅读页 · 文件保留七天';
+    } else if (window.DELIVERY_SAMPLE?.report && window.DELIVERY_SAMPLE?.slides) {
       state.report = window.DELIVERY_SAMPLE.report;
       state.slides = window.DELIVERY_SAMPLE.slides;
     } else {
@@ -263,7 +308,11 @@ byId('download-options').addEventListener('click', event => {
   const option = event.target.closest('[data-format]');
   if (!option) return;
   setDownloadMenu(false);
-  if (option.dataset.format === 'markdown') downloadText(currentMarkdown(), currentFilename());
+  if (state.production && option.dataset.format === 'markdown') {
+    requestPrivateDownload(state.view === 'slides' ? 'ppt_content' : state.view === 'sources' ? 'references' : 'report', currentFilename())
+      .catch(error => { byId('action-feedback').textContent = error.message; });
+  }
+  else if (option.dataset.format === 'markdown') downloadText(currentMarkdown(), currentFilename());
   else if (option.dataset.format === 'html') downloadHtml();
   else printCurrentAsPdf();
 });

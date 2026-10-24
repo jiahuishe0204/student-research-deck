@@ -40,6 +40,8 @@
 
 P9 不直接把任务标记为完成。Worker 先以确定性对象键上传 `report`、`ppt_content`、`references` 三类文件，逐个核验 SHA-256、大小和 AES256 服务端加密；第三类文件也成功后，数据库才原子发布下载权限、完成任务并写入邮件 Outbox。重复执行会复用相同对象与产物标识。
 
+交付阅读页支持 `delivery.html?task=TASK-...`。该模式只调用同源 `/tasks/{task_id}/delivery` 和 `/delivery/download`，携带 HttpOnly 会话 Cookie；下载请求还必须携带邮箱验证时返回、仅保存在当前标签页的 CSRF Token。无 `task` 参数时仍显示仓库内的验收样本。部署时必须在 EdgeOne/API Gateway 将这两个同源路径转发到控制面，不能把上游地址或网关密钥注入浏览器脚本。
+
 ## 告警、恢复与回滚
 
 - 云监控对函数错误、邮件 `unknown/permanent_failed`、删除八次失败、孤儿对象、OTP请求量突增和当月费用设置告警。金额阈值由用户批准后填写，不能由程序擅自承诺费用。
