@@ -34,6 +34,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -48,6 +50,6 @@ jobs:
           PYTHONPATH="$RUNNER_TEMP/scf-unpacked" python -c "import intent_http_entrypoint, delivery_http_entrypoint, task_scf_entrypoint, delivery_scf_entrypoint"
       - uses: actions/upload-artifact@v4
         with:
-          name: scf-candidate-${{ github.sha }}
+          name: scf-candidate-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/student-research-deck-scf-candidate.zip
           retention-days: 7
