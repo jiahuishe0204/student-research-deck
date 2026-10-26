@@ -62,6 +62,7 @@ class IntentHttpTests(unittest.TestCase):
         with patch("intent_http_entrypoint.consume", return_value=False) as consume:
             self.assertFalse(_rate_limit(db, SECRET, "203.0.113.2"))
         self.assertEqual((db.commits, db.rollbacks), (1, 0))
+        self.assertEqual(consume.call_args.kwargs["dimension"], "ip")
         self.assertEqual(consume.call_args.kwargs["policy"].max_requests, 20)
 
 

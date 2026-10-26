@@ -45,7 +45,7 @@ def _source_ip(event, *, trusted_gateway):
 def _rate_limit(connection, gateway_secret, source_ip):
     digest = subject_hash(gateway_secret, "preauth-intent-ip", source_ip)
     try:
-        allowed = consume(connection, dimension="preauth-intent-ip",
+        allowed = consume(connection, dimension="ip",
                           subject_digest=digest, policy=PREAUTH_INTENT_IP_POLICY)
         # Persist the denied hit too: rolling it back would erase the 30-minute block.
         connection.commit()
