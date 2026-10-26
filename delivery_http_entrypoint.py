@@ -12,6 +12,7 @@ from delivery_repository import PostgresDeliveryRepository
 from identity_vault import IdentityVault
 from otp_service import OtpService
 from private_delivery_api import authenticated_download
+from preauth_intent_ticket import verify_intent_ticket
 from production_config import load_cos_config, load_delivery_common_config
 from production_task_queue import PostgresTaskQueue
 from production_session import COOKIE_ATTRIBUTES
@@ -103,8 +104,14 @@ def main_handler(event, context=None, *, services=None):
             user_id = services["auth"].authenticate(
                 _session_cookie(event), csrf_token=headers.get("x-csrf-token", ""), require_csrf=True,
             )
+            signing_secret = (services.get("intent_signing_secret") if not owned else
+                              os.environ.get("PREAUTH_INTENT_SIGNING_SECRET"))
+            if not signing_secret or len(signing_secret) < 32:
+                raise RuntimeError("匿名题目凭证密钥未配置")
+            confirmed = verify_intent_ticket(payload.get("intent_ticket"), signing_secret)
             task = services["tasks"].create_task(
-                user_id=user_id, topic=payload.get("topic", ""), tier=payload.get("tier", "fast"),
+                user_id=user_id, topic=confirmed["topic"], tier=confirmed["tier"],
+                confirmed_intent=confirmed["intent"],
             )
             return _response(201, {"ok": True, "data": task}, {"Cache-Control": "no-store"})
         parts = path.strip("/").split("/")
@@ -135,6 +142,8 @@ def main_handler(event, context=None, *, services=None):
     except (ValueError, LookupError, PermissionError):
         # Authentication and challenge failures deliberately share one response.
         return _response(401, {"ok": False, "message": "请求无效或已过期"}, {"Cache-Control": "no-store"})
+    except RuntimeError:
+        return _response(503, {"ok": False, "message": "生产服务暂时不可用"}, {"Cache-Control": "no-store"})
     finally:
         if owned:
             services["connection"].close()

@@ -3,7 +3,7 @@ const form=$('#intent-form'),task=$('#task'),result=$('#intent-result'),title=$(
 let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',selectedDirection=null,currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,currentTaskToken=null,taskPaused=false;
 const taskSessionKey='research-delivery.active-task.v1';
 const productionTaskKey='research-delivery.production-task.v1',csrfKey='research_csrf_token';
-let productionMode=false,productionChallengeId='',productionPolling=false;
+let productionMode=false,productionChallengeId='',productionPolling=false,currentIntentTicket=null,productionConfirmedClarification=null;
 
 const slidePreviewPages=[
   {label:'问题',eyebrow:'01 / RESEARCH QUESTION',title:'实体瘤为什么仍是 CAR-T 的困难场景？',bullets:['抗原异质性带来逃逸风险','肿瘤微环境抑制 T 细胞活性','浸润与持续性仍限制疗效'],sources:'SOURCES · 03 / 07 / 11',notes:'这一页先建立问题，不急着给出路线优劣。讲述时用三个障碍解释后续技术为什么分别从靶点、细胞状态和递送方式入手。',chips:['来源 03','来源 07']},
@@ -37,8 +37,21 @@ async function request(path,payload){const headers={'Content-Type':'application/
 async function productionRequest(path,{method='GET',body=null,csrf=false}={}){const headers={};if(body!==null)headers['Content-Type']='application/json';if(csrf)headers['X-CSRF-Token']=sessionStorage.getItem(csrfKey)||'';const response=await fetch(path,{method,credentials:'include',cache:'no-store',headers,body:body===null?undefined:JSON.stringify(body)});const data=await response.json().catch(()=>({message:'服务返回格式异常'}));if(!response.ok)throw new Error(data.message||data.error||'请求失败');return data;}
 const wait=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
 function setProductionProgress(progress){const stage=String(progress.current_stage||'P1'),number=Number(stage.slice(1))||1;$('#task-workspace').hidden=false;$('#task-status-title').textContent=progress.status==='failed'?'任务未完成':`正在执行 ${stage}`;document.querySelector('.progress-line i').style.width=`${Math.min(96,Math.max(12,number*10))}%`;document.querySelectorAll('.task-status li').forEach((item,index)=>{const boundary=Math.ceil(number/2);item.className=index<boundary?'done':index===boundary?'active':'';});$('#plan-output').innerHTML=`<p class="empty-plan">任务已安全保存到云端。当前阶段：${escapeHtml(stage)}。关闭页面不会中断，完成后会发送邮件。</p>`;}
-async function pollProductionTask({untilIntent=false}={}){if(productionPolling)return;productionPolling=true;try{for(let count=0;count<180;count+=1){const response=await productionRequest(`/tasks/${encodeURIComponent(currentTaskId)}/progress`),progress=response.data||{};setProductionProgress(progress);const stageData=progress.stage_result?.data;if(untilIntent&&stageData?.normalized_topic){currentIntent=stageData;selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');$('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后开始完整调研 <span>→</span>':'确认并开始完整调研 <span>→</span>');result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});return;}if(progress.status==='completed'){location.href=`./delivery.html?task=${encodeURIComponent(currentTaskId)}`;return;}if(progress.status==='failed')throw new Error('任务未能完成，技术失败不会消耗首次免费资格');await wait(5000);}throw new Error('任务仍在运行，请稍后刷新页面查看');}finally{productionPolling=false;}}
-async function detectProduction(){try{const response=await fetch('/api/health',{cache:'no-store'}),data=await response.json();productionMode=response.ok&&data.runtime==='edgeone-gateway'&&data.ok===true;}catch(_){productionMode=false;}if(!productionMode)return false;$('#production-auth').hidden=false;$('#cancel-task').hidden=true;$('#resume-task').hidden=true;const csrf=sessionStorage.getItem(csrfKey);if(csrf){$('#production-auth').classList.add('verified');$('#auth-status').textContent='邮箱登录状态已就绪。';}const saved=sessionStorage.getItem(productionTaskKey);if(saved){currentTaskId=saved;pollProductionTask({untilIntent:true}).catch(exc=>{error.textContent=exc.message;});}return true;}
+async function pollProductionTask({untilIntent=false}={}){if(productionPolling)return;productionPolling=true;try{for(let count=0;count<180;count+=1){const response=await productionRequest(`/tasks/${encodeURIComponent(currentTaskId)}/progress`),progress=response.data||{};setProductionProgress(progress);const stageData=progress.stage_result?.data;if(untilIntent&&stageData?.normalized_topic){currentIntent=stageData;selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');$('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后开始完整调研 <span>→</span>':'确认并开始完整调研 <span>→</span>');result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});return;}if(progress.status==='completed'||progress.status==='partial'){location.href=`./delivery.html?task=${encodeURIComponent(currentTaskId)}`;return;}if(progress.status==='failed')throw new Error('任务未能完成，技术失败不会消耗首次免费资格');await wait(5000);}throw new Error('任务仍在运行，请稍后刷新页面查看');}finally{productionPolling=false;}}
+async function detectProduction(){try{const response=await fetch('/api/health',{cache:'no-store'}),data=await response.json();productionMode=response.ok&&data.runtime==='edgeone-gateway'&&data.ok===true;}catch(_){productionMode=false;}if(!productionMode){const local=location.protocol==='file:'||['localhost','127.0.0.1','::1'].includes(location.hostname);if(local)return false;error.textContent='线上服务暂时不可用，请稍后再试。';form.querySelector('.primary').disabled=true;return true;}$('#cancel-task').hidden=true;$('#resume-task').hidden=true;const csrf=sessionStorage.getItem(csrfKey);if(csrf){$('#production-auth').classList.add('verified');$('#auth-status').textContent='邮箱登录状态已就绪。';}const saved=sessionStorage.getItem(productionTaskKey);if(saved){currentTaskId=saved;if(!csrf)$('#production-auth').hidden=false;else pollProductionTask().catch(exc=>{error.textContent=exc.message;});}return true;}
+async function startProductionTask(){
+  if(!currentTaskId){
+    if(!currentIntentTicket)throw new Error('题目确认已过期，请重新提交主题。');
+    const created=await productionRequest('/tasks',{method:'POST',csrf:true,body:{intent_ticket:currentIntentTicket}});
+    currentTaskId=created.data.task_id;sessionStorage.setItem(productionTaskKey,currentTaskId);currentIntentTicket=null;
+  }
+  await productionRequest(`/tasks/${encodeURIComponent(currentTaskId)}/continue`,{method:'POST',csrf:true,body:{clarification:productionConfirmedClarification||''}});
+  productionConfirmedClarification=null;result.hidden=true;$('#production-auth').hidden=true;$('#task-workspace').hidden=false;
+  $('#task-status-title').textContent='方向已确认，正在执行完整调研';
+  $('#plan-output').innerHTML='<p class="empty-plan">系统将按 P2—P9 完成检索、证据提取、报告与 PPT 编排及独立核验。关闭页面不会中断任务。</p>';
+  $('#task-workspace').scrollIntoView({behavior:'smooth',block:'start'});
+  pollProductionTask().catch(exc=>{error.textContent=exc.message;});
+}
 async function fetchCurrentTask(){const response=await fetch(`/api/tasks/${encodeURIComponent(currentTaskId)}`,{headers:{'X-Task-ID':currentTaskId,'X-Task-Token':currentTaskToken}});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.error||'任务恢复失败');return data.data;}
 function saveTaskSession(){if(currentTaskId&&currentTaskToken)sessionStorage.setItem(taskSessionKey,JSON.stringify({taskId:currentTaskId,token:currentTaskToken}));}
 function clearTaskSession(){sessionStorage.removeItem(taskSessionKey);sessionStorage.removeItem(productionTaskKey);currentTaskId=null;currentTaskToken=null;}
@@ -65,7 +78,7 @@ $('#verify-code').addEventListener('click',async event=>{
   if(!productionMode)return;const button=event.currentTarget,code=$('#auth-code').value.trim(),status=$('#auth-status');
   if(!productionChallengeId||!/^[0-9]{6}$/.test(code)){status.textContent='请输入邮件中的 6 位验证码。';$('#auth-code').focus();return;}
   setBusy(button,true,'验证中…');
-  try{const response=await productionRequest('/auth/otp/verify',{method:'POST',body:{challenge_id:productionChallengeId,code}});sessionStorage.setItem(csrfKey,response.csrf_token);$('#production-auth').classList.add('verified');status.textContent=currentTaskId?'邮箱验证成功，正在恢复云端任务。':'邮箱验证成功，可以开始任务。';if(currentTaskId)pollProductionTask({untilIntent:true}).catch(exc=>{error.textContent=exc.message;});}
+  try{const response=await productionRequest('/auth/otp/verify',{method:'POST',body:{challenge_id:productionChallengeId,code}});sessionStorage.setItem(csrfKey,response.csrf_token);$('#production-auth').classList.add('verified');status.textContent='邮箱验证成功。';if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});}
   catch(exc){status.textContent=exc.message;}
   finally{setBusy(button,false,'确认登录');}
 });
@@ -73,22 +86,21 @@ $('#verify-code').addEventListener('click',async event=>{
 form.addEventListener('submit',async event=>{
   event.preventDefault();currentTopic=task.value.trim();currentTier=$('input[name="tier"]:checked').value;
   if(currentTopic.length<2){error.textContent='输入一个调研主题就可以开始。';task.focus();return;}
-  error.textContent='';setBusy(form.querySelector('.primary'),true,'正在理解题目… <span>·</span>');result.hidden=true;
+  error.textContent='';setBusy(form.querySelector('.primary'),true,'正在理解题目… <span>·</span>');result.hidden=true;currentIntentTicket=null;productionConfirmedClarification=null;
   try{
     if(productionMode){
-      if(!sessionStorage.getItem(csrfKey)){throw new Error('请先完成邮箱验证码登录。');}
-      const taskResponse=await productionRequest('/tasks',{method:'POST',csrf:true,body:{topic:currentTopic,tier:currentTier}});currentTaskId=taskResponse.data.task_id;sessionStorage.setItem(productionTaskKey,currentTaskId);
-      $('#task-workspace').hidden=false;$('#task-status-title').textContent='题目已提交，正在理解研究方向';$('#plan-output').innerHTML='<p class="empty-plan">任务已安全保存到云端，正在执行 P1 题目理解…</p>';$('#task-workspace').scrollIntoView({behavior:'smooth',block:'start'});
-      await pollProductionTask({untilIntent:true});return;
+      const response=await productionRequest('/api/intent',{method:'POST',body:{topic:currentTopic,tier:currentTier}});
+      currentIntent=response.data;currentIntentTicket=response.intent_ticket;currentTaskId=null;
+    }else{
+      const taskResponse=await request('/api/tasks',{topic:currentTopic,tier:currentTier});currentTaskId=taskResponse.data.task_id;currentTaskToken=taskResponse.data.owner_token;saveTaskSession();
+      const response=await request('/api/intent',{topic:currentTopic,tier:currentTier});currentIntent=response.data;
+      await persistStage('P1','intent_completed',currentIntent,'intent',true);
     }
-    const taskResponse=await request('/api/tasks',{topic:currentTopic,tier:currentTier});currentTaskId=taskResponse.data.task_id;currentTaskToken=taskResponse.data.owner_token;saveTaskSession();
-    const response=await request('/api/intent',{topic:currentTopic,tier:currentTier});currentIntent=response.data;
-    await persistStage('P1','intent_completed',currentIntent,'intent',true);
     selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);
     const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');
     directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');
     $('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;$('#clarification').value='';
-    confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后生成工作规划 <span>→</span>':'确认并生成工作规划 <span>→</span>');
+    confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后继续 <span>→</span>':'确认研究方向 <span>→</span>');
     result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});
   }catch(exc){error.textContent=exc.message;}
   finally{setBusy(form.querySelector('.primary'),false,'让系统先理解题目 <span>→</span>');}
@@ -98,14 +110,15 @@ confirmButton.addEventListener('click',async()=>{
   const directions=Array.isArray(currentIntent?.direction_options)?currentIntent.direction_options:[];
   const clarification=directions.length?(selectedDirection?`${selectedDirection.title}：${selectedDirection.focus}`:''):$('#clarification').value.trim();
   if(currentIntent?.need_clarification&&!clarification){(directions.length?$('#direction-options .direction-card'):$('#clarification'))?.focus();return;}
-  setBusy(confirmButton,true,'正在建立规划… <span>·</span>');$('#task-workspace').hidden=false;$('#plan-output').innerHTML='<p class="empty-plan">正在确定研究问题、资料需求和交付结构…</p>';$('#task-status-title').textContent='正在建立调研规划';$('#task-workspace').scrollIntoView({behavior:'smooth',block:'start'});
+  setBusy(confirmButton,true,'正在建立规划… <span>·</span>');
   try{
-    if(productionMode){await productionRequest(`/tasks/${encodeURIComponent(currentTaskId)}/continue`,{method:'POST',csrf:true,body:{clarification}});result.hidden=true;$('#task-status-title').textContent='方向已确认，正在执行完整调研';$('#plan-output').innerHTML='<p class="empty-plan">系统将按 P2—P9 完成检索、证据提取、报告与 PPT 编排及独立核验。关闭页面不会中断任务。</p>';await pollProductionTask();return;}
+    if(productionMode){productionConfirmedClarification=clarification;if(!sessionStorage.getItem(csrfKey)){$('#production-auth').hidden=false;$('#auth-status').textContent='题目已确认。请验证邮箱以保存任务并开始完整调研。';$('#production-auth').scrollIntoView({behavior:'smooth',block:'center'});return;}await startProductionTask();return;}
+    $('#task-workspace').hidden=false;$('#plan-output').innerHTML='<p class="empty-plan">正在确定研究问题、资料需求和交付结构…</p>';$('#task-status-title').textContent='正在建立调研规划';$('#task-workspace').scrollIntoView({behavior:'smooth',block:'start'});
     const response=await request('/api/plan',{topic:currentTopic,tier:currentTier,clarification,direction_id:selectedDirection?.direction_id||null});currentPlan=response.data;await persistStage('P2','plan_completed',currentPlan,'plan');renderPlan(response.data,response.usage);
     $('#task-status-title').textContent='调研规划已经就绪';document.querySelector('.progress-line i').style.width='100%';
     document.querySelectorAll('.task-status li')[1].className='done';
   }catch(exc){$('#plan-output').innerHTML=`<p class="error-card">${escapeHtml(exc.message)}。题目理解已经保留，请点击“重新生成规划”继续当前阶段，无需重新提交整题。</p>`;$('#task-status-title').textContent='规划未能完成';}
-  finally{setBusy(confirmButton,false,'重新生成规划 <span>↻</span>');}
+  finally{setBusy(confirmButton,false,productionMode?'确认方向并继续 <span>→</span>':'重新生成规划 <span>↻</span>');}
 });
 
 $('#direction-options').addEventListener('click',event=>{

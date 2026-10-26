@@ -20,7 +20,8 @@ class ProductionHomeAdapterTests(unittest.TestCase):
     def test_production_mode_requires_confirmed_healthy_edgeone_gateway(self):
         self.assertIn("fetch('/api/health'", self.script)
         self.assertIn("data.runtime==='edgeone-gateway'&&data.ok===true", self.script)
-        self.assertIn("if(!productionMode)return false", self.script)
+        self.assertIn("if(!productionMode){const local=", self.script)
+        self.assertIn("form.querySelector('.primary').disabled=true", self.script)
 
     def test_otp_and_mutating_requests_use_cookie_and_tab_scoped_csrf(self):
         self.assertIn("credentials:'include'", self.script)
@@ -30,6 +31,9 @@ class ProductionHomeAdapterTests(unittest.TestCase):
         self.assertNotIn("localStorage.setItem(csrfKey", self.script)
 
     def test_production_task_flow_covers_create_confirm_poll_and_delivery(self):
+        self.assertIn("productionRequest('/api/intent'", self.script)
+        self.assertIn("intent_ticket:currentIntentTicket", self.script)
+        self.assertIn("currentIntentTicket=null", self.script)
         self.assertIn("productionRequest('/tasks'", self.script)
         self.assertIn("/continue`,{method:'POST',csrf:true", self.script)
         self.assertIn("/progress`)", self.script)

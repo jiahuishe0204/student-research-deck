@@ -50,6 +50,8 @@ required = [
     "production_session.py",
     "private_delivery_api.py",
     "delivery_http_entrypoint.py",
+    "intent_http_entrypoint.py",
+    "preauth_intent_ticket.py",
     "scf_queue.py",
     "tests/test_scf_queue.py",
     "tests/test_research_pipeline.py",
@@ -58,6 +60,7 @@ required = [
     "deploy/edgeone/edgeone.json",
     "deploy/edgeone/package.json",
     "deploy/edgeone/cloud-functions/api/health.js",
+    "deploy/edgeone/cloud-functions/api/intent.js",
     "deploy/edgeone/cloud-functions/_proxy.js",
     "deploy/edgeone/cloud-functions/auth/[[path]].js",
     "deploy/edgeone/cloud-functions/tasks/index.js",
@@ -92,10 +95,11 @@ assert "追问一个问题" in home
 app = (ROOT / "web/app.js").read_text()
 assert "/api/intent" in app
 production_submit = app.index("if(productionMode){")
-production_login_guard = app.index("if(!sessionStorage.getItem(csrfKey))", production_submit)
-production_task_create = app.index("productionRequest('/tasks'", production_submit)
-assert production_submit < production_login_guard < production_task_create, \
-    "the production path must authenticate before creating a durable cloud task"
+production_anon_intent = app.index("productionRequest('/api/intent'", production_submit)
+production_task_create = app.index("productionRequest('/tasks'")
+assert "async function startProductionTask()" in app and production_task_create < production_submit, \
+    "production must create a durable task only from the post-confirmation handler"
+assert "if(!sessionStorage.getItem(csrfKey))" in app and "intent_ticket:currentIntentTicket" in app
 assert "request('/api/tasks'" in app, "local research runs must remain available through the local-only task store"
 assert "/api/search" in app
 assert "tier:currentTier" in app, "frontend must preserve the selected tier across later stages"

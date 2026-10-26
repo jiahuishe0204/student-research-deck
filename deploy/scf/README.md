@@ -6,12 +6,13 @@
 scf_entrypoint.main_handler
 ```
 
-The production deployment contains three explicit entry points:
+The production deployment contains explicit entry points:
 
 ```text
 scf_entrypoint.main_handler             # P1-P9 stage worker
 task_scf_entrypoint.main_handler        # PostgreSQL queued-task timer worker
 delivery_http_entrypoint.main_handler   # OTP/session/private-download API
+intent_http_entrypoint.main_handler     # anonymous P1 HTTP API
 delivery_scf_entrypoint.main_handler    # SES outbox/COS retention/reconcile/monitor timers
 ```
 
@@ -30,6 +31,7 @@ IDENTITY_SECRET
 EMAIL_FROM
 PUBLIC_ORIGIN
 EDGEONE_GATEWAY_SECRET
+PREAUTH_INTENT_SIGNING_SECRET
 SES_SECRET_ID
 SES_SECRET_KEY
 SES_REGION
@@ -48,7 +50,7 @@ pasted into chat messages. SES and COS credentials must belong to separate
 least-privilege CAM identities.
 
 `EDGEONE_GATEWAY_SECRET` must be the same high-entropy secret in the EdgeOne
-project and the four HTTP control-plane functions. The SCF endpoints reject
+project and the five HTTP control-plane functions. The SCF endpoints reject
 requests that do not carry it. EdgeOne overwrites `X-EdgeOne-Client-IP` from
 its trusted runtime context before proxying, so OTP rate limits use the actual
 client IP instead of an EdgeOne egress address.
@@ -56,8 +58,8 @@ client IP instead of an EdgeOne egress address.
 The HTTP entry points use SCF Function URLs, not the retired API Gateway
 trigger. Configure the URLs as HTTPS public endpoints with SCF CORS disabled;
 the shared gateway secret is still mandatory at the application layer. Store
-the four URL origins in EdgeOne as `HEALTH_API_BASE_URL`, `AUTH_API_BASE_URL`,
-`TASK_API_BASE_URL`, and `DELIVERY_API_BASE_URL`. Do not expose them to browser
+the five URL origins in EdgeOne as `HEALTH_API_BASE_URL`, `AUTH_API_BASE_URL`,
+`INTENT_API_BASE_URL`, `TASK_API_BASE_URL`, and `DELIVERY_API_BASE_URL`. Do not expose them to browser
 code or reuse the COS-enabled download function for auth/task routes.
 
 ## Dependencies

@@ -12,6 +12,9 @@ EXPECTED = {
     "pre_auth_intent_request_max_cost_cny": 0.5,
     "pre_auth_global_daily_budget_cny": 1.0,
     "pre_auth_daily_budget_timezone": "Asia/Shanghai",
+    "pre_auth_ip_window_seconds": 600,
+    "pre_auth_ip_max_requests": 20,
+    "pre_auth_ip_block_seconds": 1800,
     "authentication_method": "email_one_time_code",
     "email_code_validity_minutes": 10,
     "anonymous_draft_storage": "browser_memory_only",
@@ -46,7 +49,7 @@ def main():
     assert payload.get("decisions") == EXPECTED, "confirmed product decisions changed without updating their contract"
     source = ROOT / payload["source_document"]
     assert source.is_file(), "decision source document is missing"
-    assert payload.get("open_clarifications") == ["pre_auth_ip_rate_limit"]
+    assert payload.get("open_clarifications") == []
     budget_migration = ROOT / "migrations" / "008_preauth_daily_budget.sql"
     assert budget_migration.is_file(), "confirmed shared daily budget migration is missing"
     routing = json.loads((ROOT / "config" / "model-routing.json").read_text(encoding="utf-8"))

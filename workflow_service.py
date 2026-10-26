@@ -321,7 +321,7 @@ class WorkflowService:
             chunks.append(current)
         return chunks
 
-    def create_intent(self, topic, tier="fast"):
+    def create_intent(self, topic, tier="fast", *, request_timeout=300):
         topic = str(topic or "").strip()
         tier = self._tier(tier)
         if not 2 <= len(topic) <= 500:
@@ -329,6 +329,7 @@ class WorkflowService:
         output, usage, _ = self.generate(
             "P1", tier, {"topic": topic, "tier": tier, "runtime_config": {"language": "zh-CN"}},
             validate_intent, max_tokens=4200, max_attempts=2,
+            request_timeout=request_timeout,
             request_cost_limit_cny=self.PRE_AUTH_INTENT_REQUEST_MAX_COST_CNY,
             daily_budget_request_id=str(uuid.uuid4()) if self.daily_budget_ledger else None,
         )

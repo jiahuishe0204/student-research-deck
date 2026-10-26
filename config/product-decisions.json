@@ -1,6 +1,6 @@
 {
   "schema_version": "1.3.0",
-  "updated_at": "2026-10-24",
+  "updated_at": "2026-10-26",
   "authority": "User-confirmed product decisions. Changes require explicit user approval.",
   "source_document": "docs/免登录浏览与首次免费体验-产品工程决策框架.md",
   "decisions": {
@@ -9,6 +9,9 @@
     "pre_auth_intent_request_max_cost_cny": 0.5,
     "pre_auth_global_daily_budget_cny": 1.0,
     "pre_auth_daily_budget_timezone": "Asia/Shanghai",
+    "pre_auth_ip_window_seconds": 600,
+    "pre_auth_ip_max_requests": 20,
+    "pre_auth_ip_block_seconds": 1800,
     "authentication_method": "email_one_time_code",
     "email_code_validity_minutes": 10,
     "anonymous_draft_storage": "browser_memory_only",
@@ -35,9 +38,7 @@
     "internal_test_postgresql": "managed_free_tier_provider_tbd",
     "internal_test_transactional_email": "free_tier_provider_tbd"
   },
-  "open_clarifications": [
-    "pre_auth_ip_rate_limit"
-  ],
+  "open_clarifications": [],
   "explicitly_deferred": [
     "phone_login",
     "wechat_login",

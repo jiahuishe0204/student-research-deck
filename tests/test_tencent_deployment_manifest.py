@@ -24,7 +24,7 @@ class TencentDeploymentManifestTests(unittest.TestCase):
     def test_control_plane_uses_https_function_urls_and_gateway_secret(self):
         manifest=json.loads((ROOT/"deploy/tencent/functions.template.json").read_text())
         functions={item["name"]:item for item in manifest["functions"]}
-        for name in ("research-health-api","research-auth-api","research-download-api","research-task-api"):
+        for name in ("research-health-api","research-auth-api","research-intent-api","research-download-api","research-task-api"):
             function=functions[name]
             self.assertEqual(function["trigger"]["type"],"function-url")
             self.assertTrue(function["trigger"]["https_only"])

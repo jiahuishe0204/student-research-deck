@@ -22,7 +22,7 @@ function upstreamUrl(context, baseVariable) {
   return `${base}${incoming.pathname}${incoming.search}`;
 }
 
-export async function proxyControlApi(context, baseVariable) {
+export async function proxyControlApi(context, baseVariable, timeoutMs = 15_000) {
   const method = context.request.method.toUpperCase();
   if (!new Set(["GET", "POST"]).has(method)) return json({ ok: false, message: "请求方法不允许" }, 405);
   try {
@@ -40,7 +40,7 @@ export async function proxyControlApi(context, baseVariable) {
       headers,
       body,
       redirect: "manual",
-      signal: AbortSignal.timeout(15_000)
+      signal: AbortSignal.timeout(timeoutMs)
     });
     const responseHeaders = new Headers({
       "Cache-Control": "no-store",
