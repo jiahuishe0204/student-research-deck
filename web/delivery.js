@@ -52,14 +52,15 @@ function parseSlides(markdown) {
   const matches = Array.from(markdown.matchAll(/^##\s+第\s*(\d+)\s*页[｜|]\s*(.+)$/gm));
   return matches.map((match, index) => {
     const body = markdown.slice(match.index + match[0].length, index + 1 < matches.length ? matches[index + 1].index : markdown.length).trim();
-    const blocks = {}; const labels = Array.from(body.matchAll(/^(上屏文字|配图建议|讲稿|来源)：?([^\n]*)$/gm));
+    const blocks = {}; const labels = Array.from(body.matchAll(/^(?:\*\*)?(目录标题|副标题|上屏文字|配图建议|原文图入口|参考来源|讲稿|来源|页目的)(?:\*\*)?：?([^\n]*)$/gm));
     labels.forEach((label, labelIndex) => {
       const remainder = label[2].trim();
       const following = body.slice(label.index + label[0].length, labelIndex + 1 < labels.length ? labels[labelIndex + 1].index : body.length).trim();
-      blocks[label[1]] = [remainder, following].filter(Boolean).join('\n\n');
+      const key = label[1] === '页目的' ? '副标题' : label[1] === '原文图入口' ? '配图建议' : label[1] === '参考来源' ? '来源' : label[1];
+      blocks[key] = [remainder, following].filter(Boolean).join('\n\n');
     });
     const navigationTitle = body.match(/^目录标题：\s*(.+)$/m)?.[1]?.trim() || match[2].trim();
-    return { number: Number(match[1]), title: match[2].trim(), navigationTitle, raw: `${match[0]}\n\n${body}\n`, blocks };
+    return { number: Number(match[1]), title: blocks['副标题'] || match[2].trim(), navigationTitle, raw: `${match[0]}\n\n${body}\n`, blocks };
   });
 }
 function pptToMarkdown(ppt) {
@@ -143,6 +144,10 @@ function showReport() {
   byId('content-panel').querySelectorAll('p').forEach(paragraph => { if (/^\[\d+\]/.test(paragraph.textContent.trim())) paragraph.classList.add('reference-line'); });
 }
 function renderSlideBlock(title, markdown, className = '') { return markdown ? `<section class="slide-block ${className}"><h2>${escapeHtml(title)}</h2>${renderMarkdown(markdown)}</section>` : ''; }
+function renderFigureBlock(markdown) {
+  if (!markdown || !/https:\/\/[^\s)]+/i.test(markdown)) return '';
+  return renderSlideBlock('配图建议与图源', markdown);
+}
 function showSlide(index) {
   state.selectedSlide = index; const page = state.slidePages[index];
   setIndex(state.slidePages.map(item => ({ title: `${String(item.number).padStart(2, '0')} · ${item.navigationTitle}` })), index, (_, nextIndex) => {
@@ -150,7 +155,7 @@ function showSlide(index) {
     const direction = nextIndex > state.selectedSlide ? 1 : -1;
     updateIndexIndicator(nextIndex); animateIndexedContent(() => showSlide(nextIndex), direction);
   });
-  byId('content-panel').innerHTML = `<div class="slide-document"><div class="slide-topline"><span class="slide-counter">第 ${page.number} 页 / 共 ${state.slidePages.length} 页</span><button type="button" class="slide-copy">复制本页</button></div><h1>${escapeHtml(page.title)}</h1>${renderSlideBlock('上屏文字', page.blocks['上屏文字'])}${renderSlideBlock('配图建议与图源', page.blocks['配图建议'])}${renderSlideBlock('专业答辩式讲稿', page.blocks['讲稿'], 'speaker-notes')}${renderSlideBlock('本页来源', page.blocks['来源'])}</div>`;
+  byId('content-panel').innerHTML = `<div class="slide-document"><div class="slide-topline"><span class="slide-counter">第 ${page.number} 页 / 共 ${state.slidePages.length} 页</span><button type="button" class="slide-copy">复制本页</button></div><h1>${escapeHtml(page.navigationTitle)}</h1><p class="slide-subtitle">${escapeHtml(page.title)}</p>${renderSlideBlock('上屏文字', page.blocks['上屏文字'])}${renderFigureBlock(page.blocks['配图建议'])}${renderSlideBlock('专业答辩式讲稿', page.blocks['讲稿'], 'speaker-notes')}${renderSlideBlock('参考来源', page.blocks['来源'])}</div>`;
   byId('content-panel').querySelector('.slide-copy').addEventListener('click', () => copyText(page.raw, '本页内容已复制。'));
   byId('content-panel').querySelectorAll('p').forEach(paragraph => { if (paragraph.textContent.includes('复用许可') || paragraph.textContent.includes('reuse_status')) paragraph.insertAdjacentHTML('afterbegin', '<span class="figure-warning">许可需核对</span> '); });
   byId('content-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -206,6 +211,46 @@ function currentMarkdown() {
   if (state.view === 'report') return state.report;
   if (state.view === 'slides') return state.slidePages[state.selectedSlide].raw;
   return `# 引用与图源\n\n${state.sources.map(source => `- ${source.kind}｜${source.label}：${source.url}`).join('\n')}\n`;
+}
+function artifactInfo(kind) {
+  const topic = (state.report.match(/^#\s+(.+)$/m) || [])[1] || state.topic || '调研主题';
+  const safeTopic = topic.replace(/[\\/:*?"<>|]/g, '-').trim();
+  return { content: kind === 'report' ? state.report : state.slides, title: `${safeTopic}-${kind === 'report' ? '调研报告' : 'PPT内容包'}` };
+}
+function completeArtifactHtml(kind) {
+  const artifact = artifactInfo(kind);
+  const body = kind === 'report'
+    ? `<div class="report-document">${renderMarkdown(state.report)}</div>`
+    : `<div class="slide-package">${state.slidePages.map(page => `<article class="slide-document"><div class="slide-topline"><span class="slide-counter">第 ${page.number} 页 / 共 ${state.slidePages.length} 页</span></div><h1>${escapeHtml(page.navigationTitle)}</h1><p class="slide-subtitle">${escapeHtml(page.title)}</p>${renderSlideBlock('上屏文字', page.blocks['上屏文字'])}${renderFigureBlock(page.blocks['配图建议'])}${renderSlideBlock('专业答辩式讲稿', page.blocks['讲稿'], 'speaker-notes')}${renderSlideBlock('参考来源', page.blocks['来源'])}</article>`).join('')}</div>`;
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(artifact.title)}</title>
+<style>
+@page{size:A4;margin:18mm 17mm}*{box-sizing:border-box}body{margin:0;color:#2f3041;background:#fff;font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif;line-height:1.8}.document{max-width:850px;margin:0 auto;padding:36px 42px}.report-document,.slide-document{max-width:none}.report-document h1,.slide-document h1{font-family:"SimSun","Songti SC",serif;font-size:26px;line-height:1.45;margin:34px 0 15px}.report-document h1:first-child{margin-top:0}.report-document h2,.slide-block h2{margin:27px 0 10px}.report-document p,.report-document li,.slide-block p,.slide-block li{font-size:14px;line-height:1.9}.report-document a,.slide-block a{color:#514397}.speaker-notes{margin-top:20px;padding:16px 18px;border-left:3px solid #a89ad2;background:#f5f3fa}.slide-topline{margin-bottom:8px}.slide-counter{font-size:11px;color:#6658b5}.slide-document{padding-bottom:22px;margin-bottom:30px;border-bottom:1px solid #e6e2e9;break-after:page}.slide-document:last-child{break-after:auto}.slide-subtitle{font-size:17px;font-weight:600;color:#565267}.slide-block{break-inside:avoid}@media(max-width:650px){.document{padding:24px 20px}}@media print{.document{padding:0}a{color:#2f3041;text-decoration:none}}
+</style></head><body><main class="document"><div class="notice">完整交付文件 · 共 ${kind === 'report' ? state.reportSections.length + ' 个报告章节' : state.slidePages.length + ' 页 PPT 内容'}。</div>${body}<div class="footer">调研交付台 · 完整交付文件</div></main></body></html>`;
+}
+function downloadHtml(kind) {
+  const artifact = artifactInfo(kind); const filename = `${artifact.title}.html`;
+  const url = URL.createObjectURL(new Blob([completeArtifactHtml(kind)], { type: 'text/html;charset=utf-8' }));
+  const link = document.createElement('a'); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000); byId('action-feedback').textContent = `已下载 ${filename}，可作为完整网页文件在浏览器直接打开。`;
+}
+function printArtifactAsPdf(kind) {
+  const artifact = artifactInfo(kind); const printWindow = window.open('', '_blank');
+  if (!printWindow) { byId('action-feedback').textContent = '浏览器阻止了打印窗口，请允许弹出窗口后重试。'; return; }
+  printWindow.opener = null; printWindow.document.open(); printWindow.document.write(completeArtifactHtml(kind)); printWindow.document.close();
+  printWindow.document.title = artifact.title;
+  setTimeout(() => { printWindow.focus(); printWindow.print(); }, 250);
+  byId('action-feedback').textContent = `已打开完整${kind === 'report' ? '调研报告' : 'PPT 内容包'}打印窗口；请选择“另存为 PDF”。`;
+}
+function downloadArtifact(kind, format) {
+  const artifact = artifactInfo(kind);
+  if (format === 'markdown' && state.production) {
+    requestPrivateDownload(kind === 'report' ? 'report' : 'ppt_content', `${artifact.title}.md`)
+      .catch(error => { byId('action-feedback').textContent = error.message; });
+  } else if (format === 'markdown') downloadText(artifact.content, `${artifact.title}.md`);
+  else if (format === 'html') downloadHtml(kind);
+  else printArtifactAsPdf(kind);
 }
 function currentFilename() {
   const prefix = state.production ? (state.topic || state.taskId) : '慢性植入神经接口';
@@ -305,16 +350,10 @@ window.addEventListener('resize', () => updateTabIndicator());
 byId('copy-current').addEventListener('click', () => copyText(currentMarkdown()));
 byId('download-trigger').addEventListener('click', () => setDownloadMenu(byId('download-options').hidden, true));
 byId('download-options').addEventListener('click', event => {
-  const option = event.target.closest('[data-format]');
+  const option = event.target.closest('[data-kind][data-format]');
   if (!option) return;
   setDownloadMenu(false);
-  if (state.production && option.dataset.format === 'markdown') {
-    requestPrivateDownload(state.view === 'slides' ? 'ppt_content' : state.view === 'sources' ? 'references' : 'report', currentFilename())
-      .catch(error => { byId('action-feedback').textContent = error.message; });
-  }
-  else if (option.dataset.format === 'markdown') downloadText(currentMarkdown(), currentFilename());
-  else if (option.dataset.format === 'html') downloadHtml();
-  else printCurrentAsPdf();
+  downloadArtifact(option.dataset.kind, option.dataset.format);
 });
 byId('download-options').addEventListener('keydown', event => {
   const items = Array.from(byId('download-options').querySelectorAll('[role="menuitem"]'));

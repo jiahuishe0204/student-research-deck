@@ -15,6 +15,7 @@ required = [
     "workflow_service.py",
     "server.py",
     "retrieval.py",
+    "research_pipeline.py",
     "web/index.html",
     "web/mvp.css",
     "web/styles.css",
@@ -26,6 +27,13 @@ required = [
     "migrations/002_production_foundation.sql",
     "migrations/003_delivery_outbox.sql",
     "migrations/004_delivery_control.sql",
+    "migrations/006_research_task_queue.sql",
+    "migrations/007_workflow_transitions.sql",
+    "migrations/008_preauth_daily_budget.sql",
+    "migrations/009_partial_task_status.sql",
+    "migrations/010_shared_model_usage_budget.sql",
+    "postgres_model_usage.py",
+    "tests/test_postgres_model_usage.py",
     "tencent_delivery.py",
     "delivery_outbox.py",
     "delivery_control.py",
@@ -37,9 +45,14 @@ required = [
     "delivery_repository.py",
     "otp_service.py",
     "delivery_scf_entrypoint.py",
+    "task_scf_entrypoint.py",
+    "tests/test_task_scf_entrypoint.py",
     "production_session.py",
     "private_delivery_api.py",
     "delivery_http_entrypoint.py",
+    "scf_queue.py",
+    "tests/test_scf_queue.py",
+    "tests/test_research_pipeline.py",
     "deploy/tencent/functions.template.json",
     "requirements-production.txt",
     "deploy/edgeone/edgeone.json",
@@ -64,7 +77,7 @@ assert routing["tiers"]["fast"]["intent_detection"]["model"] == "deepseek-v4-pro
 assert routing["tiers"]["fast"]["intent_detection"]["reasoning_effort"] == "low"
 assert routing["tiers"]["fast"]["research_planning"]["model"] == "deepseek-v4-pro"
 assert routing["tiers"]["deep"]["research_planning"]["model"] == "deepseek-v4-pro"
-assert routing["pricing_snapshot"]["deepseek-v4-pro"]["output"]["peak"] == 27.0
+assert routing["pricing_snapshot"]["deepseek-v4-pro"]["output"]["peak"] == 34.0
 server_source = (ROOT / "server.py").read_text()
 assert '"deepseek-flash"' not in server_source, "server should obtain model IDs from model-routing.json"
 assert '"deepseek-v4-pro"' not in server_source, "server should obtain model IDs from model-routing.json"
@@ -78,7 +91,12 @@ for removed_field in ['id="occasion"', 'id="duration"']:
 assert "追问一个问题" in home
 app = (ROOT / "web/app.js").read_text()
 assert "/api/intent" in app
-assert "/api/plan" in app
+production_submit = app.index("if(productionMode){")
+production_login_guard = app.index("if(!sessionStorage.getItem(csrfKey))", production_submit)
+production_task_create = app.index("productionRequest('/tasks'", production_submit)
+assert production_submit < production_login_guard < production_task_create, \
+    "the production path must authenticate before creating a durable cloud task"
+assert "request('/api/tasks'" in app, "local research runs must remain available through the local-only task store"
 assert "/api/search" in app
 assert "tier:currentTier" in app, "frontend must preserve the selected tier across later stages"
 assert "sessionStorage" in app, "task credentials should survive refresh only within the current tab"

@@ -2,6 +2,7 @@
 """Local MVP server for the research delivery prototype."""
 
 import argparse
+import hashlib
 import json
 import os
 import traceback
@@ -41,6 +42,33 @@ from workflow_service import WorkflowService
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 MAX_BODY_BYTES = 512 * 1024
+
+
+def runtime_fingerprint(root=ROOT):
+    """Identify the product code and prompt/config files loaded by this process."""
+    paths = [
+        "server.py", "workflow_service.py", "workflow_validation.py", "patsnap_mcp.py",
+        "config/prompt-stages.json", "config/model-routing.json",
+    ]
+    registry_path = root / "config" / "prompt-stages.json"
+    if registry_path.is_file():
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        if registry.get("global_prompt"):
+            paths.append(registry["global_prompt"])
+        paths.extend(
+            entry["prompt"] for entry in registry.get("stages", [])
+            if isinstance(entry, dict) and entry.get("prompt")
+        )
+    digest = hashlib.sha256()
+    for relative in sorted(set(paths)):
+        path = root / relative
+        if not path.is_file():
+            continue
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
 
 
 class RateLimiter:
@@ -170,7 +198,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 {"ok": True, "deepseek_configured": bool(self.server.api_key),
                  "patent_provider": getattr(patent_client, "provider_name", None),
                  "patsnap_mcp_configured": isinstance(patent_client, PatsnapMCPClient),
-                 "epo_ops_configured": isinstance(patent_client, EPOClient)},
+                 "epo_ops_configured": isinstance(patent_client, EPOClient),
+                 "runtime_version": self.server.runtime_version,
+                 "started_at": self.server.started_at},
             )
             return
         parts = path.strip("/").split("/")
@@ -220,6 +250,23 @@ class AppHandler(SimpleHTTPRequestHandler):
                     raise ValueError("任务主题或版本无效")
                 self.send_json(HTTPStatus.CREATED, {"data": self.server.task_store.create_task(topic, tier)})
                 return
+            # Anonymous P1 must remain a transient browser draft and is only
+            # enabled when the shared PostgreSQL daily budget is connected.
+            if path == "/api/intent":
+                if not self.server.rate_limiter.allow("intent:" + self.client_address[0]):
+                    self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "请求过于频繁，请稍后再试"})
+                    return
+                if not getattr(self.server.workflow, "daily_budget_ledger", None):
+                    self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "登录前每日预算尚未接入，已阻止意图识别调用"})
+                    return
+                topic = str(body.get("topic", "")).strip()
+                tier = body.get("tier", "fast")
+                if not 2 <= len(topic) <= 500 or tier not in ("fast", "deep"):
+                    raise ValueError("任务主题或版本无效")
+                self.server.workflow.set_task_context("anonymous-intent")
+                output, usage = self.server.workflow.create_intent(topic, tier)
+                self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
+                return
             if len(parts) == 4 and parts[:2] == ["api", "tasks"]:
                 task_id, action = parts[2], parts[3]
                 self.require_task_access(task_id)
@@ -243,10 +290,6 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.server.workflow.set_task_context(task_id)
             if not self.server.rate_limiter.allow("work:" + self.client_address[0] + ":" + task_id):
                 self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "任务调用过于频繁，请稍后再试"})
-                return
-            if path == "/api/intent":
-                output, usage = self.server.workflow.create_intent(body.get("topic"), body.get("tier", "fast"))
-                self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/plan":
                 topic, tier, clarification, intent = resolve_plan_request(self.server.task_store.get_task(task_id), body)
@@ -447,6 +490,8 @@ def create_patent_client(root=ROOT, environ=None):
 def create_server(host="127.0.0.1", port=4180, api_key=None):
     load_dotenv(ROOT.parent / ".env")
     server = ThreadingHTTPServer((host, port), AppHandler)
+    server.runtime_version = runtime_fingerprint()
+    server.started_at = int(time.time())
     server.task_store = TaskStore(ROOT / "data" / "tasks.sqlite3")
     server.rate_limiter = RateLimiter()
     server.model_router = ModelRouter.from_file()

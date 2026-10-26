@@ -12,8 +12,9 @@
   <link rel="stylesheet" href="./delivery-mobile.css?v=3" />
   <link rel="stylesheet" href="./delivery-motion.css?v=9" />
   <link rel="stylesheet" href="./delivery-result.css?v=6" />
+  <link rel="stylesheet" href="./delivery-title-hierarchy.css?v=1" />
   <script src="./sample-delivery/data.js?v=9" defer></script>
-  <script src="./delivery.js?v=14" defer></script>
+  <script src="./delivery.js?v=17" defer></script>
 </head>
 <body class="delivery-page">
   <header class="site-header delivery-site-header">
@@ -38,9 +39,12 @@
           <div class="download-menu">
             <button type="button" id="download-trigger" aria-haspopup="menu" aria-expanded="false">下载</button>
             <div id="download-options" class="download-options" role="menu" hidden>
-              <button type="button" role="menuitem" data-format="markdown"><strong>Markdown</strong><span>继续编辑，需 Markdown 软件</span></button>
-              <button type="button" role="menuitem" data-format="html"><strong>HTML</strong><span>Windows 浏览器直接打开</span></button>
-              <button type="button" role="menuitem" data-format="pdf"><strong>PDF</strong><span>打开打印窗口后保存</span></button>
+              <button type="button" role="menuitem" data-kind="report" data-format="markdown"><strong>完整报告 · Markdown</strong><span>导出全部报告正文</span></button>
+              <button type="button" role="menuitem" data-kind="report" data-format="html"><strong>完整报告 · HTML</strong><span>完整网页文件，浏览器直接打开</span></button>
+              <button type="button" role="menuitem" data-kind="report" data-format="pdf"><strong>完整报告 · PDF</strong><span>打印窗口中保存</span></button>
+              <button type="button" role="menuitem" data-kind="slides" data-format="markdown"><strong>完整 PPT 内容包 · Markdown</strong><span>全部页面与讲稿</span></button>
+              <button type="button" role="menuitem" data-kind="slides" data-format="html"><strong>完整 PPT 内容包 · HTML</strong><span>逐页排版，浏览器直接打开</span></button>
+              <button type="button" role="menuitem" data-kind="slides" data-format="pdf"><strong>完整 PPT 内容包 · PDF</strong><span>打印窗口后保存为 PDF</span></button>
             </div>
           </div>
         </div>

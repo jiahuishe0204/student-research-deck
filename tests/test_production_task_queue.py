@@ -125,6 +125,19 @@ class ProductionTaskQueueTests(unittest.TestCase):
         self.assertIn("T", delivery["artifacts"][0]["expires_at"])
         self.assertIn("t.user_id=%s", connection.cursor_value.calls[0][0])
 
+    def test_delivery_accepts_partial_completion(self):
+        expires = datetime(2026, 10, 31, tzinfo=timezone.utc)
+        connection = Connection([
+            ("Topic", "fast", {"data": {"final_report": {"markdown": "partial ok"}}}),
+            ("a1", "ppt_content", "application/json", expires),
+            ("a2", "references", "application/json", expires),
+            ("a3", "report", "text/markdown; charset=utf-8", expires),
+        ])
+        delivery = PostgresTaskQueue(connection).task_delivery(user_id="u1", task_id="TASK-1")
+
+        self.assertEqual(delivery["final_delivery"]["final_report"]["markdown"], "partial ok")
+        self.assertIn("t.status IN ('completed','partial')", connection.cursor_value.calls[0][0])
+
 
 if __name__ == "__main__":
     unittest.main()

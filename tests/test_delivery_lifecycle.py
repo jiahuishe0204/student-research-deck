@@ -39,6 +39,20 @@ class LifecycleTests(unittest.TestCase):
             self.life.publish(task_id="TASK_12345678",artifact_id="ART_12345678",kind="report",extension="pdf",body=b"pdf",content_type="application/pdf")
         self.assertFalse(any(call[0]=="publish" for call in self.repo.calls))
 
+    def test_partial_delivery_status_is_forwarded_for_atomic_publish(self):
+        self.life.publish(task_id="TASK_12345678",artifact_id="ART_12345678",kind="report",
+                          extension="pdf",body=b"pdf",content_type="application/pdf",
+                          completion_status="partial")
+        publish=self.repo.calls[-1][1]
+        self.assertEqual(publish["completion_status"],"partial")
+
+    def test_invalid_completion_status_is_rejected_before_upload(self):
+        with self.assertRaisesRegex(ValueError,"交付状态"):
+            self.life.publish(task_id="TASK_12345678",artifact_id="ART_12345678",kind="report",
+                              extension="pdf",body=b"pdf",content_type="application/pdf",
+                              completion_status="failed")
+        self.assertEqual(self.store.calls,[])
+
     def test_expiry_disables_before_remote_delete(self):
         self.life.expire("ART_12345678")
         self.assertEqual(self.repo.calls[0][0],"disable")

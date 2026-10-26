@@ -87,7 +87,7 @@ class PostgresTaskQueue:
         cursor.execute(
             """SELECT t.topic,t.tier,j.result
                  FROM research_tasks t JOIN research_task_jobs j ON j.task_id=t.task_id
-                WHERE t.task_id=%s AND t.user_id=%s AND t.status='completed'
+                WHERE t.task_id=%s AND t.user_id=%s AND t.status IN ('completed','partial')
                   AND j.job_key='P9' AND j.status='succeeded'""",
             (str(task_id), str(user_id)),
         )

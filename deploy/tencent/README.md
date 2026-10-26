@@ -30,7 +30,7 @@
 
 ## 尚需真实云端完成
 
-1. 按顺序在 PostgreSQL 执行 `migrations/006_research_task_queue.sql` 和 `migrations/007_workflow_transitions.sql`，并保存迁移证据。
+1. 核对 PostgreSQL 当前 schema 与所有迁移证据。队列基线为 `006_research_task_queue.sql`、`007_workflow_transitions.sql`；共享登录前费用账本为 `008_preauth_daily_budget.sql`，部分交付状态为 `009_partial_task_status.sql`，共享模型费用账本为 `010_shared_model_usage_budget.sql`。部署前确认数据库中实际对象与代码相符；任何尚未应用的迁移须先备份、评审并单独批准，代码发布不会代替迁移。
 2. 确认 SCF/COS 地域和已备案或可验证的发信域名。
 3. 创建私有桶、生命周期规则、最小权限角色和三个 SES 模板。
 4. 通过服务端环境注入配置，执行快速版、深入版各一次端到端冒烟。
@@ -43,6 +43,10 @@ P9 不直接把任务标记为完成。Worker 先以确定性对象键上传 `re
 交付阅读页支持 `delivery.html?task=TASK-...`。该模式只调用同源 `/tasks/{task_id}/delivery` 和 `/delivery/download`，携带 HttpOnly 会话 Cookie；下载请求还必须携带邮箱验证时返回、仅保存在当前标签页的 CSRF Token。无 `task` 参数时仍显示仓库内的验收样本。部署时必须由 EdgeOne 将这两个同源路径转发到独立 SCF 函数 URL，不能把上游地址或网关密钥注入浏览器脚本。
 
 首页通过同源 `/api/health` 自动探测生产网关。只有网关明确返回 `runtime=edgeone-gateway` 且健康时，页面才显示邮箱验证码登录并改用 `/tasks`、`/tasks/{task_id}/progress` 和 `/tasks/{task_id}/continue`；未配置、不可达或本地开发时继续使用原有演示流程。生产部署必须通过 EdgeOne Cloud Functions 将 `/auth/*`、`/tasks*` 与 `/delivery/download` 分别转发到独立 SCF 函数 URL，并保留 Cookie 和 `X-CSRF-Token` 请求头。旧 API 网关触发器已经退出服务，不作为新部署方案。
+
+### 当前上线阻断项
+
+产品决策 `config/product-decisions.json` 规定邮箱验证发生在 P1 题目理解确认之后，但当前生产首页仍在创建云端任务、触发 P1 之前要求邮箱验证码；本地新增的登录前单次/每日费用账本也尚未接入生产 HTTP 入口。另有 `pre_auth_ip_rate_limit` 尚待确认。故在实现同源匿名 P1 入口、补齐分布式每 IP 限频并验证费用账本前，不得宣称该认证顺序已实现，也不得以当前生产流程作为最终上线验收。
 
 ## 告警、恢复与回滚
 

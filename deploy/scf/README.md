@@ -72,3 +72,12 @@ The offline package and entry points are implemented. Production deployment is
 still gated on user authorization, PostgreSQL migration evidence, SES domain
 and template approval, a private COS bucket, and the controlled cloud smoke
 tests listed in `deploy/tencent/acceptance-evidence-template.md`.
+
+The production timer worker is `task_scf_entrypoint.main_handler`. It now builds
+the workflow with shared PostgreSQL pre-auth budget and model-usage ledgers;
+verify that migrations `008_preauth_daily_budget.sql` and
+`010_shared_model_usage_budget.sql` are present before deploying this code.
+Migration `009_partial_task_status.sql` is also required before enabling
+partial-delivery status. Code deployment does not apply database migrations.
+The project notes record migration 008 as previously applied to the internal
+Neon database, but live schema state must be re-verified before release.

@@ -1,4 +1,5 @@
 import unittest
+from http import HTTPStatus
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,6 +9,43 @@ import retrieval
 
 
 class ValidationTests(unittest.TestCase):
+    def test_runtime_fingerprint_changes_when_validator_changes(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config").mkdir()
+            (root / "prompts").mkdir()
+            (root / "config" / "prompt-stages.json").write_text('{"global_prompt":"prompts/system.md","stages":[]}', encoding="utf-8")
+            (root / "prompts" / "system.md").write_text("system", encoding="utf-8")
+            for name in ("server.py", "workflow_service.py", "workflow_validation.py", "patsnap_mcp.py"):
+                (root / name).write_text(name, encoding="utf-8")
+            before = server.runtime_fingerprint(root)
+            (root / "workflow_validation.py").write_text("changed", encoding="utf-8")
+            self.assertNotEqual(before, server.runtime_fingerprint(root))
+
+    def test_explicit_patsnap_mcp_provider_uses_only_mcp_key(self):
+        client = server.create_patent_client(environ={
+            "PATENT_PROVIDER": "patsnap_mcp_cn",
+            "PATSNAP_MCP_API_KEY": "mcp-secret",
+            "PATSNAP_API_KEY": "literature-secret",
+        })
+        self.assertIsInstance(client, server.PatsnapMCPClient)
+        self.assertEqual(client.api_key, "mcp-secret")
+
+    def test_explicit_patsnap_mcp_provider_fails_closed_without_mcp_key(self):
+        with self.assertRaisesRegex(RuntimeError, "PATSNAP_MCP_API_KEY"):
+            server.create_patent_client(environ={
+                "PATENT_PROVIDER": "patsnap_mcp_cn",
+                "PATSNAP_API_KEY": "literature-secret",
+            })
+
+    def test_epo_remains_an_explicit_rollback_provider(self):
+        fallback = object()
+        with patch.object(server.EPOClient, "from_environment", return_value=fallback):
+            client = server.create_patent_client(environ={"PATENT_PROVIDER": "epo_ops"})
+        self.assertIs(client, fallback)
+
     def test_delivery_endpoint_checks_task_access_before_reading(self):
         handler = object.__new__(server.AppHandler)
         handler.path = "/api/tasks/TASK-test/delivery"
@@ -169,6 +207,56 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.validate_intent({"unexpected": True})
 
+    def test_preauth_intent_fails_closed_without_shared_daily_budget(self):
+        handler = object.__new__(server.AppHandler)
+        handler.path = "/api/intent"
+        handler.client_address = ("127.0.0.1", 1000)
+        task_writes = []
+        model_calls = []
+        handler.server = SimpleNamespace(
+            api_key="configured",
+            rate_limiter=SimpleNamespace(allow=lambda key: True),
+            workflow=SimpleNamespace(
+                daily_budget_ledger=None,
+                set_task_context=lambda task_id: model_calls.append(("context", task_id)),
+                create_intent=lambda *args: model_calls.append(("intent", args)),
+            ),
+            task_store=SimpleNamespace(create_task=lambda *args: task_writes.append(args)),
+        )
+        handler.read_json = lambda: {"topic": "3D生物打印类器官心脏瓣膜", "tier": "fast"}
+        replies = []
+        handler.send_json = lambda status, value: replies.append((status, value))
+        handler.do_POST()
+        self.assertEqual(replies[0][0], 503)
+        self.assertIn("每日预算尚未接入", replies[0][1]["error"])
+        self.assertEqual(task_writes, [])
+        self.assertEqual(model_calls, [])
+
+    def test_preauth_intent_with_budget_never_creates_persistent_task(self):
+        handler = object.__new__(server.AppHandler)
+        handler.path = "/api/intent"
+        handler.client_address = ("127.0.0.1", 1000)
+        task_writes = []
+        calls = []
+        output = {"normalized_topic": "主题"}
+        handler.server = SimpleNamespace(
+            api_key="configured",
+            rate_limiter=SimpleNamespace(allow=lambda key: True),
+            workflow=SimpleNamespace(
+                daily_budget_ledger=object(),
+                set_task_context=lambda task_id: calls.append(("context", task_id)),
+                create_intent=lambda topic, tier: (calls.append(("intent", topic, tier)) or output, {"total_tokens": 3}),
+            ),
+            task_store=SimpleNamespace(create_task=lambda *args: task_writes.append(args)),
+        )
+        handler.read_json = lambda: {"topic": "主题", "tier": "fast"}
+        replies = []
+        handler.send_json = lambda status, value: replies.append((status, value))
+        handler.do_POST()
+        self.assertEqual(replies[0], (HTTPStatus.OK, {"data": output, "usage": {"total_tokens": 3}}))
+        self.assertEqual(calls, [("context", "anonymous-intent"), ("intent", "主题", "fast")])
+        self.assertEqual(task_writes, [])
+
     def test_plan_question_count(self):
         value = {
             "research_scope": "scope",
@@ -268,12 +356,12 @@ class ValidationTests(unittest.TestCase):
             server.validate_report(value, ["EV-1"])
 
     def test_ppt_rejects_unknown_figure(self):
-        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"purpose","on_slide_text":[],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[{"figure_id":"FIG-2","source_id":"SRC-1","locator":"figure 1","intended_use":"show","reuse_status":"unknown"}],"source_citations":[]}]}
+        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","navigation_title":"Title","purpose":"purpose","on_slide_text":[],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[{"figure_id":"FIG-2","source_id":"SRC-1","locator":"figure 1","intended_use":"show","reuse_status":"unknown"}],"source_citations":[]}]}
         with self.assertRaises(ValueError):
             server.validate_ppt(value, ["EV-1"], ["FIG-1"])
 
     def test_ppt_rejects_overlong_slide_text(self):
-        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"purpose","on_slide_text":["字" * 141],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[],"source_citations":[]}]}
+        value = {"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","navigation_title":"Title","purpose":"purpose","on_slide_text":["字" * 141],"visual_suggestion":"none","speaker_notes":"notes","evidence_ids":["EV-1"],"figure_refs":[],"source_citations":[]}]}
         with self.assertRaisesRegex(Exception, "单条上屏文字"):
             server.validate_ppt(value, ["EV-1"], [])
 
@@ -294,18 +382,18 @@ class ValidationTests(unittest.TestCase):
             server.validate_verification(value, ["CL-1"], ["EV-1"], claims)
 
     def test_final_change_log_must_apply_verification_actions(self):
-        value = {"delivery_version":"1.0","evidence_version":"1.0","final_report":{"title":"title","markdown":"body","used_evidence_ids":["EV-1"]},"final_ppt":{"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"","on_slide_text":[],"visual_suggestion":"","speaker_notes":"","evidence_ids":["EV-1"],"figure_refs":[],"source_citations":[]}]},"verification_note":"checked","open_issues":[],"source_ids":["SRC-1"],"evidence_ids":["EV-1"],"change_log":[{"claim_id":"CL-1","action":"kept","reason":"wrong"}]}
+        value = {"delivery_version":"1.0","evidence_version":"1.0","final_report":{"title":"title","markdown":"body","used_evidence_ids":["EV-1"]},"final_ppt":{"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","navigation_title":"Title","purpose":"","on_slide_text":[],"visual_suggestion":"","speaker_notes":"","evidence_ids":["EV-1"],"figure_refs":[],"source_citations":[]}]},"verification_note":"checked","open_issues":[],"source_ids":["SRC-1"],"evidence_ids":["EV-1"],"change_log":[{"claim_id":"CL-1","action":"kept","reason":"wrong"}]}
         verification = {"results": [{"claim_id": "CL-1", "action": "remove"}]}
         with self.assertRaisesRegex(ValueError, "未落实"):
             server.validate_final(value, ["CL-1"], ["SRC-1"], ["EV-1"], verification)
 
     def test_final_rejects_broken_sentence_after_deterministic_edit(self):
-        value = {"delivery_version":"1.0","evidence_version":"1.0","final_report":{"title":"title","markdown":"疗效改善，但。","used_evidence_ids":["EV-1"]},"final_ppt":{"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"","on_slide_text":[],"visual_suggestion":"","speaker_notes":"","evidence_ids":["EV-1"],"figure_refs":[],"source_citations":[]}]},"verification_note":"checked","open_issues":[],"source_ids":["SRC-1"],"evidence_ids":["EV-1"],"change_log":[]}
+        value = {"delivery_version":"1.0","evidence_version":"1.0","final_report":{"title":"title","markdown":"疗效改善，但。","used_evidence_ids":["EV-1"]},"final_ppt":{"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","navigation_title":"Title","purpose":"","on_slide_text":[],"visual_suggestion":"","speaker_notes":"","evidence_ids":["EV-1"],"figure_refs":[],"source_citations":[]}]},"verification_note":"checked","open_issues":[],"source_ids":["SRC-1"],"evidence_ids":["EV-1"],"change_log":[]}
         with self.assertRaisesRegex(ValueError, "断裂标点"):
             server.validate_final(value, [], ["SRC-1"], ["EV-1"])
 
     def test_final_rejects_internal_audit_labels_in_customer_report(self):
-        value = {"delivery_version":"1.0","evidence_version":"1.0","final_report":{"title":"title","markdown":"结果见 evidence_contexts（未核实）","used_evidence_ids":["EV-1"]},"final_ppt":{"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","purpose":"","on_slide_text":[],"visual_suggestion":"","speaker_notes":"","evidence_ids":["EV-1"],"figure_refs":[],"source_citations":[]}]},"verification_note":"checked","open_issues":[],"source_ids":["SRC-1"],"evidence_ids":["EV-1"],"change_log":[]}
+        value = {"delivery_version":"1.0","evidence_version":"1.0","final_report":{"title":"title","markdown":"结果见 evidence_contexts（未核实）","used_evidence_ids":["EV-1"]},"final_ppt":{"deck_title":"deck","storyline":"story","pages":[{"page_id":"SL-1","title":"title","navigation_title":"Title","purpose":"","on_slide_text":[],"visual_suggestion":"","speaker_notes":"","evidence_ids":["EV-1"],"figure_refs":[],"source_citations":[]}]},"verification_note":"checked","open_issues":[],"source_ids":["SRC-1"],"evidence_ids":["EV-1"],"change_log":[]}
         with self.assertRaisesRegex(ValueError, "内部审计字段"):
             server.validate_final(value, [], ["SRC-1"], ["EV-1"])
 
