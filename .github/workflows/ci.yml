@@ -28,3 +28,26 @@ jobs:
         run: python tests/validate_product_decisions.py
       - name: Check Python syntax
         run: python -m compileall -q .
+
+  scf-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Linux SCF dependencies
+        run: python -m pip install -r requirements-scf.txt --target "$RUNNER_TEMP/scf-deps"
+      - name: Build current SCF deployment candidate
+        run: python scripts/build_scf_bundle.py --deps-dir "$RUNNER_TEMP/scf-deps" --output "$RUNNER_TEMP/student-research-deck-scf-candidate.zip"
+      - name: Import smoke test from unpacked candidate
+        run: |
+          mkdir -p "$RUNNER_TEMP/scf-unpacked"
+          unzip -q "$RUNNER_TEMP/student-research-deck-scf-candidate.zip" -d "$RUNNER_TEMP/scf-unpacked"
+          PYTHONPATH="$RUNNER_TEMP/scf-unpacked" python -c "import intent_http_entrypoint, delivery_http_entrypoint, task_scf_entrypoint, delivery_scf_entrypoint"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scf-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/student-research-deck-scf-candidate.zip
+          retention-days: 7

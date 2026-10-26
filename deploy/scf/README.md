@@ -68,6 +68,15 @@ Install the contents of `requirements-scf.txt` into the deployment package.
 The package must include the project Python modules, `config/`, `prompts/`, and
 the contract files used by `WorkflowService.from_project`.
 
+The checked-in CI workflow builds a Linux/Python 3.13 candidate ZIP from the
+current Git commit, installs `requirements-scf.txt` into that package, and
+smoke-imports the unpacked entry points. Its short-lived artifact is a
+deployment candidate, not an automatic release. Inspect `bundle-manifest.json`
+and verify its commit matches the approved PR head before manual SCF upload.
+The older ignored ZIP in this checkout predates the anonymous P1 modules and
+must not be uploaded as a substitute. Local task databases and generated ZIPs
+are not included in the candidate source selection.
+
 ## Current boundary
 
 The offline package and entry points are implemented. Production deployment is
