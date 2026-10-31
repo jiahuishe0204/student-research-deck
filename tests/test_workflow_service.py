@@ -200,7 +200,7 @@ class WorkflowServiceTests(unittest.TestCase):
         evidence = [{"evidence_id": "EV::SRC-1::001"}]
         service.create_report({}, {}, evidence, "fast")
         service.create_report({}, {}, evidence, "deep")
-        self.assertEqual(limits, [5000, 10000])
+        self.assertEqual(limits, [10000, 10000])
 
     def test_full_text_evidence_has_room_for_complete_captions(self):
         service = WorkflowService("", FakeRouter(), "system", {"P4": "evidence"})
@@ -790,6 +790,34 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertIn("多个免疫功能亚群", markdown)
         self.assertIn("未逐项明确", markdown)
 
+    def test_final_assembly_handles_duplicate_unverified_report_claims_idempotently(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        original = "现有证据中慢性在体数据有限，不能直接等同于长期植入性能。"
+        claims = [{
+            "claim_id": claim_id, "location_type": "report_section", "section_or_page_id": "局限与后续研究",
+            "original_text": original, "atomic_claim": "不能直接等同于长期植入性能。",
+        } for claim_id in ("CL-1", "CL-2")]
+        verification = {"results": [{
+            "claim_id": claim_id, "support_status": "cannot_determine", "action": "mark_unverified",
+            "revised_claim": None, "valid_evidence_ids": [], "explanation": "缺少可追溯证据",
+        } for claim_id in ("CL-1", "CL-2")]}
+        report = {"report_title": "t", "report_markdown": "# 局限与后续研究\n\n" + original,
+                  "used_evidence_ids": [], "open_issues": []}
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "P1", "title": "研究主题", "purpose": "说明主题", "on_slide_text": ["研究背景"],
+            "visual_suggestion": "", "speaker_notes": "", "evidence_ids": [],
+            "figure_refs": [], "source_citations": [],
+        }]}
+
+        output, _ = service.assemble_final_deterministic(
+            verification, report, ppt, claims, [], [], "1"
+        )
+
+        self.assertNotIn(original, output["final_report"]["markdown"])
+        self.assertEqual(len(output["open_issues"]), 1)
+        self.assertTrue(output["open_issues"][0].startswith("尚待核实："))
+        self.assertEqual({item["claim_id"] for item in output["change_log"]}, {"CL-1", "CL-2"})
+
     def test_final_assembly_routes_exact_open_issue_claim_to_open_issues(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})
         claim = {
@@ -955,15 +983,15 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(len(output["results"]), 9)
         self.assertEqual(metadata["batches"], 2)
 
-    def test_high_risk_verification_reserves_complete_output_budget(self):
+    def test_high_risk_verification_doubles_output_budget_after_reasoning_exhausted_prior_limit(self):
         claim = {
             "claim_id": "CL-1", "atomic_claim": "候选药物显示抗肿瘤活性",
             "cited_evidence_ids": ["EV-1"], "risk_level": "high", "claim_type": "efficacy",
         }
         evidence = {"EV-1": {"evidence_id": "EV-1", "source_id": "SRC-1"}}
 
-        self.assertEqual(WorkflowService._verification_output_limit([claim], evidence, upgrade=True), 3200)
-        self.assertLessEqual(WorkflowService._verification_output_limit([claim], evidence, upgrade=True), 4800)
+        self.assertEqual(WorkflowService._verification_output_limit([claim], evidence, upgrade=True), 6400)
+        self.assertLessEqual(WorkflowService._verification_output_limit([claim], evidence, upgrade=True), 9600)
 
     def test_verify_claims_merges_safe_near_duplicates_before_model_call(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})

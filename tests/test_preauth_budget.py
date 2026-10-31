@@ -3,7 +3,7 @@ from decimal import Decimal
 from pathlib import Path
 import unittest
 
-from preauth_budget import DailyBudgetExceeded, PostgresPreAuthDailyBudget
+from preauth_budget import DailyBudgetExceeded, LocalPreAuthDailyBudget, PostgresPreAuthDailyBudget
 
 
 class Cursor:
@@ -35,6 +35,35 @@ class Connection:
 
 
 class PreAuthBudgetTests(unittest.TestCase):
+    def test_local_budget_reserves_and_settles_persistently(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            budget = LocalPreAuthDailyBudget(Path(directory) / "budget.sqlite3", daily_limit_cny=1)
+            first = "00000000-0000-0000-0000-000000000011"
+            second = "00000000-0000-0000-0000-000000000012"
+            reserved = budget.reserve_attempt(first, 1, 0.50)
+            self.assertEqual(reserved["reserved_cny"], Decimal("0.500000"))
+            with self.assertRaisesRegex(DailyBudgetExceeded, "每日费用上限"):
+                budget.reserve_attempt(second, 1, 0.51)
+            budget.settle_attempt(first, 1, 0.20)
+            self.assertEqual(
+                LocalPreAuthDailyBudget(Path(directory) / "budget.sqlite3", daily_limit_cny=1)
+                .reserve_attempt(second, 1, 0.80)["reserved_cny"],
+                Decimal("0.800000"),
+            )
+
+    def test_local_budget_keeps_unknown_cost_and_blocks_replay(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            budget = LocalPreAuthDailyBudget(Path(directory) / "budget.sqlite3", daily_limit_cny=1)
+            request_id = "00000000-0000-0000-0000-000000000013"
+            budget.reserve_attempt(request_id, 1, 0.50)
+            budget.settle_attempt(request_id, 1, None)
+            with self.assertRaisesRegex(DailyBudgetExceeded, "费用状态未知"):
+                budget.reserve_attempt(request_id, 1, 0.10)
+
     def test_migration_defines_daily_total_and_idempotent_attempt_reservations(self):
         migration = (Path(__file__).resolve().parents[1] / "migrations" / "008_preauth_daily_budget.sql").read_text(encoding="utf-8")
         self.assertIn("preauth_daily_budgets", migration)

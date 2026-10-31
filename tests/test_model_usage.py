@@ -28,6 +28,26 @@ class ModelUsageLedgerTests(unittest.TestCase):
             self.assertEqual(summary["reasoning_tokens"], 30)
             self.assertAlmostEqual(ledger.peak_cost_cny("T1"), (40 * 0.4 + 60 * 11.5 + 50 * 34.0) / 1_000_000)
 
+    def test_detailed_summary_groups_actual_usage_and_keeps_unknown_failures_separate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = ModelUsageLedger(Path(directory) / "usage.sqlite3")
+            ledger.record("T2", "P5", "deepseek-flash", "none", 1, "accepted", {
+                "prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200,
+                "completion_tokens_details": {"reasoning_tokens": 30},
+            })
+            ledger.record("T2", "P8", "deepseek-v4-pro", "low", 1, "truncated", {
+                "prompt_tokens": 500, "completion_tokens": 3200, "total_tokens": 3700,
+                "completion_tokens_details": {"reasoning_tokens": 3200},
+            }, {"max_tokens": 3200})
+            ledger.record("T2", "P8", "deepseek-v4-pro", "low", 2, "transport_error", {})
+            result = ledger.detailed_summary("T2")
+            self.assertEqual(result["stages"]["P5"]["total_tokens"], 200)
+            self.assertEqual(result["stages"]["P5"]["reasoning_tokens"], 30)
+            self.assertEqual(result["stages"]["P8"]["reported_calls"], 1)
+            self.assertEqual(result["stages"]["P8"]["truncated_calls"], 1)
+            self.assertEqual(result["stages"]["P8"]["unknown_usage_calls"], 1)
+            self.assertEqual(result["total"]["total_tokens"], 3900)
+
     def test_pro_guard_stops_before_next_attempt(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = ModelUsageLedger(Path(directory) / "usage.sqlite3")

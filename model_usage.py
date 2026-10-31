@@ -65,6 +65,28 @@ class ModelUsageLedger:
             rows = connection.execute("SELECT model,COUNT(*) calls,SUM(CASE WHEN total_tokens>0 THEN 1 ELSE 0 END) billable_calls,SUM(completion_tokens) output_tokens,SUM(total_tokens) total_tokens,SUM(reasoning_tokens) reasoning_tokens FROM model_usage WHERE task_id=? GROUP BY model", (task_id,)).fetchall()
         return {row["model"]: dict(row) for row in rows}
 
+    def detailed_summary(self, task_id):
+        """Return API-reported token usage by stage, preserving unknown attempts."""
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT stage,COUNT(*) calls,
+                          SUM(prompt_tokens) prompt_tokens,
+                          SUM(completion_tokens) completion_tokens,
+                          SUM(total_tokens) total_tokens,
+                          SUM(reasoning_tokens) reasoning_tokens,
+                          SUM(CASE WHEN total_tokens>0 THEN 1 ELSE 0 END) reported_calls,
+                          SUM(CASE WHEN status='truncated' THEN 1 ELSE 0 END) truncated_calls,
+                          SUM(CASE WHEN status='transport_error' AND total_tokens=0 THEN 1 ELSE 0 END) unknown_usage_calls
+                     FROM model_usage WHERE task_id=? GROUP BY stage""",
+                (task_id,),
+            ).fetchall()
+        stages = {row["stage"]: dict(row) for row in rows}
+        totals = {
+            key: sum(int(item.get(key) or 0) for item in stages.values())
+            for key in ("calls", "prompt_tokens", "completion_tokens", "total_tokens", "reasoning_tokens", "reported_calls", "truncated_calls", "unknown_usage_calls")
+        }
+        return {"stages": stages, "total": totals}
+
     @staticmethod
     def _is_peak(instant):
         beijing = instant.astimezone(timezone(timedelta(hours=8)))

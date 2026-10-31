@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_UP
+from pathlib import Path
+import sqlite3
 import uuid
+from zoneinfo import ZoneInfo
 
 from model_usage import ModelBudgetExceeded
 
@@ -164,4 +168,151 @@ class PostgresPreAuthDailyBudget:
             raise
 
 
-__all__ = ["DailyBudgetExceeded", "PostgresPreAuthDailyBudget"]
+class LocalPreAuthDailyBudget:
+    """Persistent per-machine budget for the loopback-only local demo server.
+
+    This is deliberately not a substitute for the shared PostgreSQL ledger used
+    by production SCF instances. It only protects a local development server.
+    """
+
+    TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+    def __init__(self, db_path, daily_limit_cny=1.0):
+        self.db_path = Path(db_path)
+        self.daily_limit_cny = _money(daily_limit_cny)
+        if self.daily_limit_cny <= 0:
+            raise ValueError("每日总预算必须大于零")
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as connection:
+            connection.executescript("""
+                CREATE TABLE IF NOT EXISTS local_preauth_daily_budgets (
+                    budget_day TEXT PRIMARY KEY,
+                    limit_cny TEXT NOT NULL,
+                    reserved_cny TEXT NOT NULL DEFAULT '0'
+                );
+                CREATE TABLE IF NOT EXISTS local_preauth_budget_reservations (
+                    request_id TEXT NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    budget_day TEXT NOT NULL,
+                    reserved_cny TEXT NOT NULL,
+                    settled_cny TEXT,
+                    state TEXT NOT NULL CHECK (state IN ('reserved','settled','unknown')),
+                    PRIMARY KEY (request_id, attempt)
+                );
+            """)
+
+    def _connect(self):
+        connection = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+        connection.execute("PRAGMA busy_timeout=30000")
+        return connection
+
+    @classmethod
+    def _today(cls):
+        return datetime.now(cls.TIMEZONE).date().isoformat()
+
+    def reserve_attempt(self, request_id, attempt, amount_cny):
+        request_id = str(uuid.UUID(str(request_id)))
+        if isinstance(attempt, bool) or not isinstance(attempt, int) or not 1 <= attempt <= 100:
+            raise ValueError("模型尝试次数无效")
+        amount = _money(amount_cny)
+        if amount <= 0:
+            raise ValueError("预留金额必须大于零")
+        today = self._today()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                connection.execute(
+                    "INSERT OR IGNORE INTO local_preauth_daily_budgets (budget_day,limit_cny,reserved_cny) VALUES (?,?,?)",
+                    (today, str(self.daily_limit_cny), "0"),
+                )
+                daily = connection.execute(
+                    "SELECT limit_cny,reserved_cny FROM local_preauth_daily_budgets WHERE budget_day=?",
+                    (today,),
+                ).fetchone()
+                if not daily:
+                    raise RuntimeError("本地每日预算账本初始化失败")
+                limit, total = _money(daily[0]), _money(daily[1])
+                existing = connection.execute(
+                    "SELECT budget_day,reserved_cny,state FROM local_preauth_budget_reservations WHERE request_id=? AND attempt=?",
+                    (request_id, attempt),
+                ).fetchone()
+                if existing:
+                    if existing[0] != today:
+                        raise DailyBudgetExceeded("该模型尝试已归属前一自然日，请创建新的请求")
+                    if existing[2] != "reserved":
+                        raise DailyBudgetExceeded("该模型尝试已经结算或费用状态未知，已拒绝重复调用")
+                    previous = _money(existing[1])
+                else:
+                    previous = Decimal("0")
+                next_reservation = max(previous, amount)
+                increase = next_reservation - previous
+                if total + increase > limit:
+                    raise DailyBudgetExceeded("本机登录前意图识别已达到每日费用上限")
+                if existing:
+                    connection.execute(
+                        "UPDATE local_preauth_budget_reservations SET reserved_cny=?,state='reserved' WHERE request_id=? AND attempt=?",
+                        (str(next_reservation), request_id, attempt),
+                    )
+                else:
+                    connection.execute(
+                        "INSERT INTO local_preauth_budget_reservations (request_id,attempt,budget_day,reserved_cny,state) VALUES (?,?,?,?, 'reserved')",
+                        (request_id, attempt, today, str(next_reservation)),
+                    )
+                if increase:
+                    connection.execute(
+                        "UPDATE local_preauth_daily_budgets SET reserved_cny=? WHERE budget_day=?",
+                        (str(total + increase), today),
+                    )
+                connection.commit()
+                return {"budget_day": today, "reserved_cny": next_reservation, "daily_limit_cny": limit}
+            except Exception:
+                connection.rollback()
+                raise
+
+    def settle_attempt(self, request_id, attempt, actual_cost_cny=None):
+        request_id = str(uuid.UUID(str(request_id)))
+        actual = None if actual_cost_cny is None else _money(actual_cost_cny)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT budget_day,reserved_cny,state FROM local_preauth_budget_reservations WHERE request_id=? AND attempt=?",
+                    (request_id, attempt),
+                ).fetchone()
+                if not row:
+                    raise RuntimeError("找不到对应的本地每日预算预留")
+                day, reserved_text, state = row
+                if state != "reserved":
+                    connection.commit()
+                    return _money(reserved_text)
+                reserved = _money(reserved_text)
+                if actual is None:
+                    connection.execute(
+                        "UPDATE local_preauth_budget_reservations SET state='unknown' WHERE request_id=? AND attempt=?",
+                        (request_id, attempt),
+                    )
+                    kept = reserved
+                else:
+                    kept = actual
+                    connection.execute(
+                        "UPDATE local_preauth_budget_reservations SET reserved_cny=?,settled_cny=?,state='settled' WHERE request_id=? AND attempt=?",
+                        (str(actual), str(actual), request_id, attempt),
+                    )
+                    daily = connection.execute(
+                        "SELECT reserved_cny FROM local_preauth_daily_budgets WHERE budget_day=?",
+                        (day,),
+                    ).fetchone()
+                    if not daily:
+                        raise RuntimeError("找不到本地每日预算总账")
+                    total = _money(daily[0])
+                    connection.execute(
+                        "UPDATE local_preauth_daily_budgets SET reserved_cny=? WHERE budget_day=?",
+                        (str(max(Decimal("0"), total - reserved + kept)), day),
+                    )
+                connection.commit()
+                return kept
+            except Exception:
+                connection.rollback()
+                raise
+
+__all__ = ["DailyBudgetExceeded", "LocalPreAuthDailyBudget", "PostgresPreAuthDailyBudget"]

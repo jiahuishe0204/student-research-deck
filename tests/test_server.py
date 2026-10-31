@@ -183,6 +183,63 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("用户选择", responses[0][1]["error"])
         self.assertEqual(calls, [])
 
+    def test_final_retry_reuses_saved_artifacts_without_model_api_key(self):
+        claim = {"claim_id": "CL-1"}
+        verification = {"results": [{"claim_id": "CL-1", "action": "keep"}]}
+        report = {"report_markdown": "报告"}
+        ppt = {"pages": [{"page_id": "P1"}]}
+        source = {"source_id": "SRC-1"}
+        evidence = {"evidence_id": "EV-1", "source_id": "SRC-1"}
+        task = {"artifacts": {
+            "claims": {"data": {"claims": [claim]}},
+            "verification": {"data": verification},
+            "report": {"data": report}, "ppt": {"data": ppt},
+            "sources": {"data": {"records": [source]}},
+            "evidence": {"data": {"groups": [{"evidence_records": [evidence], "figure_records": []}]}},
+        }}
+        calls = []
+        workflow = SimpleNamespace(
+            set_task_context=lambda task_id: None,
+            assemble_final_deterministic=lambda *args: (calls.append(args) or ({"final_report": {}, "final_ppt": {}}, {"total_tokens": 0})),
+        )
+        handler = object.__new__(server.AppHandler)
+        handler.path = "/api/final/retry"
+        handler.server = SimpleNamespace(task_store=SimpleNamespace(get_task=lambda task_id: task), workflow=workflow)
+        handler.read_json = lambda: {}
+        handler.require_task_access = lambda: "TASK-test"
+        responses = []
+        handler.send_json = lambda status, value: responses.append((status, value))
+
+        handler.do_POST()
+
+        self.assertEqual(responses[0][0], 200)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], verification)
+        self.assertEqual(calls[0][3], [claim])
+        self.assertEqual(calls[0][4:6], (["SRC-1"], ["EV-1"]))
+
+    def test_claim_extraction_rejects_unsaved_or_cross_task_artifacts_before_model_call(self):
+        calls = []
+        handler = object.__new__(server.AppHandler)
+        handler.path = "/api/claims"
+        handler.client_address = ("127.0.0.1", 1000)
+        handler.server = SimpleNamespace(
+            api_key="configured", rate_limiter=SimpleNamespace(allow=lambda key: True),
+            task_store=SimpleNamespace(get_task=lambda task_id: {"artifacts": {}}),
+            workflow=SimpleNamespace(set_task_context=lambda task_id: None,
+                                     extract_claims=lambda *args: calls.append(args)),
+        )
+        handler.read_json = lambda: {"report": {"report_markdown": "旧报告"}, "ppt": {"pages": []}, "evidence_ids": ["EV-old"], "tier": "fast"}
+        handler.require_task_access = lambda: "TASK-new"
+        responses = []
+        handler.send_json = lambda status, value: responses.append((status, value))
+
+        handler.do_POST()
+
+        self.assertEqual(responses[0][0], 400)
+        self.assertIn("避免串用", responses[0][1]["error"])
+        self.assertEqual(calls, [])
+
     def test_intent_normalizes_single_assumption_without_paid_retry(self):
         value = {
             "domain": "life_science", "normalized_topic": "导电水凝胶", "scope_hint": "聚焦周围神经",
@@ -256,6 +313,29 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(replies[0], (HTTPStatus.OK, {"data": output, "usage": {"total_tokens": 3}}))
         self.assertEqual(calls, [("context", "anonymous-intent"), ("intent", "主题", "fast")])
         self.assertEqual(task_writes, [])
+
+    def test_local_owner_test_mode_allows_repeated_intent_without_daily_ledger(self):
+        handler = object.__new__(server.AppHandler)
+        handler.path = "/api/intent"
+        handler.client_address = ("127.0.0.1", 1000)
+        calls = []
+        handler.server = SimpleNamespace(
+            owner_test_mode=True, api_key="configured",
+            rate_limiter=SimpleNamespace(allow=lambda key: True),
+            workflow=SimpleNamespace(
+                daily_budget_ledger=None,
+                set_task_context=lambda task_id: None,
+                create_intent=lambda topic, tier: (calls.append((topic, tier)) or ({"normalized_topic": topic}, {"total_tokens": 10})),
+            ),
+        )
+        handler.read_json = lambda: {"topic": "重复测试主题", "tier": "fast"}
+        replies = []
+        handler.send_json = lambda status, value: replies.append((status, value))
+
+        handler.do_POST()
+
+        self.assertEqual(replies[0][0], HTTPStatus.OK)
+        self.assertEqual(calls, [("重复测试主题", "fast")])
 
     def test_plan_question_count(self):
         value = {

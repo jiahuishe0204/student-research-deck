@@ -143,9 +143,10 @@ class WorkflowService:
     @classmethod
     def _verification_output_limit(cls, items, evidence_by_id, upgrade):
         complexity = sum(cls._claim_complexity(item, evidence_by_id)[0] for item in items)
-        ceiling = 4800 if upgrade else 3800
-        floor = 3200 if upgrade else 1200
-        return min(ceiling, max(floor, 650 + len(items) * 220 + complexity * 70))
+        ceiling = 9600 if upgrade else 3800
+        floor = 6400 if upgrade else 1200
+        multiplier = 2 if upgrade else 1
+        return min(ceiling, max(floor, multiplier * (650 + len(items) * 220 + complexity * 70)))
 
     def generate(self, stage, tier, payload, validator=None, *, upgrade=False, max_tokens=6000, max_attempts=2, request_timeout=300, request_cost_limit_cny=None, daily_budget_request_id=None):
         if stage not in self.stage_prompts:
@@ -545,7 +546,7 @@ class WorkflowService:
             # Deep reports can include many source-bound evidence records; the
             # former 7,500 cap truncated complete drafts. Give only this stage
             # enough room, while the request-time task budget remains enforced.
-            validate_report_output, max_tokens=10000 if tier == "deep" else 5000, max_attempts=2,
+            validate_report_output, max_tokens=10000, max_attempts=2,
         )
         return output, usage
 
@@ -954,11 +955,13 @@ class WorkflowService:
                     if not originally_located and action == "remove" and claim["location_type"] == "ppt_slide":
                         originally_located = unique_embedded_numeric_line(original_page, atomic or original) is not None
                 if originally_located:
-                    if action == "remove":
-                        # An earlier overlapping claim may already have
-                        # removed the shared sentence. Treat that removal as
-                        # idempotent after proving the claim existed in the
-                        # immutable original page.
+                    if action == "remove" or (action == "mark_unverified" and not replacement):
+                        # An earlier duplicate/overlapping claim may already
+                        # have removed this unsupported sentence from the
+                        # working draft. Treat that action as idempotent only
+                        # after proving the exact claim existed in the
+                        # immutable original report/page. Its uncertainty is
+                        # still retained in open_issues above.
                         located = True
                     if replacement and claim["location_type"] == "report_section":
                         markdown += "\n\n核验修订：%s" % replacement

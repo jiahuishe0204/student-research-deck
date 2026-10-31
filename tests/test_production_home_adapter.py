@@ -44,6 +44,13 @@ class ProductionHomeAdapterTests(unittest.TestCase):
         self.assertIn("request('/api/intent'", self.script)
         self.assertIn("request('/api/plan'", self.script)
 
+    def test_new_topic_resets_previous_run_and_refreshes_usage_after_failed_finalization(self):
+        self.assertIn("function resetRunForNewTopic()", self.script)
+        self.assertIn("resetRunForNewTopic();currentTopic=submittedTopic", self.script)
+        self.assertIn("finally{await refreshTaskUsage().catch(()=>{})", self.script)
+        self.assertIn("app.js?v=11", self.html)
+        self.assertIn("这条任务缺少已保存的规划或来源", self.script)
+
     def test_auth_panel_reuses_existing_visual_language(self):
         self.assertIn(".production-auth", self.styles)
         self.assertIn("var(--accent)", self.styles)
