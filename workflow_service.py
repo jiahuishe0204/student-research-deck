@@ -7,10 +7,12 @@ import math
 import os
 import re
 import threading
+import uuid
 from pathlib import Path
 
 from contracts import load_contract, validate_stage_output
 from model_client import deepseek_json
+from model_usage import ModelBudgetExceeded, ModelUsageLedger
 from report_citations import render_linked_report
 from reviewed_page_revisions import apply_reviewed_page_revisions
 from ppt_boundary_repair import repair_verified_pages
@@ -28,13 +30,15 @@ def add_usage(total, partial):
 
 class WorkflowService:
     CLAIMS_PER_BATCH_LIMIT = 6
-    def __init__(self, api_key, model_router, system_prompt, stage_prompts, model_client=deepseek_json, usage_ledger=None, model_limits=None, response_cache_dir=None):
+    PRE_AUTH_INTENT_REQUEST_MAX_COST_CNY = 0.50
+    def __init__(self, api_key, model_router, system_prompt, stage_prompts, model_client=deepseek_json, usage_ledger=None, model_limits=None, response_cache_dir=None, daily_budget_ledger=None):
         self.api_key = api_key
         self.model_router = model_router
         self.system_prompt = system_prompt
         self.stage_prompts = dict(stage_prompts)
         self.model_client = model_client
         self.usage_ledger = usage_ledger
+        self.daily_budget_ledger = daily_budget_ledger
         self.model_limits = model_limits or {}
         self.response_cache_dir = Path(response_cache_dir) if response_cache_dir else None
         if self.response_cache_dir:
@@ -43,7 +47,7 @@ class WorkflowService:
         self._context = threading.local()
 
     @classmethod
-    def from_project(cls, api_key, model_router, root, model_client=deepseek_json, usage_ledger=None, model_limits=None):
+    def from_project(cls, api_key, model_router, root, model_client=deepseek_json, usage_ledger=None, model_limits=None, daily_budget_ledger=None):
         root = Path(root)
         registry = json.loads((root / "config" / "prompt-stages.json").read_text(encoding="utf-8"))
         system_prompt = (root / registry["global_prompt"]).read_text(encoding="utf-8")
@@ -59,8 +63,15 @@ class WorkflowService:
         # override it explicitly and avoid writing under the deployment bundle.
         cache_dir = os.environ.get("SCF_RESPONSE_CACHE_DIR")
         if not cache_dir:
-            cache_dir = "/tmp/model-response-cache" if os.environ.get("SCF_RUNTIME") or os.environ.get("TENCENTCLOUD_RUNENV") else str(root / "data" / "private" / "model-response-cache")
-        return cls(api_key, model_router, system_prompt, stage_prompts, model_client, usage_ledger, model_limits, cache_dir)
+            # Tencent SCF exposes a writable /tmp even when its runtime marker
+            # variables are absent. Never fall back to the read-only source tree.
+            cloud_runtime = (
+                os.environ.get("SCF_RUNTIME")
+                or os.environ.get("TENCENTCLOUD_RUNENV")
+                or str(root).startswith("/var/user/")
+            )
+            cache_dir = "/tmp/model-response-cache" if cloud_runtime else str(root / "data" / "private" / "model-response-cache")
+        return cls(api_key, model_router, system_prompt, stage_prompts, model_client, usage_ledger, model_limits, cache_dir, daily_budget_ledger)
 
     def set_task_context(self, task_id):
         self._context.task_id = task_id
@@ -132,15 +143,22 @@ class WorkflowService:
     @classmethod
     def _verification_output_limit(cls, items, evidence_by_id, upgrade):
         complexity = sum(cls._claim_complexity(item, evidence_by_id)[0] for item in items)
-        ceiling = 3200 if upgrade else 3800
-        floor = 2200 if upgrade else 1200
-        return min(ceiling, max(floor, 650 + len(items) * 220 + complexity * 70))
+        ceiling = 9600 if upgrade else 3800
+        floor = 6400 if upgrade else 1200
+        multiplier = 2 if upgrade else 1
+        return min(ceiling, max(floor, multiplier * (650 + len(items) * 220 + complexity * 70)))
 
-    def generate(self, stage, tier, payload, validator=None, *, upgrade=False, max_tokens=6000, max_attempts=2, request_timeout=300):
+    def generate(self, stage, tier, payload, validator=None, *, upgrade=False, max_tokens=6000, max_attempts=2, request_timeout=300, request_cost_limit_cny=None, daily_budget_request_id=None):
         if stage not in self.stage_prompts:
             raise ValueError("阶段 %s 缺少提示词" % stage)
         route = self.model_router.for_stage(stage, tier, upgrade=upgrade)
         task_id = getattr(self._context, "task_id", "unassigned")
+        usage_request_id = str(uuid.uuid4())
+        usage_task_id = ("PREAUTH-" + usage_request_id) if stage == "P1" else task_id
+        usage_limits = dict(self.model_limits)
+        if request_cost_limit_cny is not None:
+            current_limit = float(usage_limits.get("task_max_cost_cny", 0) or 0)
+            usage_limits["task_max_cost_cny"] = min(current_limit, float(request_cost_limit_cny)) if current_limit else float(request_cost_limit_cny)
         input_text = self.system_prompt + self.stage_prompts[stage] + json.dumps(payload, ensure_ascii=False)
         # The budget guard accepts token counts, not UTF-8 byte counts. Chinese
         # text commonly occupies three bytes per character, so passing bytes
@@ -169,13 +187,83 @@ class WorkflowService:
                         self.usage_ledger.record(task_id, stage, route["model"], route["effort"], 0, "cache_hit", {}, {"cache_key": cache_key})
                     return output, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}, route
 
+        attempt_reservations = {}
+
         def record(attempt, status, usage, detail):
+            if request_cost_limit_cny is not None:
+                prompt_tokens = int((usage or {}).get("prompt_tokens", 0) or 0)
+                output_tokens = int((usage or {}).get("completion_tokens", 0) or 0)
+                if prompt_tokens or output_tokens:
+                    # Never release the conservative reservation when actual usage is higher.
+                    attempt_reservations[attempt] = max(
+                        attempt_reservations.get(attempt, 0.0),
+                        ModelUsageLedger.estimate_peak_cost_cny(route["model"], prompt_tokens, output_tokens),
+                    )
             if self.usage_ledger:
-                self.usage_ledger.record(task_id, stage, route["model"], route["effort"], attempt, status, usage, detail)
+                record_attempt = getattr(self.usage_ledger, "record_attempt", None)
+                if callable(record_attempt):
+                    record_attempt(usage_task_id, usage_request_id, attempt, status, usage, detail)
+                else:
+                    self.usage_ledger.record(task_id, stage, route["model"], route["effort"], attempt, status, usage, detail)
+            if self.daily_budget_ledger and stage == "P1" and attempt in attempt_reservations:
+                known_usage = bool(
+                    int((usage or {}).get("prompt_tokens", 0) or 0)
+                    or int((usage or {}).get("completion_tokens", 0) or 0)
+                )
+                detail = detail if isinstance(detail, dict) else {}
+                response_status = detail.get("status")
+                explicitly_rejected = (
+                    status == "http_error"
+                    and isinstance(response_status, int)
+                    and 400 <= response_status < 500
+                )
+                actual_cost = 0 if explicitly_rejected else (
+                    ModelUsageLedger.estimate_peak_cost_cny(
+                        route["model"],
+                        int((usage or {}).get("prompt_tokens", 0) or 0),
+                        int((usage or {}).get("completion_tokens", 0) or 0),
+                    ) if known_usage else None
+                )
+                self.daily_budget_ledger.settle_attempt(
+                    daily_budget_request_id, attempt, actual_cost,
+                )
 
         def guard(attempt):
+            if request_cost_limit_cny is not None:
+                # Leave room for token-estimation variance and the validation-retry suffix.
+                # For pre-auth P1, UTF-8 byte count is a conservative token
+                # upper bound (at least one input byte per tokenizer token).
+                # Add 2048 tokens for message framing and the bounded retry suffix.
+                reserved_input_tokens = (
+                    len(input_text.encode("utf-8")) + 2048
+                    if stage == "P1" and request_cost_limit_cny is not None
+                    else math.ceil(estimated_input_tokens * 1.25) + 256
+                )
+                next_attempt_cost = ModelUsageLedger.estimate_peak_cost_cny(
+                    route["model"], reserved_input_tokens, max_tokens,
+                )
+                already_reserved = sum(attempt_reservations.values())
+                if already_reserved + next_attempt_cost > float(request_cost_limit_cny):
+                    raise ModelBudgetExceeded(
+                        "登录前意图识别达到单次费用上限 %.2f 元，已停止后续模型调用"
+                        % float(request_cost_limit_cny)
+                    )
+                attempt_reservations[attempt] = next_attempt_cost
             if self.usage_ledger:
-                self.usage_ledger.guard(task_id, route["model"], self.model_limits, max_tokens, estimated_input_tokens)
+                reserve_attempt = getattr(self.usage_ledger, "reserve_attempt", None)
+                if callable(reserve_attempt):
+                    reserve_attempt(
+                        usage_task_id, usage_request_id, attempt, stage, route["model"],
+                        route["effort"], usage_limits, estimated_input_tokens, max_tokens,
+                    )
+                else:
+                    self.usage_ledger.guard(task_id, route["model"], usage_limits, max_tokens, estimated_input_tokens)
+            if self.daily_budget_ledger and stage == "P1":
+                if not daily_budget_request_id:
+                    raise ModelBudgetExceeded("登录前每日预算缺少请求标识，已拒绝模型调用")
+                self.daily_budget_ledger.reserve_attempt(
+                    daily_budget_request_id, attempt, next_attempt_cost,
+                )
         output, usage = self.model_client(
             self.api_key,
             route["model"],
@@ -234,7 +322,7 @@ class WorkflowService:
             chunks.append(current)
         return chunks
 
-    def create_intent(self, topic, tier="fast"):
+    def create_intent(self, topic, tier="fast", *, request_timeout=300):
         topic = str(topic or "").strip()
         tier = self._tier(tier)
         if not 2 <= len(topic) <= 500:
@@ -242,6 +330,9 @@ class WorkflowService:
         output, usage, _ = self.generate(
             "P1", tier, {"topic": topic, "tier": tier, "runtime_config": {"language": "zh-CN"}},
             validate_intent, max_tokens=4200, max_attempts=2,
+            request_timeout=request_timeout,
+            request_cost_limit_cny=self.PRE_AUTH_INTENT_REQUEST_MAX_COST_CNY,
+            daily_budget_request_id=str(uuid.uuid4()) if self.daily_budget_ledger else None,
         )
         return output, usage
 
@@ -277,7 +368,12 @@ class WorkflowService:
                 "tier": tier,
                 "output_contract": load_contract("P2A"),
             }, lambda value: validate_stage_output("P2A", value),
-            max_tokens=3600 if tier == "deep" else 2800, max_attempts=2,
+            # P2A uses a reasoning model, and hidden reasoning shares this
+            # allowance with the visible JSON. A 2,800-token demo request used
+            # 2,541 tokens on reasoning alone and truncated the plan. Keep one
+            # explicit 10K ceiling for both tiers so live demonstrations do not
+            # fail merely because the reasoning/output split varies.
+            max_tokens=4200, max_attempts=2,
         )
         blueprint, blueprint_usage, _ = self.generate(
             "P2B", tier, {
@@ -291,7 +387,9 @@ class WorkflowService:
             }, validate_blueprint_output,
             # Reasoning tokens share the response cap with the JSON body. The
             # previous 4400-token cap truncated two paid Pro responses here.
-            max_tokens=8000 if tier == "deep" else 3400, max_attempts=2,
+            # P2B uses a lower-cost synthesis route after P2A establishes the
+            # research framing; retain enough output room for the full plan.
+            max_tokens=7500, max_attempts=2,
         )
         output = {
             "research_scope": architecture["research_scope"],
@@ -448,7 +546,7 @@ class WorkflowService:
             # Deep reports can include many source-bound evidence records; the
             # former 7,500 cap truncated complete drafts. Give only this stage
             # enough room, while the request-time task budget remains enforced.
-            validate_report_output, max_tokens=10000 if tier == "deep" else 5000, max_attempts=2,
+            validate_report_output, max_tokens=10000, max_attempts=2,
         )
         return output, usage
 
@@ -519,7 +617,6 @@ class WorkflowService:
                 payload, 9000,
                 lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids),
             )
-        source_by_id = {item.get("source_id"): item for item in source_records}
         figure_by_id = {item.get("figure_id"): item for item in figure_records}
         for page in output["pages"]:
             for reference in page["figure_refs"]:
@@ -527,12 +624,14 @@ class WorkflowService:
                 reference["source_id"] = figure["source_id"]
                 reference["locator"] = figure["locator"]
                 reference["reuse_status"] = figure["reuse_status"]
+            page["figure_refs"] = [
+                reference for reference in page["figure_refs"]
+                if re.search(r"https://[^\s|;，,）)]+", str(reference.get("locator", "")))
+            ]
+            if not page["figure_refs"]:
+                page["visual_suggestion"] = ""
             for citation in page["source_citations"]:
-                source = source_by_id.get(citation["source_id"])
-                if source and source.get("journal"):
-                    citation["short_vancouver"] = self._short_vancouver(source)
-                else:
-                    citation["short_vancouver"] = citation["short_vancouver"].replace(" 信息不完。", "").replace(" 信息不完整。", "")
+                citation["short_vancouver"] = citation["short_vancouver"].replace(" 信息不完。", "").replace(" 信息不完整。", "")
         return output, usage
 
     @staticmethod
@@ -559,6 +658,13 @@ class WorkflowService:
             {"verification_results": verification, "draft_report": report, "draft_ppt": ppt, "claim_ids": claim_ids, "source_ids": source_ids, "evidence_ids": evidence_ids, "evidence_version": str(evidence_version), "output_contract": load_contract("P9")},
             lambda value: validate_final(value, claim_ids, source_ids, evidence_ids, verification), max_tokens=12000, max_attempts=3,
         )
+        for page in output.get("final_ppt", {}).get("pages", []):
+            page["figure_refs"] = [
+                ref for ref in page.get("figure_refs", [])
+                if re.search(r"https://[^\s|;，,）)]+", str(ref.get("locator", "")))
+            ]
+            if not page["figure_refs"]:
+                page["visual_suggestion"] = ""
         return output, usage
 
     def assemble_final_deterministic(self, verification, report, ppt, claims, source_ids, evidence_ids, evidence_version="1.0", evidence_records=None, source_records=None, figure_records=None, reviewed_page_edits=None):
@@ -580,6 +686,14 @@ class WorkflowService:
 
         def replace_once(text, original, replacement):
             candidates = [original, original.rstrip("。；;，,"), original.strip()]
+            # P7 may normalize a well-known gene symbol to its protein name
+            # while copying the rest of the sentence exactly. Treat only this
+            # explicit alias as equivalent; do not fall back to replacing the
+            # whole surrounding sentence, which can contain other claims.
+            aliases = (("Claudin18.2", "CLDN18.2"), ("CLDN18.2", "Claudin18.2"))
+            for source, target in aliases:
+                if source in original:
+                    candidates.append(original.replace(source, target))
             if "：" in original and len(original.rsplit("：", 1)[-1].strip()) >= 6:
                 candidates.append(original.rsplit("：", 1)[-1].strip().rstrip("。；;，,"))
             for candidate in dict.fromkeys(item for item in candidates if item):
@@ -680,7 +794,8 @@ class WorkflowService:
             change_log.append({"claim_id": claim["claim_id"], "action": action_names[action], "reason": result["explanation"]})
             if action == "keep":
                 continue
-            original = claim["original_text"]
+            claim_original_text = claim["original_text"]
+            original = claim_original_text
             atomic = str(claim.get("atomic_claim") or "").strip()
             page = None
             if claim["location_type"] == "report_section":
@@ -803,10 +918,22 @@ class WorkflowService:
                         prior = resolved_page_claim_text.get(key, set())
                         if original in prior or (atomic and atomic in prior):
                             located = True
+                    elif not located and replacement:
+                        key = (claim["section_or_page_id"], claim["location_type"])
+                        if "revision:" + replacement.strip() in resolved_page_claim_text.get(key, set()):
+                            located = True
             if not located:
                 originally_located = False
                 if claim["location_type"] == "report_section":
-                    _, originally_located = replace_once(original_markdown, original, "")
+                    # A prior overlapping claim may already have replaced this
+                    # sentence in the working draft. Prove location against
+                    # this claim's immutable P7 text before falling back to its
+                    # atomic paraphrase, which may never have appeared verbatim.
+                    for candidate_text in (claim_original_text, original, atomic):
+                        if candidate_text:
+                            _, originally_located = replace_once(original_markdown, candidate_text, "")
+                            if originally_located:
+                                break
                 else:
                     original_page = original_pages.get(claim["section_or_page_id"], {})
                     if claim["location_type"] == "ppt_speaker_note":
@@ -828,14 +955,17 @@ class WorkflowService:
                     if not originally_located and action == "remove" and claim["location_type"] == "ppt_slide":
                         originally_located = unique_embedded_numeric_line(original_page, atomic or original) is not None
                 if originally_located:
-                    if action == "remove":
-                        # An earlier overlapping claim may already have
-                        # removed the shared sentence. Treat that removal as
-                        # idempotent after proving the claim existed in the
-                        # immutable original page.
+                    if action == "remove" or (action == "mark_unverified" and not replacement):
+                        # An earlier duplicate/overlapping claim may already
+                        # have removed this unsupported sentence from the
+                        # working draft. Treat that action as idempotent only
+                        # after proving the exact claim existed in the
+                        # immutable original report/page. Its uncertainty is
+                        # still retained in open_issues above.
                         located = True
                     if replacement and claim["location_type"] == "report_section":
                         markdown += "\n\n核验修订：%s" % replacement
+                        located = True
                     elif replacement and page and claim["location_type"] == "ppt_speaker_note":
                         current_notes = str(page.get("speaker_notes", ""))
                         # A prior claim on the same page may already have
@@ -846,6 +976,9 @@ class WorkflowService:
                             located = True
                         else:
                             located = replace_note_verification(page, claim, replacement, result)
+                    elif replacement and page and claim["location_type"] == "ppt_visual":
+                        page["visual_suggestion"] = str(page.get("visual_suggestion", "")).replace(original, replacement, 1)
+                        located = True
                     elif replacement and page and claim["location_type"] == "ppt_visual":
                         page["visual_suggestion"] = str(page.get("visual_suggestion", "")).replace(original, replacement, 1)
                         located = True
@@ -864,6 +997,8 @@ class WorkflowService:
             if located and claim["location_type"].startswith("ppt_"):
                 key = (claim["section_or_page_id"], claim["location_type"])
                 resolved_page_claim_text.setdefault(key, set()).update(item for item in (original, atomic) if item)
+                if replacement:
+                    resolved_page_claim_text[key].add("revision:" + replacement.strip())
 
         def clean_assembly_punctuation(value):
             text = str(value or "")
@@ -882,10 +1017,10 @@ class WorkflowService:
 
         markdown = clean_assembly_punctuation(markdown)
         final_pages = [{
-            "page_id": page.get("page_id"), "title": page.get("title"), "purpose": page.get("purpose", ""),
-            "on_slide_text": [clean_assembly_punctuation(item) for item in page.get("on_slide_text", []) if clean_assembly_punctuation(item) and not (len(clean_assembly_punctuation(item)) < 20 and clean_assembly_punctuation(item).endswith(("：", ":")))], "visual_suggestion": page.get("visual_suggestion", ""),
+            "page_id": page.get("page_id"), "navigation_title": page.get("navigation_title") or (page.get("title") if len(str(page.get("title") or "")) >= 2 else "研究主题"), "title": page.get("title"), "purpose": page.get("purpose", ""),
+            "on_slide_text": [clean_assembly_punctuation(item) for item in page.get("on_slide_text", []) if clean_assembly_punctuation(item) and not (len(clean_assembly_punctuation(item)) < 20 and clean_assembly_punctuation(item).endswith(("：", ":")))], "visual_suggestion": page.get("visual_suggestion", "") if any(re.search(r"https://[^\s|;，,）)]+", str(ref.get("locator", ""))) for ref in page.get("figure_refs", [])) else "",
             "speaker_notes": clean_assembly_punctuation(page.get("speaker_notes", "")), "evidence_ids": page.get("evidence_ids", []),
-            "figure_refs": page.get("figure_refs", []), "source_citations": page.get("source_citations", []),
+            "figure_refs": [ref for ref in page.get("figure_refs", []) if re.search(r"https://[^\s|;，,）)]+", str(ref.get("locator", "")))], "source_citations": page.get("source_citations", []),
         } for page in pages]
         output = {
             "delivery_version": "P9-deterministic-1.0", "evidence_version": str(evidence_version),
@@ -928,7 +1063,7 @@ class WorkflowService:
                 source_citations = [citation for citation in page_citations.get(source_page_id, [])
                                     if citation.get("source_id") in source_ids_for_page]
                 output["final_ppt"]["pages"].append({
-                    "page_id": "SL-%02d" % next_page, "title": "研究结果的适用条件",
+                    "page_id": "SL-%02d" % next_page, "navigation_title": "核验适用条件", "title": "研究结果的适用条件",
                     "purpose": "补充呈现经核验后必须保留的研究条件与范围",
                     "on_slide_text": ["关键结果需结合研究对象、队列构成与预设条件解读。"],
                     "visual_suggestion": "以简洁文字卡片呈现适用条件及对应来源。",
@@ -1090,7 +1225,7 @@ class WorkflowService:
                     "P8", tier,
                     {"claims": {"claim_set_version": claims.get("claim_set_version", ""), "claims": batch_items, "extraction_notes": []}, "evidence_records": batch_evidence, "source_records": batch_sources, "output_contract": load_contract("P8")},
                     lambda value, ids=batch_ids, items=batch_items: normalize_verification(value, items, ids),
-                    upgrade=upgrade, max_tokens=output_limit, max_attempts=2, request_timeout=90,
+                    upgrade=upgrade, max_tokens=output_limit, max_attempts=3, request_timeout=90,
                 )
                 claims_by_id = {item["claim_id"]: item for item in batch_items}
                 partial["results"] = [self.enforce_current_citation(result, claims_by_id[result["claim_id"]]) for result in partial["results"]]

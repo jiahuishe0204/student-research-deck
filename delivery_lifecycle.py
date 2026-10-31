@@ -17,13 +17,16 @@ class DeliveryLifecycle:
         self.artifact_store = artifact_store
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
-    def publish(self, *, task_id, artifact_id, kind, extension, body, content_type):
+    def publish(self, *, task_id, artifact_id, kind, extension, body, content_type,
+                completion_status="completed"):
         """Upload first, then atomically publish DB state and enqueue mail.
 
         A deterministic key makes a retry overwrite the same object. If the
         process crashes after upload, the reconciler can inspect prepared rows
         and either publish or delete the orphan.
         """
+        if completion_status not in {"completed", "partial"}:
+            raise ValueError("交付状态只能是 completed 或 partial")
         key = private_object_key(task_id, artifact_id, extension)
         prepared = self.repository.prepare_artifact(
             task_id=task_id, artifact_id=artifact_id, kind=kind,
@@ -46,6 +49,7 @@ class DeliveryLifecycle:
             remind_at=published_at + RETENTION - REMINDER_LEAD,
             completion_idempotency_key="completed:%s" % task_id,
             reminder_idempotency_key="expiry:%s" % task_id,
+            completion_status=completion_status,
         )
 
     def expire(self, artifact_id, lease_token=None):

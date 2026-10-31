@@ -52,6 +52,32 @@ class ProductionTaskQueueTests(unittest.TestCase):
             PostgresTaskQueue(connection).create_task(user_id="u1", topic="CRISPR diagnostics", tier="fast")
         self.assertEqual(connection.rollbacks, 1)
 
+    def test_confirmed_intent_seeds_completed_p1_without_pending_model_job(self):
+        connection = Connection([("available",)])
+        intent = {"domain": "生命科学", "normalized_topic": "CRISPR diagnostics", "scope_hint": "检测机制",
+                  "tier": "fast", "assumptions": [], "topic_breadth": "focused",
+                  "direction_options": [], "need_clarification": False,
+                  "clarification_question": "", "confirmation_text": "研究检测机制"}
+        PostgresTaskQueue(connection).create_task(user_id="u1", topic="CRISPR diagnostics",
+                                              tier="fast", confirmed_intent=intent)
+        job = next((sql, params) for sql, params in connection.cursor_value.calls
+                   if "INSERT INTO research_task_jobs" in sql)
+        self.assertIn("'succeeded'", job[0])
+        self.assertNotIn("'pending'", job[0])
+        self.assertEqual(__import__("json").loads(job[1][-1])["data"], intent)
+        self.assertEqual(connection.commits, 1)
+
+    def test_seeded_p1_rejects_tier_mismatch_before_entitlement_write(self):
+        connection = Connection([("available",)])
+        intent = {"domain": "生命科学", "normalized_topic": "CRISPR diagnostics", "scope_hint": "检测机制",
+                  "tier": "deep", "assumptions": [], "topic_breadth": "focused",
+                  "direction_options": [], "need_clarification": False,
+                  "clarification_question": "", "confirmation_text": "研究检测机制"}
+        with self.assertRaises(ValueError):
+            PostgresTaskQueue(connection).create_task(user_id="u1", topic="CRISPR diagnostics",
+                                                  tier="fast", confirmed_intent=intent)
+        self.assertEqual(connection.cursor_value.calls, [])
+
     def test_claim_uses_skip_locked_and_returns_fencing_token(self):
         connection = Connection([("j1", "TASK-1", "P1", "P1", 1, {"topic": "x", "tier": "fast"})])
         job = PostgresTaskQueue(connection).claim_next()
@@ -124,6 +150,19 @@ class ProductionTaskQueueTests(unittest.TestCase):
         self.assertEqual(len(delivery["artifacts"]), 3)
         self.assertIn("T", delivery["artifacts"][0]["expires_at"])
         self.assertIn("t.user_id=%s", connection.cursor_value.calls[0][0])
+
+    def test_delivery_accepts_partial_completion(self):
+        expires = datetime(2026, 10, 31, tzinfo=timezone.utc)
+        connection = Connection([
+            ("Topic", "fast", {"data": {"final_report": {"markdown": "partial ok"}}}),
+            ("a1", "ppt_content", "application/json", expires),
+            ("a2", "references", "application/json", expires),
+            ("a3", "report", "text/markdown; charset=utf-8", expires),
+        ])
+        delivery = PostgresTaskQueue(connection).task_delivery(user_id="u1", task_id="TASK-1")
+
+        self.assertEqual(delivery["final_delivery"]["final_report"]["markdown"], "partial ok")
+        self.assertIn("t.status IN ('completed','partial')", connection.cursor_value.calls[0][0])
 
 
 if __name__ == "__main__":

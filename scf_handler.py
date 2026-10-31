@@ -20,7 +20,8 @@ def validate_worker_event(event: Any) -> dict[str, Any]:
     """校验并规范化一个 SCF worker 事件。
 
     事件暂定格式：
-    ``{"task_id": "TASK-...", "stage": "P1", "attempt": 1, "payload": {}}``。
+    ``{"task_id": "TASK-...", "stage": "P1", "work_item_id": "main",
+    "attempt": 1, "payload": {}}``。P8 批次应使用稳定且互不相同的工作项 ID。
     该函数不读取密钥、不访问网络，也不改变任务状态。
     """
 
@@ -39,6 +40,12 @@ def validate_worker_event(event: Any) -> dict[str, Any]:
     if isinstance(attempt, bool) or not isinstance(attempt, int) or not 1 <= attempt <= 100:
         raise WorkerEventError("attempt 必须是 1-100 的整数")
 
+    work_item_id = str(event.get("work_item_id") or "main").strip()
+    if not work_item_id or len(work_item_id) > 128:
+        raise WorkerEventError("work_item_id 必须是 1-128 个字符")
+    if any(not (char.isascii() and (char.isalnum() or char in ":_-")) for char in work_item_id):
+        raise WorkerEventError("work_item_id 仅允许 ASCII 字母、数字、冒号、下划线和连字符")
+
     payload = event.get("payload", {})
     if not isinstance(payload, Mapping):
         raise WorkerEventError("payload 必须是 JSON 对象")
@@ -46,6 +53,7 @@ def validate_worker_event(event: Any) -> dict[str, Any]:
     return {
         "task_id": task_id,
         "stage": stage,
+        "work_item_id": work_item_id,
         "attempt": attempt,
         "payload": dict(payload),
     }
@@ -60,6 +68,7 @@ def handler(event: Any, context: Any = None) -> dict[str, Any]:
         "accepted": True,
         "task_id": normalized["task_id"],
         "stage": normalized["stage"],
+        "work_item_id": normalized["work_item_id"],
         "attempt": normalized["attempt"],
         "next": "database_claim",
     }

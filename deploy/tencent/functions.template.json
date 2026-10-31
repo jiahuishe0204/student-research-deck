@@ -20,6 +20,15 @@
       "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EDGEONE_GATEWAY_SECRET"]
     },
     {
+      "name": "research-intent-api",
+      "entrypoint": "intent_http_entrypoint.main_handler",
+      "trigger": {"type": "function-url", "https_only": true, "auth_type": "open", "cors": false},
+      "memory_mb": 512,
+      "timeout_seconds": 115,
+      "role": "database-model-intent-role",
+      "environment": ["DATABASE_URL", "DEEPSEEK_API_KEY", "MODEL_TASK_MAX_TOTAL_TOKENS", "MODEL_TASK_MAX_COST_CNY", "EDGEONE_GATEWAY_SECRET", "PREAUTH_INTENT_SIGNING_SECRET"]
+    },
+    {
       "name": "research-download-api",
       "entrypoint": "delivery_http_entrypoint.main_handler",
       "trigger": {"type": "function-url", "https_only": true, "auth_type": "open", "cors": false},
@@ -35,7 +44,7 @@
       "memory_mb": 256,
       "timeout_seconds": 15,
       "role": "database-task-role",
-      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EDGEONE_GATEWAY_SECRET"]
+      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EDGEONE_GATEWAY_SECRET", "PREAUTH_INTENT_SIGNING_SECRET"]
     },
     {
       "name": "research-task-worker",

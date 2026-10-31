@@ -3,6 +3,13 @@ import unittest
 from unittest.mock import patch
 
 from delivery_http_entrypoint import main_handler
+from preauth_intent_ticket import issue_intent_ticket
+
+
+SECRET = "test-signing-secret-longer-than-thirty-two-characters"
+INTENT = {"domain":"生命科学","normalized_topic":"CRISPR diagnostics","scope_hint":"检测机制",
+          "tier":"fast","assumptions":[],"topic_breadth":"focused","direction_options":[],
+          "need_clarification":False,"clarification_question":"","confirmation_text":"研究检测机制"}
 
 
 class Otp:
@@ -24,7 +31,7 @@ class Connection:
 
 
 class HttpEntrypointTests(unittest.TestCase):
-    def setUp(self): self.otp=Otp(); self.auth=Auth(); self.tasks=Tasks(); self.services={"otp":self.otp,"auth":self.auth,"tasks":self.tasks,"download":lambda **kw:"https://signed"}
+    def setUp(self): self.otp=Otp(); self.auth=Auth(); self.tasks=Tasks(); self.services={"otp":self.otp,"auth":self.auth,"tasks":self.tasks,"download":lambda **kw:"https://signed","intent_signing_secret":SECRET}
     def test_request_uses_trusted_gateway_ip_not_forwarded_header(self):
         event={"httpMethod":"POST","path":"/auth/otp/request","body":json.dumps({"email":"u@example.com"}),
                "headers":{"x-forwarded-for":"attacker"},"requestContext":{"sourceIp":"203.0.113.2"}}
@@ -48,11 +55,20 @@ class HttpEntrypointTests(unittest.TestCase):
 
     def test_create_task_requires_session_and_csrf_and_enqueues(self):
         event={"httpMethod":"POST","path":"/tasks","headers":{"cookie":"research_session=s1","x-csrf-token":"c1"},
-               "body":json.dumps({"topic":"CRISPR diagnostics","tier":"fast"})}
+               "body":json.dumps({"intent_ticket":issue_intent_ticket("CRISPR diagnostics","fast",INTENT,SECRET)})}
         response=main_handler(event,services=self.services)
         self.assertEqual(response["statusCode"],201)
         self.assertEqual(self.tasks.created["user_id"],"u1")
+        self.assertEqual(self.tasks.created["confirmed_intent"],INTENT)
         self.assertTrue(self.auth.auth_args[1]["require_csrf"])
+
+    def test_create_task_rejects_missing_or_tampered_ticket(self):
+        for ticket in (None, "tampered"):
+            event={"httpMethod":"POST","path":"/tasks",
+                   "headers":{"cookie":"research_session=s1","x-csrf-token":"c1"},
+                   "body":json.dumps({"intent_ticket":ticket})}
+            self.assertEqual(main_handler(event,services=self.services)["statusCode"],401)
+            self.assertFalse(hasattr(self.tasks,"created"))
 
     def test_progress_is_owner_scoped(self):
         event={"httpMethod":"GET","path":"/tasks/TASK-1/progress","headers":{"cookie":"research_session=s1"}}

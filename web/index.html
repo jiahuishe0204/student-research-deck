@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="./mvp.css?v=8" />
     <link rel="stylesheet" href="./prototype-typography.css?v=7" />
     <link rel="stylesheet" href="./home-delivery-theme.css?v=7" />
-    <script src="./app.js?v=4" defer></script>
+    <script src="./app.js?v=11" defer></script>
   </head>
   <body>
     <div class="ambient" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
@@ -55,9 +55,10 @@
         <div class="intent-mark">01</div>
         <div><p class="eyebrow">题目理解</p><h2 id="intent-title"></h2><p id="intent-copy"></p><div id="direction-options" class="direction-options" hidden></div><label class="clarification" id="clarification-wrap" hidden>补充一句就可以<input id="clarification" maxlength="300" placeholder="例如：指苹果植物，关注采后保鲜" /></label></div>
         <button type="button" class="primary" id="confirm">确认并生成工作规划 <span>→</span></button>
+        <p id="auth-gate-status" class="error-card" role="status" hidden></p>
       </section>
       <section id="task-workspace" class="task-workspace" hidden aria-live="polite">
-        <aside class="task-status"><p class="eyebrow">LIVE TASK</p><h2 id="task-status-title">正在建立调研规划</h2><div class="progress-line"><i></i></div><ol><li class="done">理解题目</li><li class="active">规划调研问题</li><li>检索与证据整理</li><li>报告与 PPT 内容</li><li>独立核验</li></ol><div class="task-controls"><button type="button" id="cancel-task">暂停任务</button><button type="button" id="resume-task" hidden>恢复任务</button><button type="button" id="forget-task">清除本页任务</button></div><p class="task-hint">任务凭证只保留在当前标签页；刷新后可恢复，关闭标签页后自动清除。</p></aside>
+        <aside class="task-status"><p class="eyebrow">LIVE TASK</p><h2 id="task-status-title">正在建立调研规划</h2><div class="progress-line"><i></i></div><ol><li class="done">理解题目</li><li class="active">规划调研问题</li><li>检索与证据整理</li><li>报告与 PPT 内容</li><li>独立核验</li></ol><div class="task-controls"><button type="button" id="cancel-task">暂停任务</button><button type="button" id="resume-task" hidden>恢复任务</button><button type="button" id="forget-task">清除本页任务</button></div><details class="token-usage"><summary>模型 Tokens 用量明细</summary><p class="task-hint">用量取自模型 API 返回记录；总 Tokens = 输入 + 输出，推理 Tokens 是输出的一部分。网络中断且未收到用量时会标为未知，不按 0 计算。</p><div id="usage-summary-body">正在读取用量记录…</div></details><p class="task-hint">任务凭证只保留在当前标签页；刷新后可恢复，关闭标签页后自动清除。</p></aside>
         <div class="plan-output" id="plan-output"><p class="empty-plan">计划完成后会在这里显示研究范围、关键问题和 PPT 叙事。</p></div>
       </section>
       <section id="workflow" class="workflow section-shell">

@@ -1,0 +1,3 @@
+.slide-document h1{margin-bottom:8px}
+.slide-subtitle{margin:0 0 32px;color:#6b6875;font-family:var(--font-editorial);font-size:19px;line-height:1.75}
+@media(max-width:650px){.slide-subtitle{font-size:17px;margin-bottom:26px}}

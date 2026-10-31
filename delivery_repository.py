@@ -7,6 +7,18 @@ import hmac
 import json
 import uuid
 
+from workflow_validation import validate_intent
+from scf_queue_contracts import queue_job_key
+
+
+TECHNICAL_FAILURE_CODES = frozenset({
+    "platform_error", "model_error", "worker_timeout", "storage_error",
+})
+
+
+class FreeEntitlementUnavailable(ValueError):
+    """The verified user has no unconsumed first free fast delivery."""
+
 
 def _one(cursor):
     row = cursor.fetchone()
@@ -78,6 +90,138 @@ class PostgresDeliveryRepository:
         row = cursor.fetchone()
         return str(row[0]) if row else None
 
+    def reserve_free_fast_task(self, *, user_id, topic, intent, clarification="", intent_confirmed=False, tier="fast"):
+        """Atomically reserve the one free fast delivery and enqueue its P2 job.
+
+        The caller must authenticate the verified-email session and enforce CSRF
+        before calling this method. P1 intent confirmation happens before this
+        gate; only confirmed intent can start the authenticated P2 research task.
+        Repeated submissions while reserved return the existing task.
+        """
+        user_id = str(user_id or "").strip()
+        topic = str(topic or "").strip()
+        clarification = str(clarification or "").strip()
+        if not user_id:
+            raise PermissionError("登录状态无效")
+        if not 2 <= len(topic) <= 500:
+            raise ValueError("主题长度必须为 2—500 个字符")
+        if tier != "fast":
+            raise ValueError("当前仅开放首次免费快速版")
+        if intent_confirmed is not True:
+            raise ValueError("请先确认系统对调研主题的理解")
+        intent = validate_intent(intent)
+        if intent.get("tier") != "fast":
+            raise ValueError("意图版本与首次免费快速版不一致")
+        if intent.get("need_clarification") and not clarification:
+            raise ValueError("请先回答意图确认中的关键问题")
+
+        task_id = "TASK-" + uuid.uuid4().hex
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                """INSERT INTO free_entitlements(user_id,state,updated_at)
+                     VALUES (%s,'available',NOW()) ON CONFLICT(user_id) DO NOTHING""",
+                (user_id,),
+            )
+            cursor.execute(
+                """SELECT e.state,e.task_id,t.status
+                     FROM free_entitlements e LEFT JOIN research_tasks t ON t.task_id=e.task_id
+                    WHERE e.user_id=%s FOR UPDATE OF e""",
+                (user_id,),
+            )
+            entitlement = cursor.fetchone()
+            if not entitlement:
+                raise RuntimeError("无法初始化免费体验资格")
+            state, reserved_task_id, task_status = entitlement
+            if state == "consumed":
+                raise FreeEntitlementUnavailable("首次免费快速版资格已使用")
+            if state == "reserved":
+                if not reserved_task_id or not task_status:
+                    raise RuntimeError("免费资格预留记录与任务状态不一致")
+                self.connection.commit()
+                return {"task_id": str(reserved_task_id), "status": str(task_status), "already_reserved": True}
+            if state != "available":
+                raise RuntimeError("免费资格状态无效")
+
+            cursor.execute(
+                """INSERT INTO research_tasks
+                       (task_id,user_id,topic,tier,status,current_stage,expires_at)
+                     VALUES (%s,%s,%s,'fast','queued','P2',NOW()+INTERVAL '7 days')
+                     RETURNING task_id""",
+                (task_id, user_id, topic),
+            )
+            if not cursor.fetchone():
+                raise RuntimeError("任务创建未确认")
+            cursor.execute(
+                """UPDATE free_entitlements SET state='reserved',task_id=%s,updated_at=NOW()
+                     WHERE user_id=%s AND state='available' RETURNING user_id""",
+                (task_id, user_id),
+            )
+            if not cursor.fetchone():
+                raise RuntimeError("免费资格并发预留失败")
+            cursor.execute(
+                """INSERT INTO research_task_jobs
+                       (job_id,task_id,job_key,stage,attempt,status,payload,available_at,
+                        created_at,updated_at,transition_status,transition_attempts)
+                     VALUES (%s,%s,%s,'P2',1,'pending',%s::jsonb,NOW(),NOW(),NOW(),'not_ready',0)
+                     ON CONFLICT (task_id,job_key) DO NOTHING""",
+                (str(uuid.uuid4()), task_id, queue_job_key("P2"), json.dumps({
+                    "topic": topic, "tier": "fast", "intent": intent, "clarification": clarification,
+                }, ensure_ascii=False)),
+            )
+            self.connection.commit()
+            return {"task_id": task_id, "status": "queued", "already_reserved": False}
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def fail_task_and_release_free_entitlement(self, *, task_id, failure_code):
+        """Close a task and release its reservation only for a known technical failure."""
+        task_id = str(task_id or "").strip()
+        if failure_code not in TECHNICAL_FAILURE_CODES:
+            raise ValueError("只有平台技术失败可以释放首次免费资格")
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "SELECT user_id,status,current_stage FROM research_tasks WHERE task_id=%s FOR UPDATE",
+                (task_id,),
+            )
+            task = cursor.fetchone()
+            if not task:
+                raise KeyError("任务不存在")
+            user_id, status, stage = task
+            if status in {"completed", "partial", "cancelled", "expired"}:
+                raise ValueError("该任务状态不允许按技术失败释放资格")
+            if status != "failed":
+                cursor.execute(
+                    """UPDATE research_tasks SET status='failed',updated_at=NOW()
+                         WHERE task_id=%s AND status IN ('queued','running')""",
+                    (task_id,),
+                )
+            cursor.execute(
+                """UPDATE research_task_jobs
+                      SET status='cancelled',lease_until=NULL,lease_token=NULL,updated_at=NOW()
+                    WHERE task_id=%s AND status IN ('pending','running')""",
+                (task_id,),
+            )
+            cursor.execute(
+                """UPDATE free_entitlements SET state='available',task_id=NULL,updated_at=NOW()
+                     WHERE user_id=%s AND state='reserved' AND task_id=%s RETURNING user_id""",
+                (str(user_id), task_id),
+            )
+            released = bool(cursor.fetchone())
+            cursor.execute(
+                """INSERT INTO security_audit_events(event_id,user_id,task_id,event_type,details)
+                     VALUES (%s,%s,%s,'technical_task_failure',%s::jsonb)""",
+                (str(uuid.uuid4()), str(user_id), task_id,
+                 json.dumps({"failure_code": failure_code, "stage": stage}, separators=(",", ":"))),
+            )
+            self.connection.commit()
+            return {"status": "failed", "entitlement_released": released}
+        except Exception:
+            self.connection.rollback()
+            raise
+
     def verify_challenge_and_open_session(self, **values):
         cursor = self.connection.cursor()
         try:
@@ -145,12 +289,15 @@ class PostgresDeliveryRepository:
     def publish_artifact_and_complete(self, **values):
         cursor = self.connection.cursor()
         try:
+            completion_status = values.get("completion_status", "completed")
+            if completion_status not in {"completed", "partial"}:
+                raise ValueError("交付状态只能是 completed 或 partial")
             cursor.execute("SELECT user_id,status FROM research_tasks WHERE task_id=%s FOR UPDATE", (values["task_id"],))
             owner = cursor.fetchone()
             if not owner:
                 raise ValueError("任务不存在")
             user_id, task_status = owner
-            if task_status not in ("running", "completed"):
+            if task_status not in ("running", "completed", "partial"):
                 raise RuntimeError("任务已取消或失败，拒绝发布")
             cursor.execute(
                 """
@@ -173,7 +320,7 @@ class PostgresDeliveryRepository:
             if not ready:
                 self.connection.commit()
                 return {"status": "uploaded", **values}
-            if task_status == "completed":
+            if task_status in {"completed", "partial"}:
                 self.connection.commit()
                 return {"status": "published", **values}
             cursor.execute(
@@ -183,9 +330,9 @@ class PostgresDeliveryRepository:
                        AND status IN ('uploaded','published')""",
                 (values["published_at"], values["expires_at"], values["remind_at"], values["task_id"]),
             )
-            cursor.execute("""UPDATE research_tasks SET status='completed',updated_at=%s
+            cursor.execute("""UPDATE research_tasks SET status=%s,updated_at=%s
                                WHERE task_id=%s AND status='running'""",
-                           (values["published_at"], values["task_id"]))
+                           (completion_status, values["published_at"], values["task_id"]))
             cursor.execute(
                 """UPDATE free_entitlements SET state='consumed',task_id=NULL,updated_at=%s
                      WHERE user_id=%s AND state='reserved' AND task_id=%s""",

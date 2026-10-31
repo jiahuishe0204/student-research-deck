@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import uuid
 
+from workflow_validation import validate_intent
+
 
 VALID_TIERS = frozenset({"fast", "deep"})
 VALID_STAGES = frozenset("P%d" % number for number in range(1, 10))
@@ -18,11 +20,15 @@ class PostgresTaskQueue:
     def __init__(self, connection):
         self.connection = connection
 
-    def create_task(self, *, user_id, topic, tier):
+    def create_task(self, *, user_id, topic, tier, confirmed_intent=None):
         topic = str(topic or "").strip()
         tier = str(tier or "").strip()
         if not 2 <= len(topic) <= 500 or tier not in VALID_TIERS:
             raise ValueError("任务主题或版本无效")
+        if confirmed_intent is not None:
+            confirmed_intent = validate_intent(confirmed_intent)
+            if confirmed_intent["tier"] != tier:
+                raise ValueError("题目结果与任务版本不一致")
         task_id = "TASK-" + uuid.uuid4().hex[:12]
         job_id = str(uuid.uuid4())
         cursor = self.connection.cursor()
@@ -45,12 +51,22 @@ class PostgresTaskQueue:
                      WHERE user_id=%s AND state='available'""",
                 (task_id, str(user_id)),
             )
-            cursor.execute(
-                """INSERT INTO research_task_jobs
-                       (job_id,task_id,job_key,stage,status,payload)
-                     VALUES (%s,%s,'P1','P1','pending',%s::jsonb)""",
-                (job_id, task_id, _json({"topic": topic, "tier": tier})),
-            )
+            if confirmed_intent is None:
+                cursor.execute(
+                    """INSERT INTO research_task_jobs
+                           (job_id,task_id,job_key,stage,status,payload)
+                         VALUES (%s,%s,'P1','P1','pending',%s::jsonb)""",
+                    (job_id, task_id, _json({"topic": topic, "tier": tier})),
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO research_task_jobs
+                           (job_id,task_id,job_key,stage,status,payload,result)
+                         VALUES (%s,%s,'P1','P1','succeeded',%s::jsonb,%s::jsonb)""",
+                    (job_id, task_id, _json({"topic": topic, "tier": tier}),
+                     _json({"data": confirmed_intent, "usage": {"prompt_tokens": 0,
+                            "completion_tokens": 0, "total_tokens": 0, "attempts": 0}})),
+                )
             self.connection.commit()
         except Exception:
             self.connection.rollback()
@@ -87,7 +103,7 @@ class PostgresTaskQueue:
         cursor.execute(
             """SELECT t.topic,t.tier,j.result
                  FROM research_tasks t JOIN research_task_jobs j ON j.task_id=t.task_id
-                WHERE t.task_id=%s AND t.user_id=%s AND t.status='completed'
+                WHERE t.task_id=%s AND t.user_id=%s AND t.status IN ('completed','partial')
                   AND j.job_key='P9' AND j.status='succeeded'""",
             (str(task_id), str(user_id)),
         )

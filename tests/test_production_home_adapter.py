@@ -20,7 +20,8 @@ class ProductionHomeAdapterTests(unittest.TestCase):
     def test_production_mode_requires_confirmed_healthy_edgeone_gateway(self):
         self.assertIn("fetch('/api/health'", self.script)
         self.assertIn("data.runtime==='edgeone-gateway'&&data.ok===true", self.script)
-        self.assertIn("if(!productionMode)return false", self.script)
+        self.assertIn("if(!productionMode){const local=", self.script)
+        self.assertIn("form.querySelector('.primary').disabled=true", self.script)
 
     def test_otp_and_mutating_requests_use_cookie_and_tab_scoped_csrf(self):
         self.assertIn("credentials:'include'", self.script)
@@ -30,6 +31,9 @@ class ProductionHomeAdapterTests(unittest.TestCase):
         self.assertNotIn("localStorage.setItem(csrfKey", self.script)
 
     def test_production_task_flow_covers_create_confirm_poll_and_delivery(self):
+        self.assertIn("productionRequest('/api/intent'", self.script)
+        self.assertIn("intent_ticket:currentIntentTicket", self.script)
+        self.assertIn("currentIntentTicket=null", self.script)
         self.assertIn("productionRequest('/tasks'", self.script)
         self.assertIn("/continue`,{method:'POST',csrf:true", self.script)
         self.assertIn("/progress`)", self.script)
@@ -39,6 +43,13 @@ class ProductionHomeAdapterTests(unittest.TestCase):
         self.assertIn("request('/api/tasks'", self.script)
         self.assertIn("request('/api/intent'", self.script)
         self.assertIn("request('/api/plan'", self.script)
+
+    def test_new_topic_resets_previous_run_and_refreshes_usage_after_failed_finalization(self):
+        self.assertIn("function resetRunForNewTopic()", self.script)
+        self.assertIn("resetRunForNewTopic();currentTopic=submittedTopic", self.script)
+        self.assertIn("finally{await refreshTaskUsage().catch(()=>{})", self.script)
+        self.assertIn("app.js?v=11", self.html)
+        self.assertIn("这条任务缺少已保存的规划或来源", self.script)
 
     def test_auth_panel_reuses_existing_visual_language(self):
         self.assertIn(".production-auth", self.styles)

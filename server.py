@@ -2,6 +2,7 @@
 """Local MVP server for the research delivery prototype."""
 
 import argparse
+import hashlib
 import json
 import os
 import traceback
@@ -18,6 +19,7 @@ from epo_ops import EPOClient
 from patsnap_mcp import DEFAULT_MCP_URL, PatsnapMCPClient
 from model_routing import ModelRouter
 from model_usage import ModelBudgetExceeded, ModelUsageLedger
+from preauth_budget import LocalPreAuthDailyBudget
 from retrieval import hydrate_europe_pmc_full_text, search_all, search_patsnap_literature
 from research_sources import (
     assess_evidence_quality, assess_source_quality, enrich_kept_open_full_text, merge_search_results,
@@ -41,6 +43,33 @@ from workflow_service import WorkflowService
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 MAX_BODY_BYTES = 512 * 1024
+
+
+def runtime_fingerprint(root=ROOT):
+    """Identify the product code and prompt/config files loaded by this process."""
+    paths = [
+        "server.py", "workflow_service.py", "workflow_validation.py", "patsnap_mcp.py",
+        "config/prompt-stages.json", "config/model-routing.json",
+    ]
+    registry_path = root / "config" / "prompt-stages.json"
+    if registry_path.is_file():
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        if registry.get("global_prompt"):
+            paths.append(registry["global_prompt"])
+        paths.extend(
+            entry["prompt"] for entry in registry.get("stages", [])
+            if isinstance(entry, dict) and entry.get("prompt")
+        )
+    digest = hashlib.sha256()
+    for relative in sorted(set(paths)):
+        path = root / relative
+        if not path.is_file():
+            continue
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
 
 
 class RateLimiter:
@@ -168,9 +197,12 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_json(
                 HTTPStatus.OK,
                 {"ok": True, "deepseek_configured": bool(self.server.api_key),
+                 "owner_test_mode": bool(getattr(self.server, "owner_test_mode", False)),
                  "patent_provider": getattr(patent_client, "provider_name", None),
                  "patsnap_mcp_configured": isinstance(patent_client, PatsnapMCPClient),
-                 "epo_ops_configured": isinstance(patent_client, EPOClient)},
+                 "epo_ops_configured": isinstance(patent_client, EPOClient),
+                 "runtime_version": self.server.runtime_version,
+                 "started_at": self.server.started_at},
             )
             return
         parts = path.strip("/").split("/")
@@ -193,6 +225,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                     return
                 if len(parts) == 4 and parts[3] == "usage":
                     self.send_json(HTTPStatus.OK, {"data": self.server.model_usage.summary(task_id)})
+                    return
+                if len(parts) == 4 and parts[3] == "usage-detail":
+                    self.send_json(HTTPStatus.OK, {"data": self.server.model_usage.detailed_summary(task_id)})
                     return
             except KeyError as exc:
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
@@ -220,6 +255,51 @@ class AppHandler(SimpleHTTPRequestHandler):
                     raise ValueError("任务主题或版本无效")
                 self.send_json(HTTPStatus.CREATED, {"data": self.server.task_store.create_task(topic, tier)})
                 return
+            # Anonymous P1 is enabled for this loopback demo with its local
+            # persistent ledger. Production entry points use the shared ledger.
+            if path == "/api/intent":
+                if not self.server.rate_limiter.allow("intent:" + self.client_address[0]):
+                    self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "请求过于频繁，请稍后再试"})
+                    return
+                if not getattr(self.server.workflow, "daily_budget_ledger", None) and not getattr(self.server, "owner_test_mode", False):
+                    self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "登录前每日预算尚未接入，已阻止意图识别调用"})
+                    return
+                topic = str(body.get("topic", "")).strip()
+                tier = body.get("tier", "fast")
+                if not 2 <= len(topic) <= 500 or tier not in ("fast", "deep"):
+                    raise ValueError("任务主题或版本无效")
+                self.server.workflow.set_task_context("anonymous-intent")
+                output, usage = self.server.workflow.create_intent(topic, tier)
+                self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
+                return
+            if path == "/api/final/retry":
+                # P9 is deterministic and does not require the model API key.
+                # Reuse this task's saved P5-P8 artifacts so a failed final
+                # assembly can be retried without repeating paid model calls.
+                task_id = self.require_task_access()
+                task = self.server.task_store.get_task(task_id)
+                artifacts = task.get("artifacts", {})
+                claims = artifacts.get("claims", {}).get("data", {}).get("claims")
+                verification = artifacts.get("verification", {}).get("data")
+                report = artifacts.get("report", {}).get("data")
+                ppt = artifacts.get("ppt", {}).get("data")
+                source_records = artifacts.get("sources", {}).get("data", {}).get("records", [])
+                evidence_groups = artifacts.get("evidence", {}).get("data", {}).get("groups", [])
+                evidence_records = [item for group in evidence_groups for item in group.get("evidence_records", [])]
+                figure_records = [item for group in evidence_groups for item in group.get("figure_records", [])]
+                if not isinstance(claims, list) or not verification or not report or not ppt:
+                    raise ValueError("当前任务没有完整保存的声明、核验结果、报告和 PPT，不能只重试终稿装配")
+                if not source_records or not evidence_records:
+                    raise ValueError("当前任务没有完整保存的来源与证据，不能生成可核验终稿")
+                source_ids = list(dict.fromkeys(item.get("source_id") for item in evidence_records if item.get("source_id")))
+                evidence_ids = list(dict.fromkeys(item.get("evidence_id") for item in evidence_records if item.get("evidence_id")))
+                self.server.workflow.set_task_context(task_id)
+                output, usage = self.server.workflow.assemble_final_deterministic(
+                    verification, report, ppt, claims, source_ids, evidence_ids,
+                    "1.0", evidence_records, source_records, figure_records,
+                )
+                self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
+                return
             if len(parts) == 4 and parts[:2] == ["api", "tasks"]:
                 task_id, action = parts[2], parts[3]
                 self.require_task_access(task_id)
@@ -243,10 +323,6 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.server.workflow.set_task_context(task_id)
             if not self.server.rate_limiter.allow("work:" + self.client_address[0] + ":" + task_id):
                 self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "任务调用过于频繁，请稍后再试"})
-                return
-            if path == "/api/intent":
-                output, usage = self.server.workflow.create_intent(body.get("topic"), body.get("tier", "fast"))
-                self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if path == "/api/plan":
                 topic, tier, clarification, intent = resolve_plan_request(self.server.task_store.get_task(task_id), body)
@@ -372,6 +448,17 @@ class AppHandler(SimpleHTTPRequestHandler):
                 tier = body.get("tier", "fast")
                 if not isinstance(report, dict) or not isinstance(ppt, dict) or not isinstance(evidence_ids, list) or tier not in ("fast", "deep"):
                     raise ValueError("声明拆分输入无效")
+                artifacts = self.server.task_store.get_task(task_id).get("artifacts", {})
+                saved_report = artifacts.get("report", {}).get("data")
+                saved_ppt = artifacts.get("ppt", {}).get("data")
+                saved_sources = artifacts.get("sources", {}).get("data", {}).get("records", [])
+                saved_groups = artifacts.get("evidence", {}).get("data", {}).get("groups", [])
+                saved_evidence = [item for group in saved_groups for item in group.get("evidence_records", [])]
+                saved_evidence_ids = {item.get("evidence_id") for item in saved_evidence if item.get("evidence_id")}
+                if not saved_report or not saved_ppt or not saved_sources or not saved_evidence:
+                    raise ValueError("当前任务尚未完整保存报告、PPT、来源和证据；为避免串用上一主题结果，已停止声明核验")
+                if report != saved_report or ppt != saved_ppt or set(evidence_ids) != saved_evidence_ids:
+                    raise ValueError("报告、PPT或证据不属于当前任务；请从当前任务已保存的内容继续")
                 output, usage, metadata = self.server.workflow.extract_claims(report, ppt, evidence_ids, tier)
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage, **metadata})
                 return
@@ -382,6 +469,17 @@ class AppHandler(SimpleHTTPRequestHandler):
                 tier = body.get("tier", "fast")
                 if not isinstance(claims, dict) or not isinstance(evidence_records, list) or not isinstance(source_records, list) or tier not in ("fast", "deep"):
                     raise ValueError("独立核验输入无效")
+                artifacts = self.server.task_store.get_task(task_id).get("artifacts", {})
+                saved_claims = artifacts.get("claims", {}).get("data")
+                saved_sources = artifacts.get("sources", {}).get("data", {}).get("records", [])
+                saved_groups = artifacts.get("evidence", {}).get("data", {}).get("groups", [])
+                saved_evidence = [item for group in saved_groups for item in group.get("evidence_records", [])]
+                saved_source_ids = {item.get("source_id") for item in saved_sources if item.get("source_id")}
+                saved_evidence_ids = {item.get("evidence_id") for item in saved_evidence if item.get("evidence_id")}
+                if not isinstance(saved_claims, dict) or not saved_sources or not saved_evidence:
+                    raise ValueError("当前任务缺少已保存的声明、来源或证据；为避免混用其他任务数据，已停止独立核验")
+                if claims != saved_claims or not {item.get("source_id") for item in source_records}.issubset(saved_source_ids) or {item.get("evidence_id") for item in evidence_records} != saved_evidence_ids:
+                    raise ValueError("声明、来源或证据不属于当前任务；请使用本任务已保存的资料继续")
                 output, usage, metadata = self.server.workflow.verify_claims(claims, evidence_records, source_records, tier, body.get("pro_claim_ids"))
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage, "route": metadata})
                 return
@@ -389,12 +487,20 @@ class AppHandler(SimpleHTTPRequestHandler):
                 if not isinstance(body.get("claims"), list):
                     raise ValueError("终稿需要声明清单；不能退回到额外付费的整稿重写路径")
                 artifacts = self.server.task_store.get_task(task_id)["artifacts"]
+                saved_report = artifacts.get("report", {}).get("data")
+                saved_ppt = artifacts.get("ppt", {}).get("data")
+                saved_claims = artifacts.get("claims", {}).get("data", {}).get("claims")
+                saved_verification = artifacts.get("verification", {}).get("data")
                 source_records = artifacts.get("sources", {}).get("data", {}).get("records", [])
                 evidence_groups = artifacts.get("evidence", {}).get("data", {}).get("groups", [])
                 evidence_records = [item for group in evidence_groups for item in group.get("evidence_records", [])]
                 figure_records = [item for group in evidence_groups for item in group.get("figure_records", [])]
                 if not source_records or not evidence_records:
                     raise ValueError("终稿缺少已保存的来源与证据，不能生成可核验引用")
+                if (body.get("draft_report") != saved_report or body.get("draft_ppt") != saved_ppt
+                        or body.get("claims") != saved_claims
+                        or body.get("verification_results") != saved_verification):
+                    raise ValueError("终稿输入与当前任务保存的报告、PPT、声明或核验结果不一致，已停止装配")
                 output, usage = self.server.workflow.assemble_final_deterministic(
                     body.get("verification_results"), body.get("draft_report"), body.get("draft_ppt"),
                     body.get("claims"), body.get("source_ids"), body.get("evidence_ids"), body.get("evidence_version", "1.0"),
@@ -446,7 +552,13 @@ def create_patent_client(root=ROOT, environ=None):
 
 def create_server(host="127.0.0.1", port=4180, api_key=None):
     load_dotenv(ROOT.parent / ".env")
+    owner_test_mode = os.environ.get("LOCAL_OWNER_TEST_MODE", "0").strip().lower() in ("1", "true", "yes", "on")
+    if owner_test_mode and host not in ("127.0.0.1", "localhost", "::1"):
+        raise RuntimeError("主理人测试模式仅允许绑定本机回环地址")
     server = ThreadingHTTPServer((host, port), AppHandler)
+    server.owner_test_mode = owner_test_mode
+    server.runtime_version = runtime_fingerprint()
+    server.started_at = int(time.time())
     server.task_store = TaskStore(ROOT / "data" / "tasks.sqlite3")
     server.rate_limiter = RateLimiter()
     server.model_router = ModelRouter.from_file()
@@ -454,13 +566,18 @@ def create_server(host="127.0.0.1", port=4180, api_key=None):
     server.patent_client = create_patent_client(ROOT)
     server.epo_client = server.patent_client if isinstance(server.patent_client, EPOClient) else None
     server.model_usage = ModelUsageLedger(ROOT / "data" / "private" / "model-usage.sqlite3")
-    server.workflow = WorkflowService.from_project(server.api_key, server.model_router, ROOT, usage_ledger=server.model_usage, model_limits={
-        "task_max_cost_cny": float(os.environ.get("MODEL_TASK_MAX_COST_CNY", "0") or 0),
-        "task_max_total_tokens": int(os.environ.get("MODEL_TASK_MAX_TOTAL_TOKENS", "0") or 0),
+    server.daily_budget_ledger = None if owner_test_mode else LocalPreAuthDailyBudget(
+        ROOT / "data" / "private" / "local-preauth-budget.sqlite3",
+        daily_limit_cny=float(os.environ.get("MODEL_PREAUTH_DAILY_LIMIT_CNY", "1.0") or 1.0),
+    )
+    server.workflow = WorkflowService.from_project(server.api_key, server.model_router, ROOT, usage_ledger=server.model_usage, daily_budget_ledger=server.daily_budget_ledger, model_limits={
+        "task_max_cost_cny": float(os.environ.get("MODEL_TASK_MAX_COST_CNY", "3.0") or 3.0),
+        "task_max_total_tokens": int(os.environ.get("MODEL_TASK_MAX_TOTAL_TOKENS", "600000") or 600000),
         "pro_max_calls": int(os.environ.get("MODEL_PRO_MAX_CALLS", "0") or 0),
         "pro_max_output_tokens": int(os.environ.get("MODEL_PRO_MAX_OUTPUT_TOKENS", "0") or 0),
         "pro_max_total_tokens": int(os.environ.get("MODEL_PRO_MAX_TOTAL_TOKENS", "0") or 0),
     })
+    server.workflow.daily_budget_ledger = server.daily_budget_ledger
     return server
 
 

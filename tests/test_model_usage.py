@@ -6,6 +6,12 @@ from model_usage import ModelBudgetExceeded, ModelUsageLedger
 
 
 class ModelUsageLedgerTests(unittest.TestCase):
+    def test_peak_estimate_uses_uncached_peak_prices_and_fails_closed_for_unknown_model(self):
+        estimate = ModelUsageLedger.estimate_peak_cost_cny("deepseek-v4-pro", 5000, 4200)
+        self.assertAlmostEqual(estimate, 0.2003)
+        with self.assertRaisesRegex(ModelBudgetExceeded, "价格未配置"):
+            ModelUsageLedger.estimate_peak_cost_cny("unlisted-model", 5000, 4200)
+
     def test_records_success_failure_and_token_details(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = ModelUsageLedger(Path(directory) / "usage.sqlite3")
@@ -20,7 +26,27 @@ class ModelUsageLedgerTests(unittest.TestCase):
             self.assertEqual(summary["billable_calls"], 1)
             self.assertEqual(summary["output_tokens"], 50)
             self.assertEqual(summary["reasoning_tokens"], 30)
-            self.assertAlmostEqual(ledger.peak_cost_cny("T1"), (40 * 0.30 + 60 * 9.0 + 50 * 27.0) / 1_000_000)
+            self.assertAlmostEqual(ledger.peak_cost_cny("T1"), (40 * 0.4 + 60 * 11.5 + 50 * 34.0) / 1_000_000)
+
+    def test_detailed_summary_groups_actual_usage_and_keeps_unknown_failures_separate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = ModelUsageLedger(Path(directory) / "usage.sqlite3")
+            ledger.record("T2", "P5", "deepseek-flash", "none", 1, "accepted", {
+                "prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200,
+                "completion_tokens_details": {"reasoning_tokens": 30},
+            })
+            ledger.record("T2", "P8", "deepseek-v4-pro", "low", 1, "truncated", {
+                "prompt_tokens": 500, "completion_tokens": 3200, "total_tokens": 3700,
+                "completion_tokens_details": {"reasoning_tokens": 3200},
+            }, {"max_tokens": 3200})
+            ledger.record("T2", "P8", "deepseek-v4-pro", "low", 2, "transport_error", {})
+            result = ledger.detailed_summary("T2")
+            self.assertEqual(result["stages"]["P5"]["total_tokens"], 200)
+            self.assertEqual(result["stages"]["P5"]["reasoning_tokens"], 30)
+            self.assertEqual(result["stages"]["P8"]["reported_calls"], 1)
+            self.assertEqual(result["stages"]["P8"]["truncated_calls"], 1)
+            self.assertEqual(result["stages"]["P8"]["unknown_usage_calls"], 1)
+            self.assertEqual(result["total"]["total_tokens"], 3900)
 
     def test_pro_guard_stops_before_next_attempt(self):
         with tempfile.TemporaryDirectory() as directory:

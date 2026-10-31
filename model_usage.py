@@ -12,10 +12,20 @@ class ModelBudgetExceeded(RuntimeError):
 
 class ModelUsageLedger:
     PEAK_PRICES_CNY_PER_MILLION = {
-        "deepseek-flash": {"cache_hit": 0.04, "cache_miss": 2.0, "output": 8.0},
-        "deepseek-v4-flash": {"cache_hit": 0.04, "cache_miss": 2.0, "output": 8.0},
-        "deepseek-v4-pro": {"cache_hit": 0.30, "cache_miss": 9.0, "output": 27.0},
+        # Official prices are USD. These CNY values use a conservative 8.5
+        # CNY/USD conversion ceiling and round upward, so budget guards stop early.
+        "deepseek-flash": {"cache_hit": 0.06, "cache_miss": 2.6, "output": 10.5},
+        "deepseek-v4-flash": {"cache_hit": 0.06, "cache_miss": 2.6, "output": 10.5},
+        "deepseek-v4-pro": {"cache_hit": 0.4, "cache_miss": 11.5, "output": 34.0},
     }
+
+    @classmethod
+    def estimate_peak_cost_cny(cls, model, input_tokens, output_tokens):
+        """Conservative request estimate: assume all input is an uncached peak-price miss."""
+        prices = cls.PEAK_PRICES_CNY_PER_MILLION.get(model)
+        if not prices:
+            raise ModelBudgetExceeded("模型价格未配置，已拒绝受费用上限保护的模型调用")
+        return (int(input_tokens or 0) * prices["cache_miss"] + int(output_tokens or 0) * prices["output"]) / 1_000_000
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,6 +64,28 @@ class ModelUsageLedger:
         with self.connect() as connection:
             rows = connection.execute("SELECT model,COUNT(*) calls,SUM(CASE WHEN total_tokens>0 THEN 1 ELSE 0 END) billable_calls,SUM(completion_tokens) output_tokens,SUM(total_tokens) total_tokens,SUM(reasoning_tokens) reasoning_tokens FROM model_usage WHERE task_id=? GROUP BY model", (task_id,)).fetchall()
         return {row["model"]: dict(row) for row in rows}
+
+    def detailed_summary(self, task_id):
+        """Return API-reported token usage by stage, preserving unknown attempts."""
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT stage,COUNT(*) calls,
+                          SUM(prompt_tokens) prompt_tokens,
+                          SUM(completion_tokens) completion_tokens,
+                          SUM(total_tokens) total_tokens,
+                          SUM(reasoning_tokens) reasoning_tokens,
+                          SUM(CASE WHEN total_tokens>0 THEN 1 ELSE 0 END) reported_calls,
+                          SUM(CASE WHEN status='truncated' THEN 1 ELSE 0 END) truncated_calls,
+                          SUM(CASE WHEN status='transport_error' AND total_tokens=0 THEN 1 ELSE 0 END) unknown_usage_calls
+                     FROM model_usage WHERE task_id=? GROUP BY stage""",
+                (task_id,),
+            ).fetchall()
+        stages = {row["stage"]: dict(row) for row in rows}
+        totals = {
+            key: sum(int(item.get(key) or 0) for item in stages.values())
+            for key in ("calls", "prompt_tokens", "completion_tokens", "total_tokens", "reasoning_tokens", "reported_calls", "truncated_calls", "unknown_usage_calls")
+        }
+        return {"stages": stages, "total": totals}
 
     @staticmethod
     def _is_peak(instant):

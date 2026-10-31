@@ -6,6 +6,7 @@
     "fast": {
       "intent_detection": {"model":"deepseek-v4-pro","thinking":"enabled","reasoning_effort":"low","note":"Intent and framing determine every downstream stage, so even the fast tier uses the stronger model with a small output budget."},
       "research_planning": {"model":"deepseek-v4-pro","thinking":"enabled","reasoning_effort":"low","note":"Fast changes evidence volume and depth, not the quality of the research framing."},
+      "planning_synthesis": {"model":"deepseek-flash","thinking":"disabled","note":"P2A retains Pro for research framing; P2B uses Flash to turn the approved framing into bounded questions and retrieval structure."},
       "retrieval_screening": {"model":"deepseek-flash","thinking":"disabled"},
       "content_generation": {"model":"deepseek-flash","thinking":"disabled"},
       "high_risk_verification": {"model":"deepseek-flash","thinking":"disabled","upgrade_model":"deepseek-v4-pro","upgrade_reasoning_effort":"low"},
@@ -14,6 +15,7 @@
     "deep": {
       "intent_detection": {"model":"deepseek-v4-pro","thinking":"enabled","reasoning_effort":"low","note":"The senior academic tier uses a stronger model once to classify the research problem and propose topic-specific framing before planning."},
       "research_planning": {"model":"deepseek-v4-pro","thinking":"enabled","reasoning_effort":"low","note":"The strong model remains responsible for framing, while low reasoning preserves output space for the complete structured plan and avoids paying for repeated truncated JSON."},
+      "planning_synthesis": {"model":"deepseek-flash","thinking":"disabled","note":"P2A retains Pro for research framing; P2B uses Flash to turn the approved framing into bounded questions and retrieval structure."},
       "retrieval_screening": {"model":"deepseek-flash","thinking":"disabled"},
       "content_generation": {"model":"deepseek-flash","thinking":"disabled","note":"Evidence extraction, report filling and claim extraction use explicit contracts; disabling hidden reasoning preserves the bounded output budget for deliverable JSON.","upgrade_model":"deepseek-v4-pro"},
       "high_risk_verification": {"model":"deepseek-flash","thinking":"disabled","upgrade_model":"deepseek-v4-pro","upgrade_reasoning_effort":"none","note":"Flash verifies ordinary claims. Only the task-level Top 10 priority claims upgrade to Pro; deterministic scoping preserves the output budget for auditable verdicts."},
@@ -36,14 +38,18 @@
     ]
   },
   "pricing_snapshot": {
-    "verified_at":"2026-10-08",
+    "verified_at":"2026-10-25",
     "currency":"CNY_per_1M_tokens",
+    "source_currency":"USD",
+    "budget_conversion_usd_to_cny_ceiling":8.5,
+    "conversion_note":"Conservative budget estimate only: official USD prices converted with an 8.5 CNY/USD ceiling and rounded upward; actual billing is provider USD billing.",
     "peak_hours_beijing":"Mon-Fri 09:00-12:00, 14:00-18:00",
-    "deepseek-flash":{"cache_hit_input":{"off_peak":0.02,"peak":0.04},"cache_miss_input":{"off_peak":1.0,"peak":2.0},"output":{"off_peak":4.0,"peak":8.0}},
-    "deepseek-v4-pro":{"cache_hit_input":{"off_peak":0.15,"peak":0.30},"cache_miss_input":{"off_peak":4.5,"peak":9.0},"output":{"off_peak":13.5,"peak":27.0}}
+    "deepseek-flash":{"cache_hit_input":{"off_peak":0.06,"peak":0.06},"cache_miss_input":{"off_peak":1.3,"peak":2.6},"output":{"off_peak":5.25,"peak":10.5}},
+    "deepseek-v4-pro":{"cache_hit_input":{"off_peak":0.4,"peak":0.4},"cache_miss_input":{"off_peak":5.75,"peak":11.5},"output":{"off_peak":17.0,"peak":34.0}}
   },
   "notes": [
-    "Model IDs and prices were checked against official DeepSeek API documentation on 2026-10-08 and must be rechecked before launch.",
+    "USD price source checked against official DeepSeek API documentation on 2026-10-25; CNY figures are conservative budget estimates, not provider billing quotes, and must be rechecked before launch.",
+    "Official model routing may change independently of model IDs; compare real output quality before changing the previously approved route.",
     "Deterministic validation should not be delegated to a language model.",
     "Cost reduction must never weaken citation authenticity."
   ]
