@@ -79,10 +79,14 @@ are not included in the candidate source selection.
 
 ## Current boundary
 
-The offline package and entry points are implemented. Production deployment is
-still gated on user authorization, PostgreSQL migration evidence, SES domain
-and template approval, a private COS bucket, and the controlled cloud smoke
-tests listed in `deploy/tencent/acceptance-evidence-template.md`.
+The offline package and entry points are implemented. The user authorized the
+Guangzhou SCF/COS deployment and server-side injection of existing credentials,
+with a CNY 100 ceiling for this phase. The private COS bucket, lifecycle rule,
+SES domain and sender, and two dedicated SCF roles have been configured. The
+three SES templates remain under review. Production deployment still requires
+complete PostgreSQL migration and backup evidence, a verified Python 3.13
+candidate bundle, function/trigger binding, and controlled cloud smoke tests
+listed in `deploy/tencent/acceptance-evidence-template.md`.
 
 The production timer worker is `task_scf_entrypoint.main_handler`. It now builds
 the workflow with shared PostgreSQL pre-auth budget and model-usage ledgers;
