@@ -84,7 +84,7 @@ Guangzhou SCF/COS deployment and server-side injection of existing credentials,
 with a CNY 100 ceiling for this phase. The private COS bucket, lifecycle rule,
 SES domain and sender, and two dedicated SCF roles have been configured. The
 three SES templates remain under review. Production deployment still requires
-complete PostgreSQL migration and backup evidence, a verified Python 3.13
+a fresh PostgreSQL snapshot check and sustained backup plan, a verified Python 3.13
 candidate bundle, function/trigger binding, and controlled cloud smoke tests
 listed in `deploy/tencent/acceptance-evidence-template.md`.
 
@@ -94,5 +94,6 @@ verify that migrations `008_preauth_daily_budget.sql` and
 `010_shared_model_usage_budget.sql` are present before deploying this code.
 Migration `009_partial_task_status.sql` is also required before enabling
 partial-delivery status. Code deployment does not apply database migrations.
-The project notes record migration 008 as previously applied to the internal
-Neon database, but live schema state must be re-verified before release.
+The 2026-11-01 production read-only audit found the final schema target for
+migrations 001-010 and an isolated logical restore passed. Recheck the live
+schema snapshot before release; the audit does not prove write behavior.
