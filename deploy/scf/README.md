@@ -32,22 +32,22 @@ EMAIL_FROM
 PUBLIC_ORIGIN
 EDGEONE_GATEWAY_SECRET
 PREAUTH_INTENT_SIGNING_SECRET
-SES_SECRET_ID
-SES_SECRET_KEY
 SES_REGION
 SES_TEMPLATE_OTP
 SES_TEMPLATE_COMPLETED
 SES_TEMPLATE_EXPIRY
-COS_SECRET_ID
-COS_SECRET_KEY
 COS_REGION
 COS_BUCKET
 ```
 
-Secrets must be injected by the Tencent Cloud server-side secret facility or
-SCF role. They must not be committed to Git, placed in public EdgeOne code, or
-pasted into chat messages. SES and COS credentials must belong to separate
-least-privilege CAM identities.
+Bind `ResearchdeskSesOutboxScfRole` to the SES outbox function and
+`ResearchdeskCosDeliveryScfRole` to the download, task worker, and retention
+functions. SCF supplies `TENCENTCLOUD_SECRETID`, `TENCENTCLOUD_SECRETKEY`, and
+`TENCENTCLOUD_SESSIONTOKEN` at runtime. The adapters use this complete triplet
+for SES and COS signing. Never copy these temporary values into function
+configuration or logs. The two new roles have distinct least-privilege CAM
+policies. Other application secrets remain server-side only and must not be
+committed to Git, placed in public EdgeOne code, or pasted into chat messages.
 
 `EDGEONE_GATEWAY_SECRET` must be the same high-entropy secret in the EdgeOne
 project and the five HTTP control-plane functions. The SCF endpoints reject

@@ -59,7 +59,8 @@ class TencentSesMailer:
     def from_config(cls, config):  # pragma: no cover - exercised in cloud smoke test
         from tencentcloud.common import credential
         from tencentcloud.ses.v20201002 import ses_client
-        cred = credential.Credential(config.ses_secret_id, config.ses_secret_key)
+        cred = credential.Credential(config.ses_secret_id, config.ses_secret_key,
+                                     token=config.ses_session_token or None)
         return cls(ses_client.SesClient(cred, config.ses_region), config.email_from, {
             "otp": config.ses_template_otp,
             "completed": config.ses_template_completed,
@@ -116,7 +117,8 @@ class TencentCosArtifactStore:
     def from_config(cls, config):  # pragma: no cover - exercised in cloud smoke test
         from qcloud_cos import CosConfig, CosS3Client
         cos_config = CosConfig(Region=config.cos_region, SecretId=config.cos_secret_id,
-                               SecretKey=config.cos_secret_key, Scheme="https")
+                               SecretKey=config.cos_secret_key,
+                               Token=config.cos_session_token or None, Scheme="https")
         return cls(CosS3Client(cos_config), config.cos_bucket)
 
     def upload(self, key, body, content_type):

@@ -13,13 +13,17 @@ class TencentDeploymentManifestTests(unittest.TestCase):
         ses=functions["research-ses-outbox"]["environment"]
         retention=functions["research-cos-retention"]["environment"]
         monitor=functions["research-delivery-monitor"]["environment"]
-        self.assertIn("SES_SECRET_ID",ses); self.assertNotIn("COS_SECRET_ID",ses)
-        self.assertIn("COS_SECRET_ID",retention); self.assertNotIn("SES_SECRET_ID",retention)
+        self.assertEqual(functions["research-ses-outbox"]["role"], "ResearchdeskSesOutboxScfRole")
+        for name in ("research-download-api", "research-task-worker", "research-cos-retention"):
+            self.assertEqual(functions[name]["role"], "ResearchdeskCosDeliveryScfRole")
+        self.assertNotIn("SES_SECRET_ID",ses); self.assertNotIn("COS_SECRET_ID",retention)
+        self.assertFalse(any("SES_SECRET_KEY" in item["environment"] or "COS_SECRET_KEY" in item["environment"]
+                             for item in functions.values()))
         self.assertNotIn("SES_SECRET_ID",monitor); self.assertNotIn("COS_SECRET_ID",monitor)
         self.assertEqual(functions["research-ses-outbox"]["max_concurrency"],1)
         self.assertTrue(functions["research-auth-api"]["trigger"]["https_only"])
         self.assertNotIn("COS_SECRET_ID",functions["research-auth-api"]["environment"])
-        self.assertIn("COS_SECRET_ID",functions["research-download-api"]["environment"])
+        self.assertIn("COS_REGION",functions["research-download-api"]["environment"])
 
     def test_control_plane_uses_https_function_urls_and_gateway_secret(self):
         manifest=json.loads((ROOT/"deploy/tencent/functions.template.json").read_text())
