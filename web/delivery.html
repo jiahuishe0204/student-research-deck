@@ -13,8 +13,9 @@
   <link rel="stylesheet" href="./delivery-motion.css?v=9" />
   <link rel="stylesheet" href="./delivery-result.css?v=6" />
   <link rel="stylesheet" href="./delivery-title-hierarchy.css?v=1" />
+  <link rel="stylesheet" href="./delivery-auth.css?v=1" />
   <script src="./sample-delivery/data.js?v=9" defer></script>
-  <script src="./delivery.js?v=17" defer></script>
+  <script src="./delivery.js?v=18" defer></script>
 </head>
 <body class="delivery-page">
   <header class="site-header delivery-site-header">
@@ -50,6 +51,19 @@
         </div>
       </div>
       <p id="action-feedback" class="action-feedback" role="status"></p>
+      <form id="delivery-login" class="delivery-message delivery-login" hidden>
+        <h2>验证邮箱，查看交付内容</h2>
+        <p>请使用创建任务时的邮箱登录。验证后将返回当前交付页面。</p>
+        <label for="delivery-email">邮箱地址</label>
+        <input id="delivery-email" type="email" autocomplete="email" required />
+        <button id="delivery-request-code" type="button">发送验证码</button>
+        <div id="delivery-code-fields" hidden>
+          <label for="delivery-code">邮件验证码</label>
+          <input id="delivery-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" />
+          <button id="delivery-verify-code" type="submit">确认登录</button>
+        </div>
+        <p id="delivery-login-status" role="status" aria-live="polite"></p>
+      </form>
       <div id="load-error" class="delivery-message" hidden role="alert">
         <h2>本地样本未能载入</h2>
         <p>请通过仓库的本地服务打开此页面；直接双击 HTML 时，浏览器通常会阻止读取相邻文件。</p>

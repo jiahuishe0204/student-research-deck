@@ -18,11 +18,21 @@ class Ambiguous(Exception): ambiguous_delivery=True; error_code="ConnectionClose
 
 
 class WorkerTests(unittest.TestCase):
-    def event(self): return {"event_id":"e1","lease_token":"lt","event_type":"send_completed","task_id":"t1","user_id":"u1","payload":{"task_label":"调研任务","site_url":"https://example.com/tasks/t1"},"attempt_count":1}
+    def event(self): return {"event_id":"e1","lease_token":"lt","event_type":"send_completed","task_id":"TASK-123456789abc","user_id":"u1","payload":{"task_label":"调研任务","site_url":"https://example.com/tasks/TASK-123456789abc"},"attempt_count":1}
 
     def test_payload_whitelist_blocks_secrets_and_signed_urls(self):
         with self.assertRaises(ValueError): validate_event_payload("send_otp",{"challenge_id":"c1","minutes":"10","email":"x"})
         with self.assertRaises(ValueError): validate_event_payload("send_completed",{"task_label":"t","site_url":"https://x.cos.ap/q-sign-x"})
+
+    @patch("delivery_worker.finish_event", return_value=True)
+    @patch("delivery_worker.claim_event")
+    def test_invalid_task_identifier_is_not_sent_in_delivery_link(self, claim, finish):
+        event = self.event()
+        event["task_id"] = "../../other"
+        claim.return_value = event
+        mailer = Mailer()
+        execute_one(object(), Vault(), mailer)
+        self.assertEqual(mailer.calls, [])
 
     @patch("delivery_worker.finish_event",return_value=True)
     @patch("delivery_worker.claim_event")
@@ -31,6 +41,7 @@ class WorkerTests(unittest.TestCase):
         result=execute_one(object(),vault,mailer)
         self.assertEqual(result["status"],"succeeded")
         self.assertEqual(vault.calls,["u1"])
+        self.assertEqual(mailer.calls[0][2], {"task_label": "调研任务", "task_id": "TASK-123456789abc"})
         self.assertNotIn("user@example.com",repr(self.event()))
 
     @patch("delivery_worker.finish_event",return_value=True)

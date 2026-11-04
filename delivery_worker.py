@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from delivery_outbox import backoff_seconds, claim_event, classify_provider_failure, finish_event
 
 
@@ -42,6 +44,13 @@ def execute_one(connection, identity_vault, mailer, *, lease_seconds=120):
             material = identity_vault.otp_material_for_challenge(variables.pop("challenge_id"))
             recipient, variables["code"] = material["recipient"], material["code"]
         else:
+            # SES templates contain the fixed public domain; only a validated
+            # task identifier is substituted into the delivery-page link.
+            task_id = str(event.get("task_id") or "")
+            if not re.fullmatch(r"TASK-[0-9a-f]{12,32}", task_id):
+                raise ValueError("邮件任务编号无效")
+            variables.pop("site_url")
+            variables["task_id"] = task_id
             recipient = identity_vault.recipient_for_user(event["user_id"])
         response = mailer.send_template(MAIL_KIND[event["event_type"]], recipient, variables)
     except Exception as exc:
