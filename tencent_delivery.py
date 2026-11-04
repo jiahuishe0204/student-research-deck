@@ -14,6 +14,11 @@ from dataclasses import dataclass
 
 
 ALLOWED_KINDS = frozenset({"otp", "completed", "expiry"})
+MAIL_SUBJECTS = {
+    "otp": "调研交付台｜登录验证码",
+    "completed": "调研交付台｜调研内容已完成",
+    "expiry": "调研交付台｜交付文件即将到期",
+}
 CONTENT_TYPES = frozenset({"application/pdf", "text/markdown; charset=utf-8", "application/json"})
 OBJECT_KEY_RE = re.compile(r"deliveries/[A-Za-z0-9_-]{8,80}/[A-Za-z0-9_-]{8,80}\.[a-z0-9]{1,8}\Z")
 
@@ -79,6 +84,7 @@ class TencentSesMailer:
             try:
                 response = self.client.send_email({
                     "from": self.from_address, "destination": destination,
+                    "subject": MAIL_SUBJECTS[kind],
                     "template_id": int(self.template_ids[kind]), "variables": safe,
                 })
             except Exception as exc:
@@ -91,6 +97,7 @@ class TencentSesMailer:
             from tencentcloud.ses.v20201002 import models
             request = models.SendEmailRequest()
             request.FromEmailAddress = self.from_address
+            request.Subject = MAIL_SUBJECTS[kind]
             request.Destination = [destination]
             template = models.Template()
             template.TemplateID = int(self.template_ids[kind])
