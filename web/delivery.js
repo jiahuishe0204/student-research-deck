@@ -283,14 +283,6 @@ function downloadText(text, filename) {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' })); const link = document.createElement('a');
   link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); byId('action-feedback').textContent = `已下载 ${filename}`;
 }
-function downloadHtml() {
-  const filename = `${currentBaseFilename()}.html`;
-  const url = URL.createObjectURL(new Blob([currentStandaloneHtml()], { type: 'text/html;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  byId('action-feedback').textContent = `已下载 ${filename}，可在 Windows 浏览器直接打开。`;
-}
 function printCurrentAsPdf() {
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
@@ -310,14 +302,61 @@ function setDownloadMenu(open, focusFirst = false) {
   byId('download-trigger').setAttribute('aria-expanded', String(open));
   if (open && focusFirst) byId('download-options').querySelector('[role="menuitem"]')?.focus();
 }
-async function loadDelivery() {
-  byId('load-error').hidden = true; byId('loading-state').hidden = false; byId('delivery-body').hidden = true; document.querySelector('.delivery-app').setAttribute('aria-busy', 'true');
+let deliveryChallengeId = '';
+async function deliveryAuthRequest(path, body) {
+  const response = await fetch(path, { method: 'POST', credentials: 'include', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || '请求失败，请稍后重试');
+  return data;
+}
+byId('delivery-request-code').addEventListener('click', async event => {
+  const email = byId('delivery-email'); const status = byId('delivery-login-status');
+  if (!email.reportValidity()) return;
+  const button = event.currentTarget; button.disabled = true;
   try {
-    const taskId = new URL(location.href).searchParams.get('task') || '';
+    const data = await deliveryAuthRequest('/auth/otp/request', { email: email.value.trim() });
+    deliveryChallengeId = data.challenge_id;
+    byId('delivery-code-fields').hidden = false;
+    status.textContent = data.message || '如果邮箱地址有效，验证码将很快送达。';
+    byId('delivery-code').focus();
+  } catch (error) { status.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+byId('delivery-login').addEventListener('submit', async event => {
+  event.preventDefault(); const code = byId('delivery-code').value.trim();
+  const status = byId('delivery-login-status');
+  if (!deliveryChallengeId || !/^[0-9]{6}$/.test(code)) { status.textContent = '请输入邮件中的 6 位验证码。'; return; }
+  const button = byId('delivery-verify-code'); button.disabled = true;
+  try {
+    const data = await deliveryAuthRequest('/auth/otp/verify', { challenge_id: deliveryChallengeId, code });
+    if (!data.csrf_token) throw new Error('登录未完成，请重试。');
+    sessionStorage.setItem('research_csrf_token', data.csrf_token);
+    deliveryChallengeId = ''; byId('delivery-code').value = '';
+    await loadDelivery();
+  } catch (error) { status.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+async function loadDelivery() {
+  byId('delivery-login').hidden = true; byId('load-error').hidden = true; byId('loading-state').hidden = false; byId('delivery-body').hidden = true; document.querySelector('.delivery-app').setAttribute('aria-busy', 'true');
+  const taskId = new URL(location.href).searchParams.get('task') || '';
+  if (taskId) {
+    document.querySelector('.result-heading h1').textContent = '调研交付';
+    document.title = '调研交付｜调研交付台';
+    document.querySelector('.delivery-toolbar').hidden = true;
+    document.querySelector('.boundary-note').hidden = true;
+    document.querySelector('footer p').textContent = '私有交付阅读页 · 文件保留七天';
+    const account = document.querySelector('.header-action');
+    account.textContent = '邮箱验证'; account.classList.remove('login-pending');
+    account.removeAttribute('title'); account.setAttribute('aria-disabled', 'true');
+  }
+  try {
     if (taskId) {
       if (!/^TASK-[A-Za-z0-9_-]{6,64}$/.test(taskId)) throw new Error('invalid task id');
+      if (!sessionStorage.getItem('research_csrf_token')) { byId('loading-state').hidden = true; byId('delivery-login').hidden = false; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); return; }
       const response = await fetch(`/tasks/${encodeURIComponent(taskId)}/delivery`, { credentials: 'include', cache: 'no-store' });
       const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) { sessionStorage.removeItem('research_csrf_token'); byId('loading-state').hidden = true; byId('delivery-login').hidden = false; byId('delivery-login-status').textContent = '请使用任务所属邮箱重新验证。'; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); return; }
       if (!response.ok || !payload.data?.final_delivery) throw new Error(payload.message || 'delivery unavailable');
       const delivery = payload.data; const final = delivery.final_delivery;
       state.taskId = taskId; state.topic = delivery.topic || ''; state.production = true; state.artifacts = delivery.artifacts || [];
@@ -329,6 +368,8 @@ async function loadDelivery() {
       if (account) { account.textContent = '已验证邮箱'; account.classList.remove('login-pending'); account.removeAttribute('aria-disabled'); account.removeAttribute('title'); }
       document.querySelector('.boundary-note h2').textContent = '内容已完成，引用边界仍需核对。';
       document.querySelector('.boundary-note p').textContent = '本页读取当前账户的私有交付结果。报告与 PPT 使用同一套核验证据；正式提交课程或比赛前，仍应复核原文与图片许可。';
+      document.querySelector('.boundary-note').hidden = false;
+      document.querySelector('.delivery-toolbar').hidden = false;
       const footerCopy = document.querySelector('footer p');
       if (footerCopy) footerCopy.textContent = '私有交付阅读页 · 文件保留七天';
     } else if (window.DELIVERY_SAMPLE?.report && window.DELIVERY_SAMPLE?.slides) {
@@ -342,7 +383,7 @@ async function loadDelivery() {
     state.reportSections = parseHeadings(state.report); state.slidePages = parseSlides(state.slides); state.sources = extractSources(state.report, state.slides);
     if (!state.reportSections.length || !state.slidePages.length) throw new Error('sample format invalid');
     byId('loading-state').hidden = true; byId('delivery-body').hidden = false; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); showView('report');
-  } catch (_) { byId('loading-state').hidden = true; byId('load-error').hidden = false; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); }
+  } catch (_) { if (taskId) { byId('load-error').querySelector('h2').textContent = '暂时无法读取交付内容'; byId('load-error').querySelector('p').textContent = '请确认链接完整，并稍后重试。'; } byId('loading-state').hidden = true; byId('load-error').hidden = false; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); }
 }
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => changeView(button.dataset.view)));
 document.querySelector('.delivery-view-tabs').addEventListener('keydown', event => { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; const buttons = Array.from(document.querySelectorAll('[data-view]')); const current = buttons.findIndex(button => button.getAttribute('aria-selected') === 'true'); const next = buttons[(current + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length]; next.focus(); changeView(next.dataset.view); event.preventDefault(); });
