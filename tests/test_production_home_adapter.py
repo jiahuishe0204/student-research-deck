@@ -48,7 +48,7 @@ class ProductionHomeAdapterTests(unittest.TestCase):
         self.assertIn("function resetRunForNewTopic()", self.script)
         self.assertIn("resetRunForNewTopic();currentTopic=submittedTopic", self.script)
         self.assertIn("finally{await refreshTaskUsage().catch(()=>{})", self.script)
-        self.assertIn("app.js?v=11", self.html)
+        self.assertIn("app.js?v=12", self.html)
         self.assertIn("这条任务缺少已保存的规划或来源", self.script)
 
     def test_auth_panel_reuses_existing_visual_language(self):

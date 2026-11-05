@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from production_task_queue import PostgresTaskQueue
+from production_task_queue import FreeEntitlementUnavailable, PostgresTaskQueue
 
 
 class Cursor:
@@ -48,7 +48,7 @@ class ProductionTaskQueueTests(unittest.TestCase):
 
     def test_create_task_without_entitlement_fails_without_partial_write(self):
         connection = Connection([None])
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(FreeEntitlementUnavailable):
             PostgresTaskQueue(connection).create_task(user_id="u1", topic="CRISPR diagnostics", tier="fast")
         self.assertEqual(connection.rollbacks, 1)
 
