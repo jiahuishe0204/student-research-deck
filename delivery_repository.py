@@ -248,6 +248,19 @@ class PostgresDeliveryRepository:
                 (values["user_id"], values["email_hash"], values["user_email_ciphertext"], values["now"]),
             )
             actual_user_id = str(cursor.fetchone()[0])
+            # A newly verified account receives its first free entitlement in
+            # the same transaction as its user and session. Preserve any
+            # existing entitlement state and do not recreate eligibility for
+            # an account that already has task history.
+            cursor.execute(
+                """INSERT INTO free_entitlements(user_id,state,updated_at)
+                     SELECT %s,'available',%s
+                      WHERE NOT EXISTS (
+                          SELECT 1 FROM research_tasks WHERE user_id=%s
+                      )
+                     ON CONFLICT(user_id) DO NOTHING""",
+                (actual_user_id, values["now"], actual_user_id),
+            )
             cursor.execute(
                 """INSERT INTO user_sessions
                        (session_hash,user_id,csrf_hash,created_at,last_active_at,expires_at)

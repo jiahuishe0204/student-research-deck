@@ -12,6 +12,10 @@ VALID_TIERS = frozenset({"fast", "deep"})
 VALID_STAGES = frozenset("P%d" % number for number in range(1, 10))
 
 
+class FreeEntitlementUnavailable(Exception):
+    """The verified user has no available first free delivery entitlement."""
+
+
 def _json(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -33,13 +37,24 @@ class PostgresTaskQueue:
         job_id = str(uuid.uuid4())
         cursor = self.connection.cursor()
         try:
+            # Self-heal a missing row only for accounts with no task history.
+            # ON CONFLICT deliberately leaves reserved/consumed state intact.
+            cursor.execute(
+                """INSERT INTO free_entitlements(user_id,state,updated_at)
+                     SELECT %s,'available',CURRENT_TIMESTAMP
+                      WHERE NOT EXISTS (
+                          SELECT 1 FROM research_tasks WHERE user_id=%s
+                      )
+                     ON CONFLICT(user_id) DO NOTHING""",
+                (str(user_id), str(user_id)),
+            )
             cursor.execute(
                 """SELECT state FROM free_entitlements WHERE user_id=%s FOR UPDATE""",
                 (str(user_id),),
             )
             row = cursor.fetchone()
             if not row or row[0] != "available":
-                raise PermissionError("当前账户没有可用任务额度")
+                raise FreeEntitlementUnavailable("当前账户没有可用的首次免费资格")
             cursor.execute(
                 """INSERT INTO research_tasks
                        (task_id,user_id,topic,tier,status,current_stage,expires_at)
@@ -364,4 +379,4 @@ class PostgresTaskQueue:
         return True
 
 
-__all__ = ["PostgresTaskQueue"]
+__all__ = ["FreeEntitlementUnavailable", "PostgresTaskQueue"]

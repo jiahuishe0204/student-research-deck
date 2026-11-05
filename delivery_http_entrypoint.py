@@ -14,7 +14,7 @@ from otp_service import OtpService
 from private_delivery_api import authenticated_download
 from preauth_intent_ticket import verify_intent_ticket
 from production_config import load_cos_config, load_delivery_common_config
-from production_task_queue import PostgresTaskQueue
+from production_task_queue import FreeEntitlementUnavailable, PostgresTaskQueue
 from production_session import COOKIE_ATTRIBUTES
 from production_session import SessionAuthenticator
 from tencent_delivery import TencentCosArtifactStore
@@ -139,6 +139,10 @@ def main_handler(event, context=None, *, services=None):
             )
             return _response(200, {"ok": True, "download_url": url}, {"Cache-Control": "no-store"})
         return _response(404, {"ok": False, "message": "接口不存在"})
+    except FreeEntitlementUnavailable:
+        return _response(403, {"ok": False, "code": "free_entitlement_unavailable",
+                               "message": "该账号当前没有可用的首次免费资格。你已登录；如认为有误，请联系支持。"},
+                         {"Cache-Control": "no-store"})
     except (ValueError, LookupError, PermissionError):
         # Authentication and challenge failures deliberately share one response.
         return _response(401, {"ok": False, "message": "请求无效或已过期"}, {"Cache-Control": "no-store"})
