@@ -154,11 +154,23 @@ $('#request-code').addEventListener('click',async event=>{
 
 $('#verify-code').addEventListener('click',async event=>{
   if(!productionMode)return;const button=event.currentTarget,code=$('#auth-code').value.trim(),status=$('#auth-status');
+  if(sessionStorage.getItem(csrfKey)){
+    setBusy(button,true,'正在重试保存…');
+    try{if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});}
+    catch(exc){status.textContent=`邮箱已验证，但任务保存或启动失败：${exc.message}。请稍后点击“重试保存任务”；无需再次输入验证码。`;error.textContent=exc.message;}
+    finally{setBusy(button,false,'重试保存任务');}
+    return;
+  }
   if(!productionChallengeId||!/^[0-9]{6}$/.test(code)){status.textContent='请输入邮件中的 6 位验证码。';$('#auth-code').focus();return;}
   setBusy(button,true,'验证中…');
-  try{const response=await productionRequest('/auth/otp/verify',{method:'POST',body:{challenge_id:productionChallengeId,code}});sessionStorage.setItem(csrfKey,response.csrf_token);$('#production-auth').classList.add('verified');status.textContent='邮箱验证成功。';if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});}
-  catch(exc){status.textContent=exc.message;}
-  finally{setBusy(button,false,'确认登录');}
+  try{
+    const response=await productionRequest('/auth/otp/verify',{method:'POST',body:{challenge_id:productionChallengeId,code}});
+    sessionStorage.setItem(csrfKey,response.csrf_token);productionChallengeId='';$('#auth-code').value='';$('#auth-code').disabled=true;
+    $('#production-auth').classList.add('verified');status.textContent='邮箱验证成功。正在保存题目并启动调研…';
+  }catch(exc){status.textContent=`验证码验证失败：${exc.message}`;setBusy(button,false,'确认登录');return;}
+  try{if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});}
+  catch(exc){status.textContent=`邮箱已验证，但任务保存或启动失败：${exc.message}。请稍后点击“重试保存任务”；无需再次输入验证码。`;error.textContent=exc.message;}
+  finally{setBusy(button,false,'重试保存任务');}
 });
 
 form.addEventListener('submit',async event=>{
@@ -192,7 +204,13 @@ confirmButton.addEventListener('click',async()=>{
   if(currentIntent?.need_clarification&&!clarification){(directions.length?$('#direction-options .direction-card'):$('#clarification'))?.focus();return;}
   setBusy(confirmButton,true,'正在建立规划… <span>·</span>');
   try{
-    if(productionMode){productionConfirmedClarification=clarification;if(!sessionStorage.getItem(csrfKey)){$('#production-auth').hidden=false;$('#auth-status').textContent='题目已确认。请验证邮箱以保存任务并开始完整调研。';$('#production-auth').scrollIntoView({behavior:'smooth',block:'center'});return;}await startProductionTask();return;}
+    if(productionMode){
+      productionConfirmedClarification=clarification;
+      if(!sessionStorage.getItem(csrfKey)){$('#production-auth').hidden=false;$('#auth-status').textContent='题目已确认。请验证邮箱以保存任务并开始完整调研。';$('#production-auth').scrollIntoView({behavior:'smooth',block:'center'});return;}
+      try{await startProductionTask();}
+      catch(exc){$('#production-auth').hidden=false;$('#auth-status').textContent=`邮箱已验证，但任务保存或启动失败：${exc.message}。请稍后点击“重试保存任务”；无需再次输入验证码。`;error.textContent=exc.message;}
+      return;
+    }
     $('#task-workspace').hidden=false;$('#plan-output').innerHTML='<p class="empty-plan">正在确定研究问题、资料需求和交付结构…</p>';$('#task-status-title').textContent='正在建立调研规划';$('#task-workspace').scrollIntoView({behavior:'smooth',block:'start'});
     const response=await request('/api/plan',{topic:currentTopic,tier:currentTier,clarification,direction_id:selectedDirection?.direction_id||null});currentPlan=response.data;await persistStage('P2','plan_completed',currentPlan,'plan',true);renderPlan(response.data,response.usage);await refreshTaskUsage().catch(()=>{});
     $('#task-status-title').textContent='调研规划已经就绪';document.querySelector('.progress-line i').style.width='100%';
