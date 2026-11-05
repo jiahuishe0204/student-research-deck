@@ -26,6 +26,14 @@ class TaskPublicViewTests(unittest.TestCase):
         self.assertEqual(view["ppt"]["pages"][0]["title"], "第一页")
         self.assertNotIn("change_log", view)
 
+    def test_partial_delivery_is_visible_with_boundary_notice(self):
+        final = {"final_delivery": {"data": {"final_report": {"title": "部分报告", "markdown": "# 有证据支持的内容"},
+                                              "final_ppt": {"deck_title": "部分汇报", "pages": [{"title": "已有证据"}]}}}}
+        progress = progress_view(self.task("partial", final))
+        self.assertTrue(progress["delivery_available"])
+        self.assertIn("证据边界", progress["next_action"])
+        self.assertEqual(delivery_view(self.task("partial", final))["report"]["title"], "部分报告")
+
 
 if __name__ == "__main__":
     unittest.main()

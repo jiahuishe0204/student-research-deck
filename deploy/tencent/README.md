@@ -2,11 +2,11 @@
 
 本目录只保存无密钥模板。真实账号标识、存储桶、域名和密钥不得提交仓库。
 
-`functions.template.json` 固化四类函数的入口、定时器、超时、并发和环境变量边界。它是部署输入模板，不包含真实资源标识；部署前将其中角色名称映射到用户账号内的CAM角色。
+`functions.template.json` 固化各类函数的入口、定时器、超时、并发和环境变量边界。它是部署输入模板，不包含真实资源标识；部署前将其中角色名称映射到用户账号内的CAM角色。
 
 ## 函数与触发器
 
-- API 函数：签发/验证验证码、会话鉴权、下载地址申请。
+- API 函数：匿名 P1 题目理解、签发/验证验证码、会话鉴权、下载地址申请。
 - 任务 API：由已验证会话创建任务、原子占用体验额度并查询任务进度。
 - 任务 Worker：每分钟从 PostgreSQL 队列原子领取一个阶段作业；租约 fencing 防止旧实例覆盖新结果。P9 使用带 COS 权限的独立角色发布三类私有交付物。
 - Outbox 定时函数：每分钟执行 `delivery_scf_entrypoint.main_handler`，事件为 `{"action":"outbox"}`。
@@ -30,7 +30,7 @@
 
 ## 尚需真实云端完成
 
-1. 按顺序在 PostgreSQL 执行 `migrations/006_research_task_queue.sql` 和 `migrations/007_workflow_transitions.sql`，并保存迁移证据。
+1. 核对 PostgreSQL 当前 schema 与所有迁移证据。队列基线为 `006_research_task_queue.sql`、`007_workflow_transitions.sql`；共享登录前费用账本为 `008_preauth_daily_budget.sql`，部分交付状态为 `009_partial_task_status.sql`，共享模型费用账本为 `010_shared_model_usage_budget.sql`。部署前确认数据库中实际对象与代码相符；任何尚未应用的迁移须先备份、评审并单独批准，代码发布不会代替迁移。
 2. 确认 SCF/COS 地域和已备案或可验证的发信域名。
 3. 创建私有桶、生命周期规则、最小权限角色和三个 SES 模板。
 4. 通过服务端环境注入配置，执行快速版、深入版各一次端到端冒烟。
@@ -42,7 +42,11 @@ P9 不直接把任务标记为完成。Worker 先以确定性对象键上传 `re
 
 交付阅读页支持 `delivery.html?task=TASK-...`。该模式只调用同源 `/tasks/{task_id}/delivery` 和 `/delivery/download`，携带 HttpOnly 会话 Cookie；下载请求还必须携带邮箱验证时返回、仅保存在当前标签页的 CSRF Token。无 `task` 参数时仍显示仓库内的验收样本。部署时必须由 EdgeOne 将这两个同源路径转发到独立 SCF 函数 URL，不能把上游地址或网关密钥注入浏览器脚本。
 
-首页通过同源 `/api/health` 自动探测生产网关。只有网关明确返回 `runtime=edgeone-gateway` 且健康时，页面才显示邮箱验证码登录并改用 `/tasks`、`/tasks/{task_id}/progress` 和 `/tasks/{task_id}/continue`；未配置、不可达或本地开发时继续使用原有演示流程。生产部署必须通过 EdgeOne Cloud Functions 将 `/auth/*`、`/tasks*` 与 `/delivery/download` 分别转发到独立 SCF 函数 URL，并保留 Cookie 和 `X-CSRF-Token` 请求头。旧 API 网关触发器已经退出服务，不作为新部署方案。
+首页通过同源 `/api/health` 自动探测生产网关。网关健康且各 API 上游均已配置时，访客先经 `/api/intent` 获取 P1 和短期签名凭证；确认方向后才验证邮箱，`POST /tasks` 使用签名凭证写入已完成的 P1 并原子保留免费资格，然后 `/tasks/{task_id}/continue` 启动 P2—P9。匿名 P1 使用共享 PostgreSQL 限频（每 IP 每 10 分钟最多 20 次，超限暂停 30 分钟）及单次/每日费用账本。生产域名健康检查失败时停止提交，不回退到本地演示流程；只有本地地址允许演示流程。生产部署必须通过 EdgeOne Cloud Functions 将 `/api/intent`、`/auth/*`、`/tasks*` 与 `/delivery/download` 分别转发到独立 SCF 函数 URL。旧 API 网关触发器已经退出服务，不作为新部署方案。
+
+### 当前上线阻断项
+
+匿名 P1 入口、同源路由、每 IP 限频、短期签名凭证与登录后 P1 结果接续已写入代码并进入本地回归；尚未证明云端已部署或可用。上线前须只读核对数据库 `004/008/010` 迁移对象，必要迁移先备份并单独评审；再配置新匿名 P1 函数、EdgeOne `INTENT_API_BASE_URL` 及与任务 API 一致的 `PREAUTH_INTENT_SIGNING_SECRET`，完成真实网关、预算拦截、邮箱登录、资格保留、P2—P9 与下载端到端验收。缺少任一云端证据不得宣称上线完成。
 
 ## 告警、恢复与回滚
 

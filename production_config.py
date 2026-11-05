@@ -23,8 +23,10 @@ class ProductionConfig:
     task_max_cost_cny: float
     ses_secret_id: str
     ses_secret_key: str
+    ses_session_token: str
     cos_secret_id: str
     cos_secret_key: str
+    cos_session_token: str
     ses_region: str
     ses_template_otp: int
     ses_template_completed: int
@@ -45,6 +47,7 @@ class SesConfig:
     email_from: str
     ses_secret_id: str
     ses_secret_key: str
+    ses_session_token: str
     ses_region: str
     ses_template_otp: int
     ses_template_completed: int
@@ -55,6 +58,7 @@ class SesConfig:
 class CosConfig:
     cos_secret_id: str
     cos_secret_key: str
+    cos_session_token: str
     cos_region: str
     cos_bucket: str
 
@@ -66,8 +70,23 @@ def _required(values, name):
     return value
 
 
+def _cloud_credentials(values, prefix):
+    """Use the SCF runtime role triplet when present; never mix credential sources."""
+    runtime = tuple(str(values.get(name, "")).strip() for name in (
+        "TENCENTCLOUD_SECRETID", "TENCENTCLOUD_SECRETKEY", "TENCENTCLOUD_SESSIONTOKEN"))
+    if any(runtime):
+        if not all(runtime):
+            raise RuntimeError("SCF 临时凭证不完整")
+        return runtime
+    secret_id = _required(values, prefix + "_SECRET_ID")
+    secret_key = _required(values, prefix + "_SECRET_KEY")
+    return secret_id, secret_key, ""
+
+
 def load_production_config(environ=None):
     values = os.environ if environ is None else environ
+    ses_id, ses_key, ses_token = _cloud_credentials(values, "SES")
+    cos_id, cos_key, cos_token = _cloud_credentials(values, "COS")
     config = ProductionConfig(
         database_url=_required(values, "DATABASE_URL"),
         deepseek_api_key=_required(values, "DEEPSEEK_API_KEY"),
@@ -76,10 +95,12 @@ def load_production_config(environ=None):
         public_origin=_required(values, "PUBLIC_ORIGIN").rstrip("/"),
         task_max_total_tokens=int(_required(values, "MODEL_TASK_MAX_TOTAL_TOKENS")),
         task_max_cost_cny=float(_required(values, "MODEL_TASK_MAX_COST_CNY")),
-        ses_secret_id=_required(values, "SES_SECRET_ID"),
-        ses_secret_key=_required(values, "SES_SECRET_KEY"),
-        cos_secret_id=_required(values, "COS_SECRET_ID"),
-        cos_secret_key=_required(values, "COS_SECRET_KEY"),
+        ses_secret_id=ses_id,
+        ses_secret_key=ses_key,
+        ses_session_token=ses_token,
+        cos_secret_id=cos_id,
+        cos_secret_key=cos_key,
+        cos_session_token=cos_token,
         ses_region=_required(values, "SES_REGION"),
         ses_template_otp=int(_required(values, "SES_TEMPLATE_OTP")),
         ses_template_completed=int(_required(values, "SES_TEMPLATE_COMPLETED")),
@@ -116,10 +137,12 @@ def load_delivery_common_config(environ=None):
 
 def load_ses_config(environ=None):
     values = os.environ if environ is None else environ
+    secret_id, secret_key, token = _cloud_credentials(values, "SES")
     config = SesConfig(
         email_from=_required(values, "EMAIL_FROM"),
-        ses_secret_id=_required(values, "SES_SECRET_ID"),
-        ses_secret_key=_required(values, "SES_SECRET_KEY"),
+        ses_secret_id=secret_id,
+        ses_secret_key=secret_key,
+        ses_session_token=token,
         ses_region=_required(values, "SES_REGION"),
         ses_template_otp=int(_required(values, "SES_TEMPLATE_OTP")),
         ses_template_completed=int(_required(values, "SES_TEMPLATE_COMPLETED")),
@@ -132,9 +155,11 @@ def load_ses_config(environ=None):
 
 def load_cos_config(environ=None):
     values = os.environ if environ is None else environ
+    secret_id, secret_key, token = _cloud_credentials(values, "COS")
     return CosConfig(
-        cos_secret_id=_required(values, "COS_SECRET_ID"),
-        cos_secret_key=_required(values, "COS_SECRET_KEY"),
+        cos_secret_id=secret_id,
+        cos_secret_key=secret_key,
+        cos_session_token=token,
         cos_region=_required(values, "COS_REGION"),
         cos_bucket=_required(values, "COS_BUCKET"),
     )

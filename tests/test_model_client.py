@@ -2,6 +2,7 @@ import json
 import os
 import http.client
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 from model_client import ModelOutputTruncated, deepseek_json, parse_json_object, read_with_deadline
@@ -108,6 +109,18 @@ class ModelClientTests(unittest.TestCase):
                               usage_callback=lambda attempt, status, usage, detail: statuses.append(status))
         self.assertEqual(statuses, ["truncated"])
         self.assertEqual(request.call_count, 1)
+
+    def test_http_error_keeps_provider_message_without_exposing_request(self):
+        error = urllib.error.HTTPError(
+            "https://api.example/chat/completions", 400, "Bad Request", {},
+            __import__("io").BytesIO(json.dumps({"error": {"type": "invalid_request_error", "message": "model not found"}}).encode()),
+        )
+        details = []
+        with patch("model_client.urllib.request.urlopen", side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, "DeepSeek HTTP 400: type=invalid_request_error; message=model not found"):
+                deepseek_json("secret-key", "model", "system", "prompt", {},
+                              usage_callback=lambda attempt, status, usage, detail: details.append(detail))
+        self.assertEqual(details, [{"status": 400, "provider_error": "type=invalid_request_error; message=model not found"}])
 
 
 if __name__ == "__main__":

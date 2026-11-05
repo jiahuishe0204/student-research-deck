@@ -10,6 +10,8 @@ from production_artifacts import publish_final_artifacts
 from production_config import load_cos_config, load_delivery_common_config
 from production_task_queue import PostgresTaskQueue
 from production_task_worker import execute_next_job
+from postgres_model_usage import PostgresModelUsageLedger
+from preauth_budget import PostgresPreAuthDailyBudget
 from scf_app import build_workflow
 from scf_config import load_scf_config
 from scf_entrypoint import _connect_database
@@ -33,7 +35,12 @@ def main_handler(event, context=None, *, connection=None, workflow=None):
             return lambda task_id, final, payload: publish_final_artifacts(
                 lifecycle, task_id, final, payload,
             )
-        return execute_next_job(PostgresTaskQueue(connection), workflow or build_workflow(ROOT),
+        active_workflow = workflow if workflow is not None else build_workflow(
+            ROOT,
+            daily_budget_ledger=PostgresPreAuthDailyBudget(connection),
+            usage_ledger=PostgresModelUsageLedger(connection),
+        )
+        return execute_next_job(PostgresTaskQueue(connection), active_workflow,
                                 root=ROOT, publisher_factory=publisher_factory)
     finally:
         if owned:

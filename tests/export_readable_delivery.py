@@ -196,34 +196,116 @@ def repair(task_id, data):
 
 
 def delivery_markdown(final, source_records):
+    source_by_id = {item["source_id"]: item for item in source_records}
     source_urls = {item["source_id"]: item.get("url", "") for item in source_records}
     lines = ["# %s" % final["final_ppt"]["deck_title"], "", "## 故事线", "", final["final_ppt"]["storyline"], ""]
-    for page in final["final_ppt"]["pages"]:
-        lines += ["## %s  %s" % (page["page_id"], page["title"]), "", "**本页目的**：%s" % page["purpose"], "", "**上屏文字**", ""]
+    for page_number, page in enumerate(final["final_ppt"]["pages"], 1):
+        navigation_title = page.get("navigation_title") or page["title"]
+        lines += ["## 第 %d 页｜%s" % (page_number, navigation_title), "", "目录标题：%s" % navigation_title, "", "**副标题**：%s" % page["title"], "", "**本页目的**：%s" % page["purpose"], "", "**上屏文字**", ""]
         lines += ["- " + item for item in page["on_slide_text"]]
-        lines += ["", "**配图建议**：%s" % page["visual_suggestion"], ""]
-        if page["figure_refs"]:
-            lines += ["**原文图片定位**", ""]
-            for figure in page["figure_refs"]:
-                locator = figure["locator"]
-                match = re.search(r"https://\S+", locator)
-                link = ("[打开原文图页](%s)" % match.group(0)) if match else locator
-                lines.append("- %s；用途：%s；复用状态：%s" % (link, figure["intended_use"], figure["reuse_status"]))
+        linked_figures = []
+        for figure in page.get("figure_refs", []):
+            match = re.search(r"https://\S+", str(figure.get("locator", "")))
+            if match:
+                linked_figures.append((figure, match.group(0).rstrip("，,；;")))
+        if linked_figures and page.get("visual_suggestion", "").strip():
+            lines += ["", "**配图建议与图源**：%s" % page["visual_suggestion"], ""]
+            lines += ["- [查看原文图源](%s)；用途：%s；复用状态：%s" % (url, figure["intended_use"], figure["reuse_status"]) for figure, url in linked_figures]
             lines.append("")
-        else:
-            lines += ["**原文图片定位**：本页没有通过证据链确认的原文图，需要后续补图或自行绘制示意图。", ""]
-        linked_sources = [(item["source_id"], source_urls.get(item["source_id"], "")) for item in page["source_citations"]]
-        linked_sources = [(source_id, url) for source_id, url in linked_sources if url]
-        if linked_sources:
-            lines += ["**图片与资料入口**", ""]
-            lines += ["- [%s 原文页面](%s)" % (source_id, url) for source_id, url in linked_sources]
-            lines.append("")
-        lines += ["**页下注释（Vancouver 短格式）**", ""]
-        lines += ["- " + item["short_vancouver"] for item in page["source_citations"]]
-        lines += ["", "**简短讲稿**", "", page["speaker_notes"], "", "**证据编号**：%s" % "、".join(page["evidence_ids"]), ""]
+        lines += ["**参考来源**", ""]
+        lines += ["- " + format_paper_citation(item, source_by_id.get(item["source_id"], {})) for item in page["source_citations"]]
+        notes = re.sub(r"（引用证据应改为EV::[^）]+）", "", page["speaker_notes"])
+        lines += ["", "**简短讲稿**", "", notes, ""]
     lines += ["## 使用前必须知道的证据边界", ""]
     lines += ["- " + item for item in final["open_issues"]]
     return "\n".join(lines).strip() + "\n"
+
+
+def format_paper_citation(citation, source):
+    authors = source.get("authors") or []
+    def abbreviated_author(name):
+        parts = str(name).rstrip(".").split()
+        if len(parts) < 2:
+            return str(name).rstrip(".")
+        if parts[-1].isupper() and parts[-1].isalpha():
+            return "%s %s" % (parts[0], parts[-1])
+        surname = parts[-1]
+        initials = "".join(part[0].upper() for part in parts[:-1])
+        return "%s %s" % (surname, initials)
+    if authors:
+        author_text = ", ".join(abbreviated_author(author) for author in authors[:3])
+        if len(authors) > 3:
+            author_text += ", et al."
+        else:
+            author_text += "."
+    else:
+        author_text = str(citation.get("short_vancouver", "")).split(".", 1)[0] + "."
+
+    journal = str(source.get("journal") or "").strip()
+    journal_abbreviations = {
+        "International journal of molecular sciences": "Int J Mol Sci.",
+        "Current protocols": "Curr Protoc.",
+    }
+    journal_fallbacks = {"MED:42891137": "Front Immunol."}
+    if journal:
+        journal = journal_abbreviations.get(journal, journal.rstrip(".") + ".")
+    else:
+        short = str(citation.get("short_vancouver", ""))
+        year = str(source.get("year") or "")
+        prefix = short.split(year, 1)[0] if year and year in short else short
+        journal = journal_fallbacks.get(source.get("source_id"), prefix.strip().rsplit(". ", 1)[-1].strip())
+        if journal and not journal.endswith("."):
+            journal += "."
+
+    year = str(source.get("year") or "")
+    locator = ""
+    volume = str(source.get("volume") or "").strip()
+    issue = str(source.get("issue") or "").strip()
+    pages = str(source.get("pages") or "").strip()
+    if volume:
+        locator = volume + ("(%s)" % issue if issue else "")
+        if pages:
+            locator += ":" + pages
+    elif pages:
+        locator = pages
+    if not locator and citation.get("short_vancouver") and year in citation["short_vancouver"]:
+        tail = citation["short_vancouver"].split(year, 1)[1].strip().lstrip(";").rstrip(".")
+        locator = tail
+    cite = "%s %s %s" % (author_text, journal, year)
+    if locator:
+        cite += ";" + locator
+    doi = str(source.get("doi") or "").strip()
+    if doi:
+        cite += ". doi:[%s](https://doi.org/%s)" % (doi, doi)
+    else:
+        url = str(source.get("url") or "").strip()
+        if url:
+            cite += ". [原文](%s)" % url
+    return cite.rstrip(" .") + ("." if not cite.endswith(")") else "")
+
+
+def report_reference_style(markdown, source_records):
+    by_url = {str(item.get("url", "")).rstrip("/"): item for item in source_records}
+    in_references = False
+    output = []
+    for line in markdown.splitlines():
+        if line.strip() == "## 参考文献":
+            in_references = True
+            output.append(line)
+            continue
+        if in_references:
+            match = re.match(r"^(\[\d+\])\s+.*?\s+(https?://\S+)\s*$", line)
+            if match:
+                source = by_url.get(match.group(2).rstrip("/"))
+                if source:
+                    citation = {"source_id": source["source_id"], "short_vancouver": ""}
+                    output.append("%s %s" % (match.group(1), format_paper_citation(citation, source)))
+                    continue
+        output.append(line)
+    return "\n".join(output).replace(
+        "重要事实和判断均标注证据编号，供内部核验。",
+        "重要事实和判断均在相应位置标注参考来源，便于追溯原文。",
+    ).rstrip() + "\n"
 
 
 def usage_rows(task_id):

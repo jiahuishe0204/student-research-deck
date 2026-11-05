@@ -1,0 +1,15 @@
+{
+  "task_id": "codex-smoke-20261023-p2",
+  "stage": "P2",
+  "attempt": 1,
+  "payload": {
+    "topic": "CAR-T用于实体瘤的技术路线比较",
+    "intent": {
+      "domain": "life_science",
+      "normalized_topic": "CAR-T用于实体瘤的技术路线比较",
+      "need_clarification": false
+    },
+    "tier": "fast",
+    "clarification": ""
+  }
+}

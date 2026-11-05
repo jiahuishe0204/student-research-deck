@@ -1,5 +1,7 @@
 import sys
 import unittest
+from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -28,6 +30,32 @@ class FakeCos:
 
 
 class TencentDeliveryTests(unittest.TestCase):
+    def test_real_sdk_request_includes_required_subject_for_each_mail_kind(self):
+        models = ModuleType("tencentcloud.ses.v20201002.models")
+        models.SendEmailRequest = SimpleNamespace
+        models.Template = SimpleNamespace
+        modules = {name: ModuleType(name) for name in (
+            "tencentcloud", "tencentcloud.ses", "tencentcloud.ses.v20201002")}
+        modules["tencentcloud.ses.v20201002"].models = models
+        modules["tencentcloud.ses.v20201002.models"] = models
+        requests = []
+        class Client:
+            def SendEmail(self, request):
+                # SES rejects the request when this required field is absent.
+                if not getattr(request, "Subject", ""):
+                    raise ValueError("MissingParameter.Subject")
+                requests.append(request)
+                return SimpleNamespace(MessageId="m", RequestId="r")
+        mailer = TencentSesMailer(Client(), "noreply@example.com",
+                                  {"otp": 101, "completed": 102, "expiry": 103})
+        with patch.dict(sys.modules, modules):
+            for kind in ("otp", "completed", "expiry"):
+                mailer.send_template(kind, "user@example.com", {"code": "123456"})
+        self.assertEqual(len(requests), 3)
+        for request in requests:
+            self.assertNotIn("123456", request.Subject)
+            self.assertEqual(request.Destination, ["user@example.com"])
+
     def test_object_key_contains_no_email_or_topic(self):
         self.assertEqual(private_object_key("TASK_12345678", "ART_12345678", "pdf"),
                          "deliveries/TASK_12345678/ART_12345678.pdf")

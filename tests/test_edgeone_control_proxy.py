@@ -9,11 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 class EdgeOneControlProxyTests(unittest.TestCase):
     def test_proxy_routes_cover_production_browser_contract(self):
         base = ROOT / "deploy" / "edgeone" / "cloud-functions"
-        for relative in ("auth/[[path]].js", "tasks/index.js", "tasks/[[path]].js", "delivery/download.js"):
+        for relative in ("api/intent.js", "auth/[[path]].js", "tasks/index.js", "tasks/[[path]].js", "delivery/download.js"):
             self.assertIn("proxyControlApi", (base / relative).read_text())
         self.assertIn('"AUTH_API_BASE_URL"', (base / "auth/[[path]].js").read_text())
         self.assertIn('"TASK_API_BASE_URL"', (base / "tasks/index.js").read_text())
         self.assertIn('"DELIVERY_API_BASE_URL"', (base / "delivery/download.js").read_text())
+        self.assertIn('"INTENT_API_BASE_URL"', (base / "api/intent.js").read_text())
 
     def test_proxy_forwards_only_required_identity_headers(self):
         source = (ROOT / "deploy/edgeone/cloud-functions/_proxy.js").read_text()
@@ -28,10 +29,12 @@ class EdgeOneControlProxyTests(unittest.TestCase):
         manifest = json.loads((ROOT / "deploy/tencent/functions.template.json").read_text())
         http = [item for item in manifest["functions"] if item.get("trigger", {}).get("type") == "function-url"]
         self.assertEqual({item["name"] for item in http}, {
-            "research-health-api", "research-auth-api", "research-download-api", "research-task-api"
+            "research-health-api", "research-auth-api", "research-intent-api", "research-download-api", "research-task-api"
         })
         self.assertTrue(all("EDGEONE_GATEWAY_SECRET" in item["environment"] for item in http))
         self.assertTrue(all(item["trigger"]["cors"] is False for item in http))
+        intent = next(item for item in http if item["name"] == "research-intent-api")
+        self.assertFalse({"IDENTITY_SECRET", "PATSNAP_MCP_API_KEY", "COS_SECRET_ID", "SES_SECRET_ID"} & set(intent["environment"]))
 
 
 if __name__ == "__main__":

@@ -15,6 +15,8 @@ def progress_view(task):
     stage = task.get("current_stage")
     if status == "completed":
         title, next_action = "交付已完成", "阅读报告与 PPT 逐页内容。"
+    elif status == "partial":
+        title, next_action = "已交付可支持的部分内容", "阅读已交付内容，并留意其中说明的证据边界与待核实问题。"
     elif status == "failed":
         title, next_action = "任务未完成", "查看失败说明；技术失败不得消耗首次免费资格。"
     elif status == "cancelled":
@@ -27,12 +29,12 @@ def progress_view(task):
         "title": title,
         "next_action": next_action,
         "updated_at": task["updated_at"],
-        "delivery_available": status == "completed" and bool(task.get("artifacts", {}).get("final_delivery")),
+        "delivery_available": status in {"completed", "partial"} and bool(task.get("artifacts", {}).get("final_delivery")),
     }
 
 
 def delivery_view(task):
-    if task["status"] != "completed":
+    if task["status"] not in {"completed", "partial"}:
         raise ValueError("任务尚未完成，不能展示正式交付")
     final = task.get("artifacts", {}).get("final_delivery", {}).get("data")
     if not isinstance(final, dict):

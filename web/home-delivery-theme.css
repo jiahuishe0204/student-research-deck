@@ -173,6 +173,16 @@ body {
 
 footer { border-color: #e2dee7; }
 
+.footer-matter { display: grid; justify-items: center; gap: 8px; }
+.footer-matter p { margin: 0; text-align: center; }
+.public-security-filing { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.public-security-filing img { display: block; width: 20px; height: 20px; object-fit: contain; }
+
+@media (max-width: 620px) {
+  .footer-matter { justify-items: start; }
+  .footer-matter p { text-align: left; }
+}
+
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; }
   .command-panel { max-width: 680px; }

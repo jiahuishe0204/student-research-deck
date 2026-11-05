@@ -18,6 +18,67 @@ def normalized_url(value):
 
 
 class DeliveryReaderTests(unittest.TestCase):
+    def test_real_case_export_keeps_navigation_title_and_full_title(self):
+        from tests.export_readable_delivery import delivery_markdown
+
+        final = {"final_ppt": {"deck_title": "测试", "storyline": "故事", "pages": [{
+            "page_id": "P1", "navigation_title": "免疫微环境异质性",
+            "title": "单细胞分析显示肿瘤免疫微环境存在细胞状态差异",
+            "purpose": "解释异质性", "on_slide_text": ["要点"],
+            "visual_suggestion": "", "figure_refs": [],
+            "source_citations": [{"source_id": "SRC-1", "short_vancouver": "Xiang L, et al. Int J Mol Sci. 2024;25(17)."}],
+            "speaker_notes": "讲稿", "evidence_ids": ["EV1"],
+        }]}, "open_issues": []}
+        sources = [{"source_id": "SRC-1", "authors": ["Lingyan Xiang", "Jie Rao", "Jingping Yuan", "Ting Xie"],
+                    "journal": "International journal of molecular sciences", "year": "2024", "volume": "25",
+                    "issue": "17", "pages": "", "doi": "10.3390/ijms25179482"}]
+        markdown = delivery_markdown(final, sources)
+        self.assertIn("## 第 1 页｜免疫微环境异质性", markdown)
+        self.assertIn("**副标题**：单细胞分析显示肿瘤免疫微环境存在细胞状态差异", markdown)
+        self.assertIn("**参考来源**", markdown)
+        self.assertIn("Xiang L, Rao J, Yuan J, et al. Int J Mol Sci. 2024;25(17). doi:[10.3390/ijms25179482](https://doi.org/10.3390/ijms25179482)", markdown)
+        self.assertNotIn("EV1", markdown)
+        self.assertNotIn("配图建议与图源", markdown)
+
+    def test_figure_guidance_is_omitted_without_a_direct_link_and_shown_with_one(self):
+        from tests.export_readable_delivery import delivery_markdown
+
+        page = {"page_id": "P1", "navigation_title": "细胞状态", "title": "完整标题", "purpose": "说明",
+                "on_slide_text": ["要点"], "visual_suggestion": "展示细胞状态差异", "figure_refs": [],
+                "source_citations": [], "speaker_notes": "讲稿", "evidence_ids": ["EV::1"]}
+        final = {"final_ppt": {"deck_title": "测试", "storyline": "故事", "pages": [page]}, "open_issues": []}
+        markdown = delivery_markdown(final, [])
+        self.assertNotIn("配图建议与图源", markdown)
+        page["figure_refs"] = [{"figure_id": "SRC-1:Fig2", "locator": "Figure 2 https://publisher.example/article/figure/2",
+                                "intended_use": "展示细胞状态差异", "reuse_status": "unknown"}]
+        markdown = delivery_markdown(final, [])
+        self.assertIn("配图建议与图源", markdown)
+        self.assertIn("https://publisher.example/article/figure/2", markdown)
+        self.assertNotIn("EV::1", markdown)
+
+    def test_reader_renders_short_main_title_and_full_subtitle(self):
+        script = (WEB / "delivery.js").read_text(encoding="utf-8")
+        self.assertIn("blocks['副标题'] || match[2].trim()", script)
+        self.assertIn("<h1>${escapeHtml(page.navigationTitle)}</h1><p class=\"slide-subtitle\">${escapeHtml(page.title)}</p>", script)
+        self.assertIn("参考来源|讲稿", script)
+        self.assertIn("function renderFigureBlock(markdown)", script)
+        self.assertIn("配图建议与图源', markdown", script)
+        self.assertTrue((WEB / "delivery-title-hierarchy.css").exists())
+
+    def test_download_menu_exports_complete_report_and_entire_slide_package(self):
+        for html_path in (WEB / "delivery.html", WEB / "single-cell-delivery.html"):
+            html = html_path.read_text(encoding="utf-8")
+            for artifact in ("report", "slides"):
+                for fmt in ("markdown", "html", "pdf"):
+                    self.assertIn(f'data-kind="{artifact}" data-format="{fmt}"', html)
+            self.assertIn("全部页面与讲稿", html)
+        script = (WEB / "delivery.js").read_text(encoding="utf-8")
+        self.assertIn("function artifactInfo(kind)", script)
+        self.assertIn("kind === 'report' ? state.report : state.slides", script)
+        self.assertIn("function completeArtifactHtml(kind)", script)
+        self.assertIn("function printArtifactAsPdf(kind)", script)
+        self.assertNotIn("state.slidePages[state.selectedSlide].number}.md", script)
+
     def test_browser_samples_match_reviewed_source_documents(self):
         self.assertEqual(REPORT_SOURCE.read_text(encoding="utf-8"),
                          (WEB / "sample-delivery" / "report.md").read_text(encoding="utf-8"))
@@ -62,6 +123,7 @@ class DeliveryReaderTests(unittest.TestCase):
         package = (ROOT / "docs" / "项目总内容包.md").read_text(encoding="utf-8")
         self.assertIn("data-evidence-ids", script)
         self.assertIn("evidence_ids||[]", script)
+        self.assertIn("参考来源：", script)
         self.assertNotIn("<span>${escapeHtml((page.evidence_ids||[]).join", script)
         for text in (p6, p9, package):
             self.assertIn("EV::...", text)
@@ -187,20 +249,26 @@ class DeliveryReaderTests(unittest.TestCase):
             self.assertIn(token, result_css)
         self.assertIn("卡片外背景应继承同一渐变", rules)
 
-    def test_current_download_is_two_character_menu_with_windows_friendly_formats(self):
+    def test_download_menu_offers_complete_report_and_complete_ppt(self):
         html = (WEB / "delivery.html").read_text(encoding="utf-8")
         script = (WEB / "delivery.js").read_text(encoding="utf-8")
         self.assertRegex(html, r'id="download-trigger"[^>]*>下载</button>')
-        self.assertNotIn("下载当前内容 .md", html)
-        self.assertNotIn("下载完整样本", html)
-        for value in ('data-format="markdown"', 'data-format="html"', 'data-format="pdf"'):
+        for value in ('data-kind="report" data-format="markdown"', 'data-kind="report" data-format="html"', 'data-kind="report" data-format="pdf"', 'data-kind="slides" data-format="markdown"', 'data-kind="slides" data-format="html"', 'data-kind="slides" data-format="pdf"'):
             self.assertIn(value, html)
-        self.assertIn("text/html;charset=utf-8", script)
-        self.assertIn("content.querySelectorAll('button').forEach(button => button.remove())", script)
-        self.assertIn("@page{size:A4", script)
-        self.assertIn("不是线上生成结果", script)
-        self.assertIn("printWindow.print()", script)
-        self.assertIn("Microsoft Print to PDF", script)
+        self.assertIn("kind === 'report' ? state.report : state.slides", script)
+        self.assertIn("完整网页文件", html)
+        self.assertIn("打印窗口后保存为 PDF", html)
+        self.assertIn("state.slidePages.map(page =>", script)
+
+    def test_download_layout_is_the_persistent_simple_delivery_baseline(self):
+        rules = (ROOT / "docs" / "项目总内容包.md").read_text(encoding="utf-8")
+        script = (WEB / "delivery.js").read_text(encoding="utf-8")
+        for phrase in ("不额外增加封面、自动目录或装饰性页面", "完整保留报告或 PPT 内容包原文", "每页分隔并保留页码、短主标题与完整副标题"):
+            self.assertIn(phrase, rules)
+        self.assertIn("@page{size:A4;margin:18mm 17mm}", script)
+        self.assertIn("state.slidePages.map(page =>", script)
+        self.assertIn(".slide-document{padding-bottom:22px;margin-bottom:30px;border-bottom:1px solid #e6e2e9;break-after:page}", script)
+        self.assertIn("完整交付文件 · 共 ${kind === 'report' ? state.reportSections.length + ' 个报告章节'", script)
 
     def test_delivery_tabs_have_sliding_indicator_and_directional_content_motion(self):
         html = (WEB / "delivery.html").read_text(encoding="utf-8")

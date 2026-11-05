@@ -55,6 +55,19 @@ class ProductionFoundationTests(unittest.TestCase):
         cos={key:values[key] for key in ("COS_SECRET_ID","COS_SECRET_KEY","COS_REGION","COS_BUCKET")}
         self.assertEqual(load_cos_config(cos).cos_secret_id,"cos-id")
 
+    def test_scf_role_credentials_take_priority_and_require_complete_triplet(self):
+        values=self.valid()
+        values.update(TENCENTCLOUD_SECRETID="temporary-id", TENCENTCLOUD_SECRETKEY="temporary-key",
+                      TENCENTCLOUD_SESSIONTOKEN="temporary-token")
+        self.assertEqual(load_ses_config(values).ses_session_token, "temporary-token")
+        self.assertEqual(load_ses_config(values).ses_secret_id, "temporary-id")
+        self.assertEqual(load_cos_config(values).cos_session_token, "temporary-token")
+        del values["TENCENTCLOUD_SESSIONTOKEN"]
+        with self.assertRaises(RuntimeError):
+            load_ses_config(values)
+        with self.assertRaises(RuntimeError):
+            load_cos_config(values)
+
     def test_manifest_keeps_one_workflow_and_excludes_legacy_generation(self):
         manifest = json.loads((ROOT / "config/production-foundation.json").read_text())
         self.assertEqual(manifest["workflow"], "P1-P9_only")
@@ -88,6 +101,7 @@ class ProductionFoundationTests(unittest.TestCase):
         self.assertEqual(headers["X-Frame-Options"], "DENY")
         health = (deploy / "cloud-functions/api/health.js").read_text()
         self.assertIn("HEALTH_API_BASE_URL", health)
+        self.assertIn("INTENT_API_BASE_URL", health)
         for legacy in ("search_query", "generateReport", "jobs/"):
             self.assertNotIn(legacy, health)
 

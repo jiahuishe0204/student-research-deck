@@ -20,6 +20,8 @@ jobs:
         run: python -m pip install -r requirements-production.txt
       - name: Run unit and integration tests
         run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Verify complete delivery HTML downloads
+        run: node tests/test_delivery_download.cjs
       - name: Validate project structure
         run: python tests/validate_project.py
       - name: Validate prompt assets
@@ -28,3 +30,28 @@ jobs:
         run: python tests/validate_product_decisions.py
       - name: Check Python syntax
         run: python -m compileall -q .
+
+  scf-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Build and import-test on a glibc 2.17 baseline
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/workspace" -v "$RUNNER_TEMP:/output" -w /workspace quay.io/pypa/manylinux2014_x86_64 bash -euc '
+            git config --global --add safe.directory /workspace
+            PY=/opt/python/cp313-cp313/bin/python
+            "$PY" -m pip install -r requirements-scf.txt --target /output/scf-deps
+            "$PY" scripts/build_scf_bundle.py --deps-dir /output/scf-deps --output /output/student-research-deck-scf-candidate.zip
+            mkdir -p /output/scf-unpacked
+            "$PY" -m zipfile -e /output/student-research-deck-scf-candidate.zip /output/scf-unpacked
+            cd /tmp
+            PYTHONPATH=/output/scf-unpacked "$PY" -c "import intent_http_entrypoint, delivery_http_entrypoint, task_scf_entrypoint, delivery_scf_entrypoint"
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scf-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/student-research-deck-scf-candidate.zip
+          retention-days: 7

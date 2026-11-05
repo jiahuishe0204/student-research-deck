@@ -18,6 +18,7 @@ class RatePolicy:
 OTP_POLICY = RatePolicy(window_seconds=600, max_requests=5, block_seconds=1800)
 OTP_IP_POLICY = RatePolicy(window_seconds=600, max_requests=20, block_seconds=1800)
 OTP_GLOBAL_POLICY = RatePolicy(window_seconds=600, max_requests=2000, block_seconds=600)
+PREAUTH_INTENT_IP_POLICY = RatePolicy(window_seconds=600, max_requests=20, block_seconds=1800)
 
 
 def subject_hash(secret, dimension, subject):
@@ -72,5 +73,5 @@ def consume_many(connection, subjects, *, policy=OTP_POLICY, now=None):
         raise
 
 
-__all__ = ["OTP_POLICY", "OTP_IP_POLICY", "OTP_GLOBAL_POLICY", "RatePolicy", "consume",
+__all__ = ["OTP_POLICY", "OTP_IP_POLICY", "OTP_GLOBAL_POLICY", "PREAUTH_INTENT_IP_POLICY", "RatePolicy", "consume",
            "consume_many", "subject_hash"]

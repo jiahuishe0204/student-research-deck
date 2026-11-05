@@ -1,9 +1,13 @@
 import unittest
 import json
+import os
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from workflow_service import WorkflowService
+from model_usage import ModelBudgetExceeded
+from preauth_budget import DailyBudgetExceeded
 
 
 class FakeRouter:
@@ -11,7 +15,173 @@ class FakeRouter:
         return {"model": "%s-%s" % (stage, tier), "effort": "high" if upgrade else "none", "upgraded": upgrade}
 
 
+class ProIntentRouter:
+    def for_stage(self, stage, tier, upgrade=False):
+        return {"model": "deepseek-v4-pro", "effort": "low", "upgraded": upgrade}
+
+
 class WorkflowServiceTests(unittest.TestCase):
+    def test_create_intent_uses_confirmed_pre_auth_request_ceiling(self):
+        service = WorkflowService("secret", ProIntentRouter(), "system", {"P1": "intent"})
+        observed = {}
+
+        def generate(stage, tier, payload, validator=None, **options):
+            observed.update(options)
+            return {"ok": True}, {}, {}
+
+        service.generate = generate
+        service.create_intent("神经科学研究主题")
+
+        self.assertEqual(observed["request_cost_limit_cny"], 0.50)
+        self.assertEqual(observed["max_attempts"], 2)
+
+    def test_create_intent_has_stable_budget_id_for_attempt_reservations(self):
+        service = WorkflowService(
+            "secret", ProIntentRouter(), "system", {"P1": "intent"},
+            daily_budget_ledger=object(),
+        )
+        observed = {}
+
+        def generate(stage, tier, payload, validator=None, **options):
+            observed.update(options)
+            return {"ok": True}, {}, {}
+
+        service.generate = generate
+        service.create_intent("神经科学研究主题")
+        self.assertTrue(observed["daily_budget_request_id"])
+
+    def test_request_cost_cap_blocks_retry_before_second_provider_call(self):
+        attempts = []
+
+        def client(*args):
+            before_attempt = args[11]
+            usage_callback = args[10]
+            before_attempt(1)
+            attempts.append(1)
+            usage_callback(1, "rejected", {
+                "prompt_tokens": 100, "completion_tokens": 100, "total_tokens": 200,
+            }, {})
+            before_attempt(2)
+            attempts.append(2)
+            return {"ok": True}, {"total_tokens": 200}
+
+        service = WorkflowService("secret", ProIntentRouter(), "s", {"P1": "p"}, client)
+        with self.assertRaisesRegex(ModelBudgetExceeded, "单次费用上限"):
+            service.generate(
+                "P1", "fast", {}, lambda value: value,
+                max_tokens=1000, max_attempts=2, request_cost_limit_cny=0.06,
+            )
+
+        self.assertEqual(attempts, [1])
+
+    def test_request_cost_cap_allows_one_attempt_within_limit(self):
+        attempts = []
+
+        def client(*args):
+            args[11](1)
+            attempts.append(1)
+            args[10](1, "accepted", {
+                "prompt_tokens": 100, "completion_tokens": 100, "total_tokens": 200,
+            }, {})
+            return {"ok": True}, {"total_tokens": 200}
+
+        service = WorkflowService("secret", ProIntentRouter(), "s", {"P1": "p"}, client)
+        output, _, _ = service.generate(
+            "P1", "fast", {}, lambda value: value,
+            max_tokens=4200, max_attempts=2, request_cost_limit_cny=0.20,
+        )
+        self.assertEqual(output, {"ok": True})
+        self.assertEqual(attempts, [1])
+
+    def test_explicit_provider_4xx_releases_pre_auth_budget_reservation(self):
+        class BudgetLedger:
+            def __init__(self):
+                self.reservations = []
+                self.settlements = []
+
+            def reserve_attempt(self, request_id, attempt, amount):
+                self.reservations.append((request_id, attempt, amount))
+
+            def settle_attempt(self, request_id, attempt, actual_cost):
+                self.settlements.append((request_id, attempt, actual_cost))
+
+        ledger = BudgetLedger()
+
+        def rejected_client(*args):
+            args[11](1)
+            args[10](1, "http_error", {}, {"status": 400})
+            raise RuntimeError("DeepSeek HTTP 400")
+
+        service = WorkflowService(
+            "secret", ProIntentRouter(), "s", {"P1": "p"}, rejected_client,
+            daily_budget_ledger=ledger,
+        )
+        request_id = "00000000-0000-0000-0000-000000000099"
+        with self.assertRaisesRegex(RuntimeError, "HTTP 400"):
+            service.generate(
+                "P1", "fast", {}, lambda value: value,
+                max_tokens=4200, max_attempts=1, request_cost_limit_cny=0.50,
+                daily_budget_request_id=request_id,
+            )
+
+        self.assertEqual(len(ledger.reservations), 1)
+        self.assertEqual(ledger.settlements, [(request_id, 1, 0)])
+
+    def test_provider_transport_error_keeps_pre_auth_reservation_unknown(self):
+        class BudgetLedger:
+            def __init__(self):
+                self.settlements = []
+
+            def reserve_attempt(self, request_id, attempt, amount):
+                pass
+
+            def settle_attempt(self, request_id, attempt, actual_cost):
+                self.settlements.append(actual_cost)
+
+        ledger = BudgetLedger()
+
+        def uncertain_client(*args):
+            args[11](1)
+            args[10](1, "transport_error", {}, {"error": "TimeoutError"})
+            raise TimeoutError("provider response uncertain")
+
+        service = WorkflowService(
+            "secret", ProIntentRouter(), "s", {"P1": "p"}, uncertain_client,
+            daily_budget_ledger=ledger,
+        )
+        with self.assertRaisesRegex(TimeoutError, "uncertain"):
+            service.generate(
+                "P1", "fast", {}, lambda value: value,
+                max_tokens=4200, max_attempts=1, request_cost_limit_cny=0.50,
+                daily_budget_request_id="00000000-0000-0000-0000-000000000098",
+            )
+
+        self.assertEqual(ledger.settlements, [None])
+
+    def test_global_daily_cap_blocks_before_provider_call(self):
+        class DenyBudget:
+            def reserve_attempt(self, request_id, attempt, amount):
+                raise DailyBudgetExceeded("登录前意图识别已达到全站每日费用上限")
+
+        provider_calls = []
+
+        def client(*args):
+            args[11](1)
+            provider_calls.append(True)
+            self.fail("daily cap must block before provider call")
+
+        service = WorkflowService(
+            "secret", ProIntentRouter(), "s", {"P1": "p"}, client,
+            daily_budget_ledger=DenyBudget(),
+        )
+        with self.assertRaisesRegex(DailyBudgetExceeded, "每日费用上限"):
+            service.generate(
+                "P1", "fast", {}, lambda value: value, max_tokens=4200,
+                max_attempts=2, request_cost_limit_cny=0.50,
+                daily_budget_request_id="00000000-0000-0000-0000-000000000099",
+            )
+        self.assertEqual(provider_calls, [])
+
     def test_deep_report_has_stage_specific_output_room(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P5": "report"})
         limits = []
@@ -30,7 +200,7 @@ class WorkflowServiceTests(unittest.TestCase):
         evidence = [{"evidence_id": "EV::SRC-1::001"}]
         service.create_report({}, {}, evidence, "fast")
         service.create_report({}, {}, evidence, "deep")
-        self.assertEqual(limits, [5000, 10000])
+        self.assertEqual(limits, [10000, 10000])
 
     def test_full_text_evidence_has_room_for_complete_captions(self):
         service = WorkflowService("", FakeRouter(), "system", {"P4": "evidence"})
@@ -179,6 +349,57 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertIn("questions", captured["P2B"]["output_contract"]["required"])
         self.assertEqual(captured["P2B"]["research_architecture"]["overall_story"], "story")
 
+    def test_plan_lists_mcp_patents_and_keeps_patsnap_literature_separate(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P2A": "architecture", "P2B": "blueprint"})
+        captured = {}
+
+        def generate(stage, tier, payload, validator=None, **options):
+            captured[stage] = payload
+            if stage == "P2A":
+                return {
+                    "research_scope": "scope", "exclusions": [], "overall_story": "story",
+                    "modules": [{"module_id": "M1", "working_title": "t", "content_purpose": "p", "main_content": "c", "why_it_comes_here": "w", "connection_to_next": None}],
+                    "risks": [],
+                }, {}, {}
+            return {
+                "research_scope": "scope", "exclusions": [],
+                "questions": [{"question_id": str(i), "question": "q", "evidence_needs": []} for i in range(3)],
+                "search_concepts": {}, "source_plan": [], "selection_criteria": [], "stop_conditions": [],
+                "report_outline": [], "ppt_story_arc": [], "risks": [],
+            }, {}, {}
+
+        service.generate = generate
+        intent = {"domain": "life_science", "normalized_topic": "主题", "scope_hint": "scope", "tier": "fast", "assumptions": [], "topic_breadth": "focused", "direction_options": [], "need_clarification": False, "clarification_question": None, "confirmation_text": "ok"}
+        with patch.dict(os.environ, {"PATSNAP_MCP_API_KEY": "mcp", "PATSNAP_API_KEY": "literature"}, clear=False):
+            service.create_plan("主题", "", "fast", intent)
+        sources = captured["P2B"]["available_sources"]
+        self.assertIn("智慧芽 MCP 专利", sources)
+        self.assertIn("Patsnap", sources)
+        self.assertNotIn("EPO OPS", sources)
+
+    def test_plan_architecture_has_ten_thousand_token_ceiling_for_demo_stability(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P2A": "architecture", "P2B": "blueprint"})
+        limits = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            limits.append((stage, options["max_tokens"]))
+            if stage == "P2A":
+                return {
+                    "research_scope": "scope", "exclusions": [], "overall_story": "story",
+                    "modules": [{"module_id": "M1", "working_title": "t", "content_purpose": "p", "main_content": "c", "why_it_comes_here": "w", "connection_to_next": None}],
+                    "risks": [],
+                }, {}, {}
+            return {
+                "research_scope": "scope", "exclusions": [],
+                "questions": [{"question_id": str(i), "question": "q", "evidence_needs": []} for i in range(3)],
+                "search_concepts": {}, "source_plan": [], "selection_criteria": [], "stop_conditions": [],
+                "report_outline": [], "ppt_story_arc": [], "risks": [],
+            }, {}, {}
+
+        service.generate = generate
+        service.create_plan("心脏类器官", "", "fast")
+        self.assertEqual(limits, [("P2A", 4200), ("P2B", 7500)])
+
     def test_ppt_payload_inherits_topic_specific_plan(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
         captured = {}
@@ -216,7 +437,7 @@ class WorkflowServiceTests(unittest.TestCase):
         def generate(stage, tier, payload, validator=None, **options):
             payloads.append(payload)
             evidence_id = "EV::INVALID::001" if len(payloads) == 1 else "EV::SRC-1::001"
-            page = {"page_id": "SL-01", "title": "界面结论", "purpose": "解释机制",
+            page = {"page_id": "SL-01", "navigation_title": "界面结论", "title": "界面结论", "purpose": "解释机制",
                     "on_slide_text": ["结论有证据支持"], "visual_suggestion": "机制示意图",
                     "speaker_notes": "该结果仍需结合具体条件解释。", "evidence_ids": [evidence_id],
                     "figure_refs": [], "source_citations": []}
@@ -237,7 +458,7 @@ class WorkflowServiceTests(unittest.TestCase):
         def generate(stage, tier, payload, validator=None, **options):
             batch = payload["page_batch"]
             calls.append((batch["index"], [item["module_id"] for item in batch["assigned_arc"]], options["max_tokens"]))
-            page = {"page_id": "SL-01", "title": "界面结论", "purpose": "解释界面机制",
+            page = {"page_id": "SL-01", "navigation_title": "界面结论", "title": "界面结论", "purpose": "解释界面机制",
                     "on_slide_text": ["导电水凝胶改善电极界面"], "visual_suggestion": "材料结构示意图",
                     "speaker_notes": "材料界面性能需要结合具体实验评价。", "evidence_ids": ["EV-1"],
                     "figure_refs": [], "source_citations": []}
@@ -511,6 +732,92 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertIn("M2 极化，但这一细节尚缺独立证据支持", output["final_report"]["markdown"])
         self.assertNotIn("evidence_id", output["final_report"]["markdown"])
 
+    def test_final_assembly_alias_repair_does_not_consume_neighbor_claim(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        claims = [{
+            "claim_id": "CL-1", "location_type": "report_section", "section_or_page_id": "摘要",
+            "original_text": "靶向Claudin18.2的CAR-T观察到缓解", "atomic_claim": "靶向Claudin18.2的CAR-T观察到缓解。",
+        }, {
+            "claim_id": "CL-2", "location_type": "report_section", "section_or_page_id": "摘要",
+            "original_text": "尚无随机对照证据支持其优于现有治疗", "atomic_claim": "尚无随机对照证据支持其优于现有治疗。",
+        }]
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "在单臂试验中，靶向CLDN18.2的CAR-T观察到缓解。", "explanation": "限定设计",
+        }, {
+            "claim_id": "CL-2", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "目前尚缺随机对照证据证明其优于现有治疗。", "explanation": "限定证据层级",
+        }]}
+        report = {"report_title": "t", "report_markdown": "靶向CLDN18.2的CAR-T观察到缓解，但尚无随机对照证据支持其优于现有治疗。", "used_evidence_ids": [], "open_issues": []}
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "P1", "title": "title", "purpose": "", "on_slide_text": ["text"],
+            "visual_suggestion": "", "speaker_notes": "", "evidence_ids": [], "figure_refs": [], "source_citations": [],
+        }]}
+        output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, [], [], "1")
+        markdown = output["final_report"]["markdown"]
+        self.assertIn("在单臂试验中", markdown)
+        self.assertIn("目前尚缺随机对照证据", markdown)
+
+    def test_final_assembly_locates_overlapping_claims_against_immutable_original(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        original = "在NSCLC中，TAM亚群与多种免疫功能相关[EV-1]。"
+        claims = [{
+            "claim_id": "CL-1", "location_type": "report_section", "section_or_page_id": "body",
+            "original_text": original, "atomic_claim": "TAM亚群与免疫功能相关。",
+        }, {
+            "claim_id": "CL-2", "location_type": "report_section", "section_or_page_id": "body",
+            "original_text": original, "atomic_claim": "TAM亚群对应的具体免疫功能尚不明确。",
+        }]
+        verification = {"results": [{
+            "claim_id": "CL-1", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "在NSCLC中，TAM包含多个免疫功能亚群[EV-1]。", "explanation": "限定证据范围",
+        }, {
+            "claim_id": "CL-2", "support_status": "partially_supported", "action": "revise",
+            "revised_claim": "现有摘要未逐项明确各TAM亚群与具体免疫功能的对应关系[EV-1]。", "explanation": "补充证据边界",
+        }]}
+        report = {"report_title": "t", "report_markdown": original, "used_evidence_ids": ["EV-1"], "open_issues": []}
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "P1", "title": "t", "purpose": "p", "on_slide_text": ["结论"],
+            "visual_suggestion": "", "speaker_notes": "", "evidence_ids": ["EV-1"],
+            "figure_refs": [], "source_citations": [],
+        }]}
+
+        output, _ = service.assemble_final_deterministic(
+            verification, report, ppt, claims, ["SRC-1"], ["EV-1"], "1"
+        )
+
+        markdown = output["final_report"]["markdown"]
+        self.assertIn("多个免疫功能亚群", markdown)
+        self.assertIn("未逐项明确", markdown)
+
+    def test_final_assembly_handles_duplicate_unverified_report_claims_idempotently(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {})
+        original = "现有证据中慢性在体数据有限，不能直接等同于长期植入性能。"
+        claims = [{
+            "claim_id": claim_id, "location_type": "report_section", "section_or_page_id": "局限与后续研究",
+            "original_text": original, "atomic_claim": "不能直接等同于长期植入性能。",
+        } for claim_id in ("CL-1", "CL-2")]
+        verification = {"results": [{
+            "claim_id": claim_id, "support_status": "cannot_determine", "action": "mark_unverified",
+            "revised_claim": None, "valid_evidence_ids": [], "explanation": "缺少可追溯证据",
+        } for claim_id in ("CL-1", "CL-2")]}
+        report = {"report_title": "t", "report_markdown": "# 局限与后续研究\n\n" + original,
+                  "used_evidence_ids": [], "open_issues": []}
+        ppt = {"deck_title": "d", "storyline": "s", "pages": [{
+            "page_id": "P1", "title": "研究主题", "purpose": "说明主题", "on_slide_text": ["研究背景"],
+            "visual_suggestion": "", "speaker_notes": "", "evidence_ids": [],
+            "figure_refs": [], "source_citations": [],
+        }]}
+
+        output, _ = service.assemble_final_deterministic(
+            verification, report, ppt, claims, [], [], "1"
+        )
+
+        self.assertNotIn(original, output["final_report"]["markdown"])
+        self.assertEqual(len(output["open_issues"]), 1)
+        self.assertTrue(output["open_issues"][0].startswith("尚待核实："))
+        self.assertEqual({item["claim_id"] for item in output["change_log"]}, {"CL-1", "CL-2"})
+
     def test_final_assembly_routes_exact_open_issue_claim_to_open_issues(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})
         claim = {
@@ -523,7 +830,7 @@ class WorkflowServiceTests(unittest.TestCase):
         }]}
         report = {"report_title": "t", "report_markdown": "正文", "used_evidence_ids": [], "open_issues": ["需要前瞻性验证。"]}
         ppt = {"deck_title": "d", "storyline": "s", "pages": [{
-            "page_id": "P1", "title": "t", "purpose": "p", "on_slide_text": [],
+            "page_id": "P1", "navigation_title": "研究结论", "title": "关键研究结论", "purpose": "p", "on_slide_text": [],
             "visual_suggestion": "", "speaker_notes": "", "evidence_ids": [],
             "figure_refs": [], "source_citations": [],
         }]}
@@ -568,12 +875,13 @@ class WorkflowServiceTests(unittest.TestCase):
                                     for claim_id in ("CL-1", "CL-2")]}
         report = {"report_title": "t", "report_markdown": "report", "used_evidence_ids": ["EV-1"], "open_issues": []}
         ppt = {"deck_title": "d", "storyline": "s", "pages": [{
-            "page_id": "P1", "title": "t", "purpose": "p", "on_slide_text": [],
+            "page_id": "P1", "navigation_title": "研究结论", "title": "关键研究结论", "purpose": "p", "on_slide_text": [],
             "visual_suggestion": "", "speaker_notes": "原句。", "evidence_ids": ["EV-1"],
             "figure_refs": [], "source_citations": [],
         }]}
         output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, [], ["EV-1"], "1")
         self.assertEqual(output["final_ppt"]["pages"][0]["speaker_notes"], "修订句。")
+        self.assertEqual(output["final_ppt"]["pages"][0]["navigation_title"], "研究结论")
 
     def test_final_assembly_moves_verified_revision_to_supplement_when_page_is_full(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})
@@ -674,6 +982,16 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertLess(calls[1]["max_tokens"], calls[0]["max_tokens"])
         self.assertEqual(len(output["results"]), 9)
         self.assertEqual(metadata["batches"], 2)
+
+    def test_high_risk_verification_doubles_output_budget_after_reasoning_exhausted_prior_limit(self):
+        claim = {
+            "claim_id": "CL-1", "atomic_claim": "候选药物显示抗肿瘤活性",
+            "cited_evidence_ids": ["EV-1"], "risk_level": "high", "claim_type": "efficacy",
+        }
+        evidence = {"EV-1": {"evidence_id": "EV-1", "source_id": "SRC-1"}}
+
+        self.assertEqual(WorkflowService._verification_output_limit([claim], evidence, upgrade=True), 6400)
+        self.assertLessEqual(WorkflowService._verification_output_limit([claim], evidence, upgrade=True), 9600)
 
     def test_verify_claims_merges_safe_near_duplicates_before_model_call(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
@@ -830,9 +1148,9 @@ class WorkflowServiceTests(unittest.TestCase):
         output, _ = service.assemble_final_deterministic(verification, report, ppt, claims, ["SRC-1"], ["EV-1"])
         page = output["final_ppt"]["pages"][0]
 
-        self.assertEqual(page["figure_refs"], [figure])
+        self.assertEqual(page["figure_refs"], [])
         self.assertEqual(page["source_citations"], [citation])
-        self.assertEqual(page["visual_suggestion"], "使用 Fig. 2")
+        self.assertEqual(page["visual_suggestion"], "")
 
     def test_deterministic_final_locates_slide_claim_after_label_prefix(self):
         service = WorkflowService("secret", FakeRouter(), "system", {})

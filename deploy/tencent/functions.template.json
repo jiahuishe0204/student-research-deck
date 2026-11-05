@@ -20,13 +20,22 @@
       "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EDGEONE_GATEWAY_SECRET"]
     },
     {
+      "name": "research-intent-api",
+      "entrypoint": "intent_http_entrypoint.main_handler",
+      "trigger": {"type": "function-url", "https_only": true, "auth_type": "open", "cors": false},
+      "memory_mb": 512,
+      "timeout_seconds": 115,
+      "role": "database-model-intent-role",
+      "environment": ["DATABASE_URL", "DEEPSEEK_API_KEY", "MODEL_TASK_MAX_TOTAL_TOKENS", "MODEL_TASK_MAX_COST_CNY", "EDGEONE_GATEWAY_SECRET", "PREAUTH_INTENT_SIGNING_SECRET"]
+    },
+    {
       "name": "research-download-api",
       "entrypoint": "delivery_http_entrypoint.main_handler",
       "trigger": {"type": "function-url", "https_only": true, "auth_type": "open", "cors": false},
       "memory_mb": 256,
       "timeout_seconds": 15,
-      "role": "cos-delivery-role",
-      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EDGEONE_GATEWAY_SECRET", "COS_SECRET_ID", "COS_SECRET_KEY", "COS_REGION", "COS_BUCKET"]
+      "role": "ResearchdeskCosDeliveryScfRole",
+      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EDGEONE_GATEWAY_SECRET", "COS_REGION", "COS_BUCKET"]
     },
     {
       "name": "research-task-api",
@@ -35,7 +44,7 @@
       "memory_mb": 256,
       "timeout_seconds": 15,
       "role": "database-task-role",
-      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EDGEONE_GATEWAY_SECRET"]
+      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EDGEONE_GATEWAY_SECRET", "PREAUTH_INTENT_SIGNING_SECRET"]
     },
     {
       "name": "research-task-worker",
@@ -45,8 +54,8 @@
       "memory_mb": 1024,
       "timeout_seconds": 900,
       "max_concurrency": 1,
-      "role": "cos-task-delivery-role",
-      "environment": ["DATABASE_URL", "DEEPSEEK_API_KEY", "PATENT_PROVIDER", "PATSNAP_MCP_URL", "PATSNAP_MCP_API_KEY", "PATSNAP_MCP_TIMEOUT_SECONDS", "PATSNAP_API_KEY", "MODEL_TASK_MAX_TOTAL_TOKENS", "MODEL_TASK_MAX_COST_CNY", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "COS_SECRET_ID", "COS_SECRET_KEY", "COS_REGION", "COS_BUCKET"]
+      "role": "ResearchdeskCosDeliveryScfRole",
+      "environment": ["DATABASE_URL", "DEEPSEEK_API_KEY", "PATENT_PROVIDER", "PATSNAP_MCP_URL", "PATSNAP_MCP_API_KEY", "PATSNAP_MCP_TIMEOUT_SECONDS", "PATSNAP_API_KEY", "MODEL_TASK_MAX_TOTAL_TOKENS", "MODEL_TASK_MAX_COST_CNY", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "COS_REGION", "COS_BUCKET"]
     },
     {
       "name": "research-ses-outbox",
@@ -56,8 +65,8 @@
       "memory_mb": 128,
       "timeout_seconds": 30,
       "max_concurrency": 1,
-      "role": "ses-delivery-role",
-      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EMAIL_FROM", "SES_SECRET_ID", "SES_SECRET_KEY", "SES_REGION", "SES_TEMPLATE_OTP", "SES_TEMPLATE_COMPLETED", "SES_TEMPLATE_EXPIRY"]
+      "role": "ResearchdeskSesOutboxScfRole",
+      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "EMAIL_FROM", "SES_REGION", "SES_TEMPLATE_OTP", "SES_TEMPLATE_COMPLETED", "SES_TEMPLATE_EXPIRY"]
     },
     {
       "name": "research-cos-retention",
@@ -67,8 +76,8 @@
       "memory_mb": 128,
       "timeout_seconds": 60,
       "max_concurrency": 1,
-      "role": "cos-delivery-role",
-      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "COS_SECRET_ID", "COS_SECRET_KEY", "COS_REGION", "COS_BUCKET"]
+      "role": "ResearchdeskCosDeliveryScfRole",
+      "environment": ["DATABASE_URL", "IDENTITY_SECRET", "PUBLIC_ORIGIN", "COS_REGION", "COS_BUCKET"]
     },
     {
       "name": "research-delivery-monitor",

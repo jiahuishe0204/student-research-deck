@@ -85,10 +85,30 @@ def deepseek_json(api_key, model, system, stage_prompt, payload, effort="none", 
             with urllib.request.urlopen(request, timeout=request_timeout) as response:
                 data = json.loads(read_with_deadline(response, request_timeout).decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            # Preserve the provider's actionable error without exposing the
+            # request headers (which contain the API credential).  SCF often
+            # truncates tracebacks, so the status alone is not enough to
+            # diagnose an invalid model or request field.
+            provider_detail = ""
+            try:
+                raw_error = exc.read(4096).decode("utf-8", errors="replace")
+                parsed_error = json.loads(raw_error) if raw_error else {}
+                error_value = parsed_error.get("error", parsed_error) if isinstance(parsed_error, dict) else parsed_error
+                if isinstance(error_value, dict):
+                    provider_detail = "; ".join(
+                        f"{key}={str(error_value[key])[:300]}"
+                        for key in ("type", "code", "message")
+                        if error_value.get(key) is not None
+                    )
+                else:
+                    provider_detail = str(error_value)[:500]
+            except Exception:
+                provider_detail = "响应体不可解析"
+            detail = {"status": exc.code, "provider_error": provider_detail or "未返回错误详情"}
             if usage_callback:
-                usage_callback(attempt + 1, "http_error", {}, {"status": exc.code})
+                usage_callback(attempt + 1, "http_error", {}, detail)
             if 400 <= exc.code < 500:
-                raise
+                raise RuntimeError(f"DeepSeek HTTP {exc.code}: {detail['provider_error']}") from exc
             last_error = exc
             if attempt + 1 < max_attempts:
                 continue

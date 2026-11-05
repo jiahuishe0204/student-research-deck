@@ -26,7 +26,7 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["page_id", "title", "purpose", "on_slide_text", "visual_suggestion", "speaker_notes", "evidence_ids", "figure_refs", "source_citations"],
+            "required": ["page_id", "title", "navigation_title", "purpose", "on_slide_text", "visual_suggestion", "speaker_notes", "evidence_ids", "figure_refs", "source_citations"],
             "properties": {
               "page_id": {"type": "string", "minLength": 1},
               "title": {"type": "string", "minLength": 1},

@@ -3,6 +3,10 @@
 data/*.sqlite3
 data/*.sqlite3-*
 data/private/
+# Local task data is user state, not a deployable source artifact.
+/research_delivery.db
+/skill-life-science-research-delivery.zip
+/student-research-deck-scf-candidate-py313.zip
 *.log
 __pycache__/
 

@@ -15,9 +15,13 @@ export async function onRequestGet(context) {
   const env = context.env || process.env;
   const configured = {
     HEALTH_API_BASE_URL: Boolean(env.HEALTH_API_BASE_URL),
+    INTENT_API_BASE_URL: Boolean(env.INTENT_API_BASE_URL),
+    AUTH_API_BASE_URL: Boolean(env.AUTH_API_BASE_URL),
+    TASK_API_BASE_URL: Boolean(env.TASK_API_BASE_URL),
+    DELIVERY_API_BASE_URL: Boolean(env.DELIVERY_API_BASE_URL),
     EDGEONE_GATEWAY_SECRET: Boolean(env.EDGEONE_GATEWAY_SECRET)
   };
-  if (!configured.HEALTH_API_BASE_URL || !configured.EDGEONE_GATEWAY_SECRET) {
+  if (Object.values(configured).some(value => !value)) {
     return json({ ok: false, runtime: "edgeone-gateway", configured }, 503);
   }
   try {

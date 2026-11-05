@@ -9,7 +9,7 @@ STAGE_CAPABILITIES = {
     "P1": "intent_detection",
     "P2": "research_planning",
     "P2A": "research_planning",
-    "P2B": "research_planning",
+    "P2B": "planning_synthesis",
     "P3": "retrieval_screening",
     "P4": "content_generation",
     "P5": "content_generation",

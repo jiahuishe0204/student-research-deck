@@ -14,6 +14,11 @@ from dataclasses import dataclass
 
 
 ALLOWED_KINDS = frozenset({"otp", "completed", "expiry"})
+MAIL_SUBJECTS = {
+    "otp": "调研交付台｜登录验证码",
+    "completed": "调研交付台｜调研内容已完成",
+    "expiry": "调研交付台｜交付文件即将到期",
+}
 CONTENT_TYPES = frozenset({"application/pdf", "text/markdown; charset=utf-8", "application/json"})
 OBJECT_KEY_RE = re.compile(r"deliveries/[A-Za-z0-9_-]{8,80}/[A-Za-z0-9_-]{8,80}\.[a-z0-9]{1,8}\Z")
 
@@ -59,7 +64,8 @@ class TencentSesMailer:
     def from_config(cls, config):  # pragma: no cover - exercised in cloud smoke test
         from tencentcloud.common import credential
         from tencentcloud.ses.v20201002 import ses_client
-        cred = credential.Credential(config.ses_secret_id, config.ses_secret_key)
+        cred = credential.Credential(config.ses_secret_id, config.ses_secret_key,
+                                     token=config.ses_session_token or None)
         return cls(ses_client.SesClient(cred, config.ses_region), config.email_from, {
             "otp": config.ses_template_otp,
             "completed": config.ses_template_completed,
@@ -78,6 +84,7 @@ class TencentSesMailer:
             try:
                 response = self.client.send_email({
                     "from": self.from_address, "destination": destination,
+                    "subject": MAIL_SUBJECTS[kind],
                     "template_id": int(self.template_ids[kind]), "variables": safe,
                 })
             except Exception as exc:
@@ -90,6 +97,7 @@ class TencentSesMailer:
             from tencentcloud.ses.v20201002 import models
             request = models.SendEmailRequest()
             request.FromEmailAddress = self.from_address
+            request.Subject = MAIL_SUBJECTS[kind]
             request.Destination = [destination]
             template = models.Template()
             template.TemplateID = int(self.template_ids[kind])
@@ -116,7 +124,8 @@ class TencentCosArtifactStore:
     def from_config(cls, config):  # pragma: no cover - exercised in cloud smoke test
         from qcloud_cos import CosConfig, CosS3Client
         cos_config = CosConfig(Region=config.cos_region, SecretId=config.cos_secret_id,
-                               SecretKey=config.cos_secret_key, Scheme="https")
+                               SecretKey=config.cos_secret_key,
+                               Token=config.cos_session_token or None, Scheme="https")
         return cls(CosS3Client(cos_config), config.cos_bucket)
 
     def upload(self, key, body, content_type):

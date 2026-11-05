@@ -12,8 +12,9 @@ from delivery_repository import PostgresDeliveryRepository
 from identity_vault import IdentityVault
 from otp_service import OtpService
 from private_delivery_api import authenticated_download
+from preauth_intent_ticket import verify_intent_ticket
 from production_config import load_cos_config, load_delivery_common_config
-from production_task_queue import PostgresTaskQueue
+from production_task_queue import FreeEntitlementUnavailable, PostgresTaskQueue
 from production_session import COOKIE_ATTRIBUTES
 from production_session import SessionAuthenticator
 from tencent_delivery import TencentCosArtifactStore
@@ -103,8 +104,17 @@ def main_handler(event, context=None, *, services=None):
             user_id = services["auth"].authenticate(
                 _session_cookie(event), csrf_token=headers.get("x-csrf-token", ""), require_csrf=True,
             )
+            signing_secret = (services.get("intent_signing_secret") if not owned else
+                              os.environ.get("PREAUTH_INTENT_SIGNING_SECRET"))
+            if not signing_secret or len(signing_secret) < 32:
+                raise RuntimeError("匿名题目凭证密钥未配置")
+            try:
+                confirmed = verify_intent_ticket(payload.get("intent_ticket"), signing_secret)
+            except ValueError as exc:
+                raise ValueError("研究方向确认凭证无效或已过期") from exc
             task = services["tasks"].create_task(
-                user_id=user_id, topic=payload.get("topic", ""), tier=payload.get("tier", "fast"),
+                user_id=user_id, topic=confirmed["topic"], tier=confirmed["tier"],
+                confirmed_intent=confirmed["intent"],
             )
             return _response(201, {"ok": True, "data": task}, {"Cache-Control": "no-store"})
         parts = path.strip("/").split("/")
@@ -132,9 +142,18 @@ def main_handler(event, context=None, *, services=None):
             )
             return _response(200, {"ok": True, "download_url": url}, {"Cache-Control": "no-store"})
         return _response(404, {"ok": False, "message": "接口不存在"})
-    except (ValueError, LookupError, PermissionError):
-        # Authentication and challenge failures deliberately share one response.
-        return _response(401, {"ok": False, "message": "请求无效或已过期"}, {"Cache-Control": "no-store"})
+    except FreeEntitlementUnavailable:
+        return _response(403, {"ok": False, "code": "free_entitlement_unavailable",
+                               "message": "该账号当前没有可用的首次免费资格。你已登录；如认为有误，请联系支持。"},
+                         {"Cache-Control": "no-store"})
+    except PermissionError:
+        return _response(401, {"ok": False, "code": "session_invalid", "message": "登录会话已失效，请重新验证邮箱。"}, {"Cache-Control": "no-store"})
+    except LookupError:
+        return _response(401, {"ok": False, "code": "task_not_found", "message": "任务或登录会话不存在，请刷新后重试。"}, {"Cache-Control": "no-store"})
+    except ValueError as exc:
+        return _response(401, {"ok": False, "code": "request_invalid", "message": str(exc) or "请求参数无效。"}, {"Cache-Control": "no-store"})
+    except RuntimeError:
+        return _response(503, {"ok": False, "message": "生产服务暂时不可用"}, {"Cache-Control": "no-store"})
     finally:
         if owned:
             services["connection"].close()
