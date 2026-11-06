@@ -50,6 +50,7 @@ required = [
     "production_session.py",
     "private_delivery_api.py",
     "delivery_http_entrypoint.py",
+    "research_task_http_entrypoint.py",
     "intent_http_entrypoint.py",
     "preauth_intent_ticket.py",
     "scf_queue.py",

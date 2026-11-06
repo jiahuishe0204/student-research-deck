@@ -39,7 +39,7 @@
     },
     {
       "name": "research-task-api",
-      "entrypoint": "delivery_http_entrypoint.main_handler",
+      "entrypoint": "research_task_http_entrypoint.main_handler",
       "trigger": {"type": "function-url", "https_only": true, "auth_type": "open", "cors": false},
       "memory_mb": 256,
       "timeout_seconds": 15,
