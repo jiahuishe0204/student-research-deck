@@ -10,8 +10,11 @@ from scf_stage_dispatch import dispatch_stage
 
 
 def _stage_result(value):
-    if isinstance(value, tuple) and len(value) == 2:
-        return {"data": value[0], "usage": value[1]}
+    if isinstance(value, tuple) and len(value) in (2, 3):
+        result = {"data": value[0], "usage": value[1]}
+        if len(value) == 3:
+            result["metadata"] = value[2]
+        return result
     return {"data": value, "usage": {"prompt_tokens": 0, "completion_tokens": 0,
                                        "total_tokens": 0, "attempts": 0}}
 

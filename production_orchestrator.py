@@ -12,6 +12,12 @@ from research_sources import merge_search_results, plan_patsnap_queries, plan_se
 
 def _data(result):
     value = (result or {}).get("data")
+    # P7 results produced by older worker versions persisted the full
+    # (data, usage, metadata) tuple as a JSON array. Accept that legacy shape
+    # so an already-paid successful stage can resume its transition safely.
+    if (isinstance(value, list) and len(value) == 3 and
+            isinstance(value[0], dict) and isinstance(value[1], dict)):
+        value = value[0]
     if not isinstance(value, dict):
         raise RuntimeError("阶段结果格式无效")
     return value

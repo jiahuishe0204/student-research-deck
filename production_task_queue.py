@@ -113,6 +113,32 @@ class PostgresTaskQueue:
                 result[name] = result[name].isoformat()
         return result
 
+    def recent_tasks(self, *, user_id, limit=10):
+        """Return minimal summaries for the signed-in user's recent tasks."""
+        try:
+            limit = max(1, min(20, int(limit)))
+        except (TypeError, ValueError):
+            limit = 10
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """SELECT task_id,topic,tier,status,current_stage,created_at,updated_at
+                 FROM research_tasks
+                WHERE user_id=%s
+                ORDER BY CASE WHEN status IN ('queued','running') THEN 0 ELSE 1 END,
+                         updated_at DESC
+                LIMIT %s""",
+            (str(user_id), limit),
+        )
+        tasks = []
+        for row in cursor.fetchall():
+            task = dict(zip(("task_id", "topic", "tier", "status", "current_stage",
+                             "created_at", "updated_at"), row))
+            for name in ("created_at", "updated_at"):
+                if hasattr(task[name], "isoformat"):
+                    task[name] = task[name].isoformat()
+            tasks.append(task)
+        return tasks
+
     def task_delivery(self, *, user_id, task_id):
         cursor = self.connection.cursor()
         cursor.execute(

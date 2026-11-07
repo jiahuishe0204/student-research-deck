@@ -117,6 +117,10 @@ def main_handler(event, context=None, *, services=None):
                 confirmed_intent=confirmed["intent"],
             )
             return _response(201, {"ok": True, "data": task}, {"Cache-Control": "no-store"})
+        if method == "GET" and path.rstrip("/").endswith("/tasks"):
+            user_id = services["auth"].authenticate(_session_cookie(event))
+            tasks = services["tasks"].recent_tasks(user_id=user_id)
+            return _response(200, {"ok": True, "data": tasks}, {"Cache-Control": "no-store"})
         parts = path.strip("/").split("/")
         if method == "POST" and len(parts) >= 3 and parts[-1] == "continue" and parts[-3] == "tasks":
             user_id = services["auth"].authenticate(
