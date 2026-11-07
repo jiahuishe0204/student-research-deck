@@ -4,13 +4,10 @@ let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',selec
 const taskSessionKey='research-delivery.active-task.v1';
 const productionTaskKey='research-delivery.production-task.v1',csrfKey='research_csrf_token';
 function savedProductionTaskId(){
-  const current=sessionStorage.getItem(productionTaskKey);
-  if(current)return current;
-  try{return localStorage.getItem(productionTaskKey)||'';}catch(_exc){return '';}
+  return sessionStorage.getItem(productionTaskKey)||'';
 }
 function persistProductionTaskId(taskId){
   sessionStorage.setItem(productionTaskKey,taskId);
-  try{localStorage.setItem(productionTaskKey,taskId);}catch(_exc){}
 }
 let productionMode=false,productionChallengeId='',productionPolling=false,currentIntentTicket=null,productionConfirmedClarification=null;
 
@@ -102,7 +99,7 @@ async function startProductionTask(){
 }
 async function fetchCurrentTask(){const response=await fetch(`/api/tasks/${encodeURIComponent(currentTaskId)}`,{headers:{'X-Task-ID':currentTaskId,'X-Task-Token':currentTaskToken}});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.error||'任务恢复失败');return data.data;}
 function saveTaskSession(){if(currentTaskId&&currentTaskToken)sessionStorage.setItem(taskSessionKey,JSON.stringify({taskId:currentTaskId,token:currentTaskToken}));}
-function clearTaskSession(){sessionStorage.removeItem(taskSessionKey);sessionStorage.removeItem(productionTaskKey);try{localStorage.removeItem(productionTaskKey);}catch(_exc){}currentTaskId=null;currentTaskToken=null;}
+function clearTaskSession(){sessionStorage.removeItem(taskSessionKey);sessionStorage.removeItem(productionTaskKey);currentTaskId=null;currentTaskToken=null;}
 function resetRunForNewTopic(){
   clearTaskSession();currentIntent=null;currentPlan=null;currentSources=[];currentScreening=null;currentEvidenceGroups=[];currentReport=null;currentPpt=null;taskPaused=false;
   $('#task-workspace').hidden=true;$('#plan-output').replaceChildren();
