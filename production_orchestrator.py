@@ -135,7 +135,10 @@ def advance(queue, job, result, *, root, publisher=None):
         return "P7"
     if stage == "P7":
         queue.enqueue(task_id=task_id, job_key="P8", stage="P8", payload={
-            "claims": data["claims"], "evidence": payload["evidence"],
+            # P8 consumes the complete P7 claim-set envelope. Passing only
+            # data["claims"] leaves a list where verify_claims expects the
+            # {claim_set_version, claims, extraction_notes} object.
+            "claims": data, "evidence": payload["evidence"],
             "sources": payload["sources"], "tier": payload["tier"],
             "report": payload["report"], "ppt": payload["ppt"],
             "figure_records": payload["figure_records"],
@@ -144,7 +147,7 @@ def advance(queue, job, result, *, root, publisher=None):
     if stage == "P8":
         queue.enqueue(task_id=task_id, job_key="P9", stage="P9", payload={
             "verification": data, "report": payload["report"], "ppt": payload["ppt"],
-            "claims": payload["claims"],
+            "claims": payload["claims"]["claims"],
             "source_ids": sorted({item["source_id"] for item in payload["evidence"]}),
             "evidence_ids": [item["evidence_id"] for item in payload["evidence"]],
             "evidence_version": "1.0", "evidence_records": payload["evidence"],
