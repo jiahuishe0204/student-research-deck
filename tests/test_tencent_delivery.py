@@ -26,7 +26,8 @@ class FakeCos:
     def get_presigned_download_url(self, **kwargs): self.signed = kwargs; return "https://signed.invalid/object"
     def delete_object(self, **kwargs): self.deletes.append(kwargs)
     def head_object(self, **kwargs):
-        return {"Metadata":{"sha256":"a"*64},"Content-Length":3,"Content-Type":"application/pdf","x-cos-server-side-encryption":"AES256","ETag":'"etag"'}
+        # qcloud_cos.head_object returns raw HTTP headers, not S3-style Metadata.
+        return {"x-cos-meta-sha256":"a"*64,"Content-Length":"3","Content-Type":"application/pdf","x-cos-server-side-encryption":"AES256","ETag":'"etag"'}
 
 
 class TencentDeliveryTests(unittest.TestCase):
