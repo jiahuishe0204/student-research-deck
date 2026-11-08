@@ -36,10 +36,18 @@ class DeliveryLifecycle:
             return prepared
         stored = self.artifact_store.upload(key, body, content_type)
         remote = self.artifact_store.stat(key)
-        if (remote.get("sha256") != stored.sha256
-                or int(remote.get("size_bytes", -1)) != stored.size_bytes
-                or remote.get("encryption") != "AES256"):
-            raise RuntimeError("COS 上传后完整性或加密校验失败")
+        sha256_matches = remote.get("sha256") == stored.sha256
+        size_matches = int(remote.get("size_bytes", -1)) == stored.size_bytes
+        encryption = str(remote.get("encryption") or "missing")[:32]
+        if not (sha256_matches and size_matches and encryption == "AES256"):
+            # These bounded values identify which COS response field failed
+            # without logging object content, credentials, or signed URLs.
+            raise RuntimeError(
+                "COS 上传后完整性或加密校验失败 "
+                "sha256_matches=%s,size_matches=%s,encryption=%s" % (
+                    sha256_matches, size_matches, encryption,
+                )
+            )
         published_at = self.clock()
         return self.repository.publish_artifact_and_complete(
             task_id=task_id, artifact_id=artifact_id, object_key=key,
