@@ -101,7 +101,8 @@ class ProductionTaskQueueTests(unittest.TestCase):
         job = PostgresTaskQueue(connection).claim_transition()
         sql = connection.cursor_value.calls[0][0]
         self.assertIn("status='succeeded'", sql)
-        self.assertIn("transition_status='pending'", sql)
+        self.assertIn("transition_status IN ('pending','running')", sql)
+        self.assertIn("lease_until<CURRENT_TIMESTAMP", sql)
         self.assertEqual(job["result"]["data"], {"plan": True})
 
     def test_third_transition_failure_refunds_entitlement(self):
