@@ -101,6 +101,37 @@ class ProductionTaskWorkerTests(unittest.TestCase):
         self.assertEqual(result["next"], "completed")
         self.assertEqual(publishers, [True])
 
+    def test_transition_records_only_allowlisted_config_diagnostic(self):
+        transition = {"job_id": "j9", "task_id": "TASK-1", "stage": "P9", "attempt": 1,
+                      "payload": {}, "result": {"data": {}},
+                      "transition_attempt": 1, "lease_token": "transition-lease"}
+
+        class TransitionQueue(Queue):
+            def claim_transition(self): return transition
+            def finish_transition(self, job, **values): self.transition_finished = values; return True
+
+        queue = TransitionQueue(None)
+        with self.assertRaisesRegex(RuntimeError, "缺少必要变量"):
+            execute_next_job(queue, Workflow(), publisher_factory=lambda: (_ for _ in ()).throw(
+                RuntimeError("生产环境缺少必要变量：COS_BUCKET")))
+        self.assertEqual(queue.transition_finished["error_code"],
+                         "RuntimeError:生产环境缺少必要变量：COS_BUCKET")
+
+    def test_transition_never_persists_untrusted_runtime_error_message(self):
+        transition = {"job_id": "j9", "task_id": "TASK-1", "stage": "P9", "attempt": 1,
+                      "payload": {}, "result": {"data": {}},
+                      "transition_attempt": 1, "lease_token": "transition-lease"}
+
+        class TransitionQueue(Queue):
+            def claim_transition(self): return transition
+            def finish_transition(self, job, **values): self.transition_finished = values; return True
+
+        queue = TransitionQueue(None)
+        with self.assertRaisesRegex(RuntimeError, "provider secret"):
+            execute_next_job(queue, Workflow(), publisher_factory=lambda: (_ for _ in ()).throw(
+                RuntimeError("provider secret")))
+        self.assertEqual(queue.transition_finished["error_code"], "RuntimeError")
+
 
 if __name__ == "__main__":
     unittest.main()
