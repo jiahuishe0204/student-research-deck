@@ -138,7 +138,9 @@ class TencentCosArtifactStore:
         digest = hashlib.sha256(payload).hexdigest()
         response = self.client.put_object(
             Bucket=self.bucket, Key=key, Body=payload, ContentType=content_type,
-            ServerSideEncryption="AES256", Metadata={"sha256": digest},
+            # qcloud_cos maps Metadata keys directly to request headers; COS
+            # custom metadata requires the x-cos-meta- prefix explicitly.
+            ServerSideEncryption="AES256", Metadata={"x-cos-meta-sha256": digest},
         )
         return StoredArtifact(key, digest, len(payload), str(response.get("ETag", "")).strip('"'))
 
