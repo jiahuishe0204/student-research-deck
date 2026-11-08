@@ -276,28 +276,31 @@ class PostgresDeliveryRepository:
 
     def prepare_artifact(self, *, task_id, artifact_id, kind, object_key, content_type):
         cursor = self.connection.cursor()
-        cursor.execute(
-            """
-            INSERT INTO task_artifacts
-                (artifact_id,task_id,kind,object_key,sha256,size_bytes,content_type,status,expires_at)
-            SELECT %s,%s,%s,%s,%s,1,%s,'prepared',CURRENT_TIMESTAMP + INTERVAL '7 days'
-             WHERE EXISTS (SELECT 1 FROM research_tasks WHERE task_id=%s AND status IN ('running','completed'))
-            ON CONFLICT (artifact_id) DO NOTHING
-            """,
-            (str(artifact_id), task_id, kind, object_key, "0" * 64, content_type, task_id),
-        )
-        cursor.execute(
-            """SELECT jsonb_build_object('artifact_id',artifact_id,'status',status,
-                       'object_key',object_key) FROM task_artifacts
-                 WHERE artifact_id=%s AND task_id=%s AND object_key=%s FOR UPDATE""",
-            (str(artifact_id), task_id, object_key),
-        )
-        result = _one(cursor)
-        if not result:
+        try:
+            cursor.execute(
+                """
+                INSERT INTO task_artifacts
+                    (artifact_id,task_id,kind,object_key,sha256,size_bytes,content_type,status,expires_at)
+                SELECT %s,%s,%s,%s,%s,1,%s,'prepared',CURRENT_TIMESTAMP + INTERVAL '7 days'
+                 WHERE EXISTS (SELECT 1 FROM research_tasks WHERE task_id=%s AND status IN ('running','completed'))
+                ON CONFLICT (artifact_id) DO NOTHING
+                """,
+                (str(artifact_id), task_id, kind, object_key, "0" * 64, content_type, task_id),
+            )
+            cursor.execute(
+                """SELECT jsonb_build_object('artifact_id',artifact_id,'status',status,
+                           'object_key',object_key) FROM task_artifacts
+                     WHERE artifact_id=%s AND task_id=%s AND object_key=%s FOR UPDATE""",
+                (str(artifact_id), task_id, object_key),
+            )
+            result = _one(cursor)
+            if not result:
+                raise ValueError("任务不存在或产物标识冲突")
+            self.connection.commit()
+            return result
+        except Exception:
             self.connection.rollback()
-            raise ValueError("任务不存在或产物标识冲突")
-        self.connection.commit()
-        return result
+            raise
 
     def publish_artifact_and_complete(self, **values):
         cursor = self.connection.cursor()
