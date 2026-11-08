@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 
 def build_final_artifacts(task_id, final_delivery, stage_payload):
@@ -18,15 +19,19 @@ def build_final_artifacts(task_id, final_delivery, stage_payload):
         raise ValueError("P9 缺少报告或 PPT 内容")
     if not isinstance(sources, list) or not isinstance(evidence, list):
         raise ValueError("P9 缺少参考文献或证据记录")
-    suffix = str(task_id).replace("-", "_")
+    def artifact_id(kind):
+        # task_artifacts.artifact_id is a UUID in production. UUID5 keeps each
+        # task/kind pair stable across retries without colliding with other kinds.
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, "researchdesk:%s:%s" % (task_id, kind)))
+
     return (
-        {"artifact_id": "REPORT_" + suffix, "kind": "report", "extension": "md",
+        {"artifact_id": artifact_id("report"), "kind": "report", "extension": "md",
          "content_type": "text/markdown; charset=utf-8", "body": markdown + "\n"},
-        {"artifact_id": "PPTCONTENT_" + suffix, "kind": "ppt_content", "extension": "json",
+        {"artifact_id": artifact_id("ppt_content"), "kind": "ppt_content", "extension": "json",
          "content_type": "application/json", "body": json.dumps(
              {"deck_title": ppt.get("deck_title"), "storyline": ppt.get("storyline"), "pages": pages},
              ensure_ascii=False, indent=2)},
-        {"artifact_id": "REFERENCES_" + suffix, "kind": "references", "extension": "json",
+        {"artifact_id": artifact_id("references"), "kind": "references", "extension": "json",
          "content_type": "application/json", "body": json.dumps(
              {"sources": sources, "evidence_records": evidence,
               "evidence_version": stage_payload.get("evidence_version", "1.0")},
