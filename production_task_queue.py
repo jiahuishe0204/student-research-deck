@@ -304,7 +304,7 @@ class PostgresTaskQueue:
         cursor.execute(
             """WITH candidate AS (
                    SELECT job_id FROM research_task_jobs
-                    WHERE status='succeeded' AND transition_status='pending'
+                    WHERE status='succeeded' AND transition_status IN ('pending','running')
                       AND transition_attempts<3 AND available_at<=CURRENT_TIMESTAMP
                       AND (lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP)
                     ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 1
