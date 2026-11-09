@@ -12,7 +12,7 @@ class Lifecycle:
 
 class ProductionArtifactsTests(unittest.TestCase):
     def setUp(self):
-        self.final = {"final_report": {"markdown": "# Report\nBody"},
+        self.final = {"final_report": {"markdown": "# Report\n\n" + "中" * 8000},
                       "final_ppt": {"deck_title": "Deck", "storyline": "Story",
                                     "pages": [{"page_id": "SL-01", "title": "One"}]}}
         self.payload = {"source_records": [{"source_id": "S1"}],

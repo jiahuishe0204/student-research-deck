@@ -30,6 +30,20 @@ EFFICACY_OVERCLAIM = re.compile(r"(?:电荷注入)?效率优于|刺激效率优�
 NEGATED_SUPERIORITY = re.compile(r"(?:不等同于|不能|无法|尚不足以|并非|不意味着)[^。；\n]{0,35}优于")
 LIMITED_EFFICIENCY = re.compile(r"(?:不等同于|不能|无法|尚不足以|并非|不意味着)[^。；\n]{0,35}(?:电荷注入效率|刺激效率)")
 
+REPORT_HAN_MIN = 8000
+REPORT_HAN_MAX = 12000
+HAN_CHARACTER = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0002fa1f\U00030000-\U000323af]")
+
+
+def report_body_han_count(markdown):
+    """Count Han characters in report prose, excluding headings and references."""
+    body = str(markdown or "")
+    body = re.split(r"(?im)^#{1,3}\s*(?:参考文献|references)\s*$", body, maxsplit=1)[0]
+    body = re.sub(r"(?m)^#{1,6}\s+.*$", "", body)
+    body = re.sub(r"```.*?```", "", body, flags=re.S)
+    body = re.sub(r"\[EV::[^\]]+\]", "", body)
+    return len(HAN_CHARACTER.findall(body))
+
 
 def presentation_boundary_issues(page):
     """Shared repair triggers and final delivery gates must agree."""
@@ -210,15 +224,11 @@ def validate_report(value, evidence_ids, tier="deep"):
     cited = set(re.findall(r"EV::.+?::\d{3}", markdown))
     if tier == "deep" and value.get("status") == "draft" and not cited:
         raise ContractError("P5 深入报告没有逐项证据引用，不能进入后续交付")
-    # The lower bound guards against a disguised outline.  The upper bound is
-    # only a technical runaway guard: report depth must not be cut merely to
-    # satisfy the former 8,000-character product target.
-    limits = {"fast": (2000, 8000), "deep": (4000, 12000)}
-    minimum, maximum = limits.get(tier, limits["deep"])
-    if len(markdown) > maximum:
-        raise ContractError("P5 调研报告超过版本字数上限：%d/%d" % (len(markdown), maximum))
-    if value.get("status") == "draft" and len(markdown) < minimum:
-        raise ContractError("P5 调研报告未达到完整交付的最低篇幅：%d/%d" % (len(markdown), minimum))
+    han_count = report_body_han_count(markdown)
+    if han_count > REPORT_HAN_MAX:
+        raise ContractError("P5 调研报告正文汉字超过上限：%d/%d" % (han_count, REPORT_HAN_MAX))
+    if han_count < REPORT_HAN_MIN:
+        raise ContractError("P5 调研报告正文汉字未达到最低篇幅：%d/%d" % (han_count, REPORT_HAN_MIN))
     required_sections = (("执行摘要", "摘要"), ("研究范围", "研究问题与范围", "问题界定", "研究目的"), ("方法", "证据基础", "资料基础"), ("综合结论", "结论"), ("局限", "证据边界"))
     missing_sections = [alternatives[0] for alternatives in required_sections if not any(term in markdown for term in alternatives)]
     if missing_sections:

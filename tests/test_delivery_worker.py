@@ -1,4 +1,6 @@
 import unittest
+import json
+from uuid import UUID
 from unittest.mock import patch
 
 from delivery_worker import execute_one, validate_event_payload
@@ -18,6 +20,16 @@ class Ambiguous(Exception): ambiguous_delivery=True; error_code="ConnectionClose
 
 
 class WorkerTests(unittest.TestCase):
+    @patch("delivery_worker.finish_event", return_value=True)
+    @patch("delivery_worker.claim_event")
+    def test_database_uuid_results_can_be_serialized_by_scf(self, claim, finish):
+        for error in (None, Ambiguous()):
+            event = self.event()
+            event["event_id"] = UUID("12345678-1234-1234-1234-123456789abc")
+            claim.return_value = event
+            result = execute_one(object(), Vault(), Mailer(error))
+            self.assertEqual(json.loads(json.dumps(result))["event_id"], str(event["event_id"]))
+
     def event(self): return {"event_id":"e1","lease_token":"lt","event_type":"send_completed","task_id":"TASK-123456789abc","user_id":"u1","payload":{"task_label":"调研任务","site_url":"https://example.com/tasks/TASK-123456789abc"},"attempt_count":1}
 
     def test_payload_whitelist_blocks_secrets_and_signed_urls(self):

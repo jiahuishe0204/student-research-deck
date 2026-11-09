@@ -35,19 +35,22 @@ class ResearchPipelineTests(unittest.TestCase):
         }
         workflow = Workflow()
         patent_client = object()
-        with patch("research_pipeline.search_all", side_effect=search):
+        with patch("research_pipeline.search_all", side_effect=search), patch("research_sources.search_europe_pmc", return_value=[]):
             result = search_and_screen_sources(
                 workflow, topic="cell biology topic", plan=plan, tier="fast",
                 patent_client=patent_client, environ={},
             )
 
-        self.assertEqual(len(calls), 2)
+        # The shared minimum-source gate is now applied to fast reports too,
+        # so this one-record fixture triggers one supplemental query.
+        self.assertEqual(len(calls), 3)
         self.assertIs(calls[0][1]["patent_client"], patent_client)
         self.assertIsNone(calls[1][1]["patent_client"])
         self.assertEqual(result["usage"]["total_tokens"], 17)
         self.assertEqual(result["sources"]["records"][0]["source_id"], "PMID:1")
         self.assertEqual(result["screening"]["quality_gate"]["usable_count"], 1)
-        self.assertEqual(result["screening"]["full_text_enrichment"]["lookups"], 0)
+        self.assertTrue(result["supplemental_search"])
+        self.assertEqual(result["screening"]["full_text_enrichment"]["lookups"], 1)
         self.assertEqual(workflow.screen_call[0], "cell biology topic")
 
     def test_rejects_invalid_pipeline_inputs_before_provider_calls(self):
@@ -69,7 +72,7 @@ class ResearchPipelineTests(unittest.TestCase):
             result = search_and_screen_sources(
                 workflow, topic="cell topic", plan={"questions": [{"question_id": "Q1"}]},
                 tier="fast", candidate_records=[candidate], previous_queries=["prior query"],
-                environ={},
+                supplement=False, environ={},
             )
         search.assert_not_called()
         self.assertEqual(workflow.records, [candidate])

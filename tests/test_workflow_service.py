@@ -189,7 +189,7 @@ class WorkflowServiceTests(unittest.TestCase):
         def generate(stage, tier, payload, validator=None, **options):
             limits.append(options["max_tokens"])
             body = ("执行摘要\n摘要。\n研究范围与资料方法\n范围与方法。\n正文\n"
-                    + ("结果与限制[EV::SRC-1::001]。" * 300)
+                    + ("结果与限制[EV::SRC-1::001]。" * 1600)
                     + "\n综合结论\n结论。\n局限与后续研究\n局限。")
             value = {"report_version": "1", "report_title": "t", "report_markdown": body,
                      "used_evidence_ids": ["EV::SRC-1::001"], "figure_recommendations": [],
@@ -200,7 +200,7 @@ class WorkflowServiceTests(unittest.TestCase):
         evidence = [{"evidence_id": "EV::SRC-1::001"}]
         service.create_report({}, {}, evidence, "fast")
         service.create_report({}, {}, evidence, "deep")
-        self.assertEqual(limits, [10000, 10000])
+        self.assertEqual(limits, [20000, 20000])
 
     def test_full_text_evidence_has_room_for_complete_captions(self):
         service = WorkflowService("", FakeRouter(), "system", {"P4": "evidence"})
@@ -230,8 +230,8 @@ class WorkflowServiceTests(unittest.TestCase):
 
         self.assertEqual(len(calls), 3)
         self.assertEqual(output["summary"]["candidate_count"], 9)
-        self.assertEqual(output["summary"]["keep_count"], 4)
-        self.assertEqual(output["summary"]["reserve_count"], 5)
+        self.assertEqual(output["summary"]["keep_count"], 8)
+        self.assertEqual(output["summary"]["reserve_count"], 1)
         self.assertEqual(usage["total_tokens"], 30)
 
     def test_screen_sources_drops_harmless_notes_without_retry(self):
@@ -344,7 +344,7 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertIn("EPO OPS", captured["P2B"]["available_sources"])
         self.assertIn("只看临床", captured["P2A"]["intent"]["normalized_topic"])
         self.assertIn("疾病定义", captured["P2A"]["intent"]["scope_hint"])
-        self.assertEqual(captured["P2B"]["runtime_config"]["source_limit"], 19)
+        self.assertEqual(captured["P2B"]["runtime_config"]["source_limit"], 24)
         self.assertEqual(captured["P2A"]["output_contract"]["type"], "object")
         self.assertIn("questions", captured["P2B"]["output_contract"]["required"])
         self.assertEqual(captured["P2B"]["research_architecture"]["overall_story"], "story")
@@ -550,7 +550,7 @@ class WorkflowServiceTests(unittest.TestCase):
         service = WorkflowService("secret", FakeRouter(), "system", {"P5": "report"})
 
         def generate(stage, tier, payload, validator=None, **options):
-            body = "# 摘要\n摘要。\n# 研究范围\n范围。\n# 资料方法\n方法。\n# 正文\n" + ("有证据的叙述[EV::SRC-1::001]与待核验叙述[EV::SRC-X::999]。" * 100) + "\n# 结论\n结论。\n# 局限\n局限。"
+            body = "# 摘要\n摘要。\n# 研究范围\n范围。\n# 资料方法\n方法。\n# 正文\n" + ("有证据的叙述[EV::SRC-1::001]与待核验叙述[EV::SRC-X::999]。" * 800) + "\n# 结论\n结论。\n# 局限\n局限。"
             value = {
                 "report_version": "1", "report_title": "t", "report_markdown": body,
                 "used_evidence_ids": ["EV::SRC-1::001", "EV::SRC-X::999"], "figure_recommendations": [],
