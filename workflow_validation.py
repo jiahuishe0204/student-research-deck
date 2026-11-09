@@ -241,8 +241,11 @@ def validate_ppt(value, evidence_ids, figure_ids, source_ids=None):
         for figure in page["figure_refs"]:
             if figure["figure_id"] not in allowed_figures:
                 raise ContractError("P6 页面使用了不存在的 figure_id")
-        if allowed_sources and not {item["source_id"] for item in page["source_citations"]}.issubset(allowed_sources):
-            raise ContractError("P6 页面使用了不存在的 source_id")
+        if allowed_sources:
+            invalid_sources = sorted({item["source_id"] for item in page["source_citations"]} - allowed_sources)
+            if invalid_sources:
+                safe_ids = [re.sub(r"[^A-Za-z0-9:_-]", "", item)[:120] for item in invalid_sources[:8]]
+                raise ContractError("P6 页面使用了不存在的 source_id：" + ", ".join(safe_ids))
     validate_ppt_density(value["pages"])
     validate_presentation_voice(value["pages"], check_claim_boundaries=False)
     return value

@@ -22,6 +22,7 @@ class Tasks:
     def create_task(self,**values): self.created=values; return {"task_id":"TASK-1","status":"queued"}
     def task_progress(self,**values): self.progress=values; return {"task_id":"TASK-1","status":"running"}
     def continue_after_intent(self,**values): self.continued=values; return {"task_id":"TASK-1","current_stage":"P2"}
+    def retry_failed_task(self,**values): self.retried=values; return {"task_id":"TASK-1","status":"queued","current_stage":"P6"}
     def task_delivery(self,**values): self.delivery=values; return {"task_id":"TASK-1","artifacts":[]}
 class Cursor:
     def execute(self,sql): self.sql=sql
@@ -83,6 +84,14 @@ class HttpEntrypointTests(unittest.TestCase):
         response=main_handler(event,services=self.services)
         self.assertEqual(response["statusCode"],202)
         self.assertEqual(self.tasks.continued,{"user_id":"u1","task_id":"TASK-1","clarification":"聚焦检测机制"})
+        self.assertTrue(self.auth.auth_args[1]["require_csrf"])
+
+    def test_retry_failed_task_requires_csrf_and_is_owner_scoped(self):
+        event={"httpMethod":"POST","path":"/tasks/TASK-1/retry",
+               "headers":{"cookie":"research_session=s1","x-csrf-token":"c1"},"body":"{}"}
+        response=main_handler(event,services=self.services)
+        self.assertEqual(response["statusCode"],202)
+        self.assertEqual(self.tasks.retried,{"user_id":"u1","task_id":"TASK-1"})
         self.assertTrue(self.auth.auth_args[1]["require_csrf"])
 
     def test_delivery_is_owner_scoped(self):

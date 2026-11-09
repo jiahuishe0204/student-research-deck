@@ -451,6 +451,26 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertIn("validation_feedback", payloads[1])
         self.assertIn("EV::INVALID::001", payloads[1]["validation_feedback"])
 
+    def test_ppt_revises_a_source_id_outside_the_allowed_source_list(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
+        payloads = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            payloads.append(payload)
+            source_id = "SRC-INVENTED" if len(payloads) == 1 else "SRC-VALID"
+            page = {"page_id": "SL-01", "navigation_title": "界面结论", "title": "界面结论", "purpose": "解释机制",
+                    "on_slide_text": ["结论有证据支持"], "visual_suggestion": "机制示意图",
+                    "speaker_notes": "该结果仍需结合具体条件解释。", "evidence_ids": ["EV-1"],
+                    "figure_refs": [], "source_citations": [{"source_id": source_id, "short_vancouver": "Example J. 2024."}]}
+            return validator({"deck_title": "deck", "storyline": "story", "pages": [page]}), {"total_tokens": 1}, {}
+
+        service.generate = generate
+        service.create_ppt({}, {"report_markdown": "结论[EV-1]。"}, [{"evidence_id": "EV-1"}], [], {}, "fast",
+                            source_records=[{"source_id": "SRC-VALID", "title": "Valid source"}])
+        self.assertEqual(len(payloads), 2)
+        self.assertIn("allowed_source_ids", payloads[1])
+        self.assertIn("SRC-INVENTED", payloads[1]["validation_feedback"])
+
     def test_long_deep_ppt_uses_two_bounded_arc_batches_and_unique_page_ids(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
         calls = []

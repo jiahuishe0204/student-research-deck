@@ -581,14 +581,24 @@ class WorkflowService:
                                      max_tokens=token_limit, max_attempts=1)
             except ValueError as exc:
                 message = str(exc)
-                if "P6 页面使用了不存在的 evidence_id" not in message:
+                if not any(marker in message for marker in (
+                    "P6 页面使用了不存在的 evidence_id",
+                    "P6 页面使用了不存在的 source_id",
+                )):
                     raise
                 corrected_payload = dict(batch_payload)
-                corrected_payload["validation_feedback"] = (
-                    "上次页面因证据编号不在 allowed_evidence_ids 白名单而被拒绝。"
-                    "只可逐字使用白名单中的编号；若某条判断没有可用编号，应删除或收窄该判断，不得自造编号。"
-                    "校验信息：" + message[:400]
-                )
+                if "source_id" in message:
+                    correction = (
+                        "上次页面使用了 allowed_source_ids 白名单之外的来源编号。"
+                        "source_citations 只能逐字使用 allowed_source_ids 中的 source_id；"
+                        "没有匹配来源时请删除该引用，不得自造编号或改写编号。"
+                    )
+                else:
+                    correction = (
+                        "上次页面因证据编号不在 allowed_evidence_ids 白名单而被拒绝。"
+                        "只可逐字使用白名单中的编号；若某条判断没有可用编号，应删除或收窄该判断，不得自造编号。"
+                    )
+                corrected_payload["validation_feedback"] = correction + "校验信息：" + message[:400]
                 return self.generate("P6", tier, corrected_payload, validator,
                                      max_tokens=token_limit, max_attempts=1)
 

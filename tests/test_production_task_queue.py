@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from production_task_queue import FreeEntitlementUnavailable, PostgresTaskQueue
+from production_task_queue import FreeEntitlementUnavailable, PostgresTaskQueue, TaskNotRetryable
 
 
 class Cursor:
@@ -111,6 +111,25 @@ class ProductionTaskQueueTests(unittest.TestCase):
         statements = [sql for sql, _ in connection.cursor_value.calls]
         self.assertTrue(any("status='failed'" in sql for sql in statements))
         self.assertTrue(any("state='available'" in sql for sql in statements))
+
+    def test_retry_failed_task_requeues_only_the_failed_checkpoint(self):
+        connection = Connection([
+            ("failed", "P6"), ("job-p6", "permanent_failed"), ("available", None),
+        ])
+        result = PostgresTaskQueue(connection).retry_failed_task(user_id="u1", task_id="TASK-1")
+        self.assertEqual(result, {"task_id": "TASK-1", "status": "queued", "current_stage": "P6"})
+        statements = [sql for sql, _ in connection.cursor_value.calls]
+        self.assertTrue(any("user_id=%s FOR UPDATE" in sql for sql in statements))
+        self.assertTrue(any("status='permanent_failed'" in sql for sql in statements))
+        self.assertTrue(any("status='pending',attempt=0" in sql for sql in statements))
+        self.assertTrue(any("state='reserved'" in sql for sql in statements))
+        self.assertEqual(connection.commits, 1)
+
+    def test_retry_failed_task_rejects_a_nonfailed_task(self):
+        connection = Connection([("running", "P6")])
+        with self.assertRaises(TaskNotRetryable):
+            PostgresTaskQueue(connection).retry_failed_task(user_id="u1", task_id="TASK-1")
+        self.assertEqual(connection.rollbacks, 1)
 
     def test_progress_is_owner_scoped_and_returns_latest_stage_result(self):
         connection = Connection([("TASK-1", "CRISPR", "fast", "running", "P1",
