@@ -49,6 +49,15 @@ function showProductionTaskFailure(exc,button){
   error.textContent=exc.message;
 }
 const wait=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
+async function restoreRecentProductionTask(){
+  const response=await productionRequest('/tasks'),items=Array.isArray(response.data)?response.data:[];
+  const recent=items.find(item=>typeof item.task_id==='string'&&/^TASK-[a-f0-9]{12}$/.test(item.task_id));
+  if(!recent)return false;
+  currentTaskId=recent.task_id;sessionStorage.setItem(productionTaskKey,currentTaskId);
+  $('#auth-status').textContent=`已找回任务“${recent.topic||'最近任务'}”，正在读取${recent.current_stage||'当前'}进度。`;
+  pollProductionTask().catch(exc=>{error.textContent=exc.message;});
+  return true;
+}
 function setProductionProgress(progress){const stage=String(progress.current_stage||'P1'),number=Number(stage.slice(1))||1,failed=progress.status==='failed';$('#task-workspace').hidden=false;$('#task-status-title').textContent=failed?'任务未完成':`正在执行 ${stage}`;$('#resume-task').hidden=!failed;$('#resume-task').textContent='恢复失败阶段';document.querySelector('.progress-line i').style.width=`${Math.min(96,Math.max(12,number*10))}%`;document.querySelectorAll('.task-status li').forEach((item,index)=>{const boundary=Math.ceil(number/2);item.className=index<boundary?'done':index===boundary?'active':'';});$('#plan-output').innerHTML=`<p class="empty-plan">任务已安全保存到云端。当前阶段：${escapeHtml(stage)}。${failed?'失败阶段可从已完成的检查点恢复。':'关闭页面不会中断，完成后会发送邮件。'}</p>`;}
 async function pollProductionTask({untilIntent=false}={}){
   if(productionPolling)return;
