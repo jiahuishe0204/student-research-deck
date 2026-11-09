@@ -50,7 +50,38 @@ function showProductionTaskFailure(exc,button){
 }
 const wait=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
 function setProductionProgress(progress){const stage=String(progress.current_stage||'P1'),number=Number(stage.slice(1))||1;$('#task-workspace').hidden=false;$('#task-status-title').textContent=progress.status==='failed'?'任务未完成':`正在执行 ${stage}`;document.querySelector('.progress-line i').style.width=`${Math.min(96,Math.max(12,number*10))}%`;document.querySelectorAll('.task-status li').forEach((item,index)=>{const boundary=Math.ceil(number/2);item.className=index<boundary?'done':index===boundary?'active':'';});$('#plan-output').innerHTML=`<p class="empty-plan">任务已安全保存到云端。当前阶段：${escapeHtml(stage)}。关闭页面不会中断，完成后会发送邮件。</p>`;}
-async function pollProductionTask({untilIntent=false}={}){if(productionPolling)return;productionPolling=true;try{for(let count=0;count<180;count+=1){const response=await productionRequest(`/tasks/${encodeURIComponent(currentTaskId)}/progress`),progress=response.data||{};setProductionProgress(progress);const stageData=progress.stage_result?.data;if(untilIntent&&stageData?.normalized_topic){currentIntent=stageData;selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');$('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后开始完整调研 <span>→</span>':'确认并开始完整调研 <span>→</span>');result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});return;}if(progress.status==='completed'||progress.status==='partial'){location.href=`./delivery.html?task=${encodeURIComponent(currentTaskId)}`;return;}if(progress.status==='failed')throw new Error('任务未能完成，技术失败不会消耗首次免费资格');await wait(5000);}throw new Error('任务仍在运行，请稍后刷新页面查看');}finally{productionPolling=false;}}
+async function restoreRecentProductionTask(){
+  const response=await productionRequest('/tasks'),items=Array.isArray(response.data)?response.data:[];
+  if(!items.length)return false;
+  const recent=items[0];
+  if(typeof recent.task_id!=='string'||!/^TASK-[a-f0-9]{12}$/.test(recent.task_id))throw new Error('最近任务记录中的任务编号无效');
+  currentTaskId=recent.task_id;sessionStorage.setItem(productionTaskKey,currentTaskId);
+  $('#production-auth').hidden=true;$('#task-workspace').hidden=false;
+  $('#task-status-title').textContent=`已恢复最近任务，正在读取 ${recent.current_stage||'当前'} 阶段`;
+  pollProductionTask().catch(exc=>{error.textContent=exc.message;});
+  return true;
+}
+async function pollProductionTask({untilIntent=false}={}){
+  if(productionPolling)return;
+  const pollTaskId=currentTaskId;
+  if(typeof pollTaskId!=='string'||!/^TASK-[a-f0-9]{12}$/.test(pollTaskId)){
+    if(await restoreRecentProductionTask())return;
+    throw new Error('当前页面没有有效的任务编号；已停止查询，请登录后恢复最近任务。');
+  }
+  productionPolling=true;
+  try{
+    for(let count=0;count<180;count+=1){
+      if(currentTaskId!==pollTaskId)return;
+      const response=await productionRequest(`/tasks/${encodeURIComponent(pollTaskId)}/progress`),progress=response.data||{};
+      setProductionProgress(progress);const stageData=progress.stage_result?.data;
+      if(untilIntent&&stageData?.normalized_topic){currentIntent=stageData;selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');$('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后开始完整调研 <span>→</span>':'确认并开始完整调研 <span>→</span>');result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});return;}
+      if(progress.status==='completed'||progress.status==='partial'){location.href=`./delivery.html?task=${encodeURIComponent(pollTaskId)}`;return;}
+      if(progress.status==='failed')throw new Error('任务已保存，但后台执行失败；请查看失败阶段后恢复，不要重新输入验证码。');
+      await wait(5000);
+    }
+    throw new Error('任务仍在运行，请稍后刷新页面查看');
+  }finally{productionPolling=false;}
+}
 function showOwnerTestCopy(){
   const fastLabel=$('input[name="tier"][value="fast"]').closest('label');
   const deepLabel=$('input[name="tier"][value="deep"]').closest('label');
@@ -82,7 +113,7 @@ async function detectProduction(){
   }
   let health={};try{const response=await fetch('/api/health',{cache:'no-store'});health=await response.json();const data=health;productionMode=response.ok&&data.runtime==='edgeone-gateway'&&data.ok===true;}catch(_exc){productionMode=false;}
   if(!productionMode){const local=['localhost','127.0.0.1','::1'].includes(location.hostname);if(local){if(health.owner_test_mode===true)showOwnerTestCopy();return false;}error.textContent='线上服务暂时不可用，请稍后再试。';form.querySelector('.primary').disabled=true;return true;}
-  $('#cancel-task').hidden=true;$('#resume-task').hidden=true;const csrf=sessionStorage.getItem(csrfKey);if(csrf){$('#production-auth').classList.add('verified');$('#auth-status').textContent='邮箱登录状态已就绪。';}const saved=sessionStorage.getItem(productionTaskKey);if(saved){currentTaskId=saved;if(!csrf)$('#production-auth').hidden=false;else pollProductionTask().catch(exc=>{error.textContent=exc.message;});}return true;
+  $('#cancel-task').hidden=true;$('#resume-task').hidden=true;const csrf=sessionStorage.getItem(csrfKey);if(csrf){$('#production-auth').classList.add('verified');$('#auth-status').textContent='邮箱登录状态已就绪。';}const saved=sessionStorage.getItem(productionTaskKey);if(saved){currentTaskId=saved;if(!csrf)$('#production-auth').hidden=false;else pollProductionTask().catch(exc=>{error.textContent=exc.message;});}else{restoreRecentProductionTask().catch(exc=>{if(exc.status!==401)error.textContent=exc.message;});}return true;
 }
 async function startProductionTask(){
   if(!currentTaskId){

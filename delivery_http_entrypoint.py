@@ -119,16 +119,26 @@ def main_handler(event, context=None, *, services=None):
             return _response(201, {"ok": True, "data": task}, {"Cache-Control": "no-store"})
         parts = path.strip("/").split("/")
         if method == "POST" and len(parts) >= 3 and parts[-1] == "continue" and parts[-3] == "tasks":
+            task_id = parts[-2]
+            if task_id.lower() in ("", "null", "undefined"):
+                return _response(400, {"ok": False, "code": "task_id_invalid",
+                                       "message": "任务编号缺失或无效，请恢复最近任务后继续。"},
+                                 {"Cache-Control": "no-store"})
             user_id = services["auth"].authenticate(
                 _session_cookie(event), csrf_token=headers.get("x-csrf-token", ""), require_csrf=True,
             )
             task = services["tasks"].continue_after_intent(
-                user_id=user_id, task_id=parts[-2], clarification=payload.get("clarification", ""),
+                user_id=user_id, task_id=task_id, clarification=payload.get("clarification", ""),
             )
             return _response(202, {"ok": True, "data": task}, {"Cache-Control": "no-store"})
         if method == "GET" and len(parts) >= 3 and parts[-1] == "progress" and parts[-3] == "tasks":
+            task_id = parts[-2]
+            if task_id.lower() in ("", "null", "undefined"):
+                return _response(400, {"ok": False, "code": "task_id_invalid",
+                                       "message": "任务编号缺失或无效，请恢复最近任务后继续。"},
+                                 {"Cache-Control": "no-store"})
             user_id = services["auth"].authenticate(_session_cookie(event))
-            progress = services["tasks"].task_progress(user_id=user_id, task_id=parts[-2])
+            progress = services["tasks"].task_progress(user_id=user_id, task_id=task_id)
             return _response(200, {"ok": True, "data": progress}, {"Cache-Control": "no-store"})
         if method == "GET" and len(parts) >= 3 and parts[-1] == "delivery" and parts[-3] == "tasks":
             user_id = services["auth"].authenticate(_session_cookie(event))
@@ -149,7 +159,7 @@ def main_handler(event, context=None, *, services=None):
     except PermissionError:
         return _response(401, {"ok": False, "code": "session_invalid", "message": "登录会话已失效，请重新验证邮箱。"}, {"Cache-Control": "no-store"})
     except LookupError:
-        return _response(401, {"ok": False, "code": "task_not_found", "message": "任务或登录会话不存在，请刷新后重试。"}, {"Cache-Control": "no-store"})
+        return _response(404, {"ok": False, "code": "task_not_found", "message": "未找到该任务，或当前账号无权访问。"}, {"Cache-Control": "no-store"})
     except ValueError as exc:
         return _response(401, {"ok": False, "code": "request_invalid", "message": str(exc) or "请求参数无效。"}, {"Cache-Control": "no-store"})
     except RuntimeError:
