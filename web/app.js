@@ -34,7 +34,20 @@ function renderSlidePreview(index,animate=false){
 }
 function showPreview(name){$('#preview-body').innerHTML=previews[name];document.querySelectorAll('.preview-tabs button').forEach(button=>button.classList.toggle('active',button.dataset.preview===name));if(name==='slides')renderSlidePreview(0);}
 async function request(path,payload){const headers={'Content-Type':'application/json'};if(currentTaskId&&currentTaskToken){headers['X-Task-ID']=currentTaskId;headers['X-Task-Token']=currentTaskToken;}const response=await fetch(path,{method:'POST',headers,body:JSON.stringify(payload)});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.detail?`${data.error||'请求失败'}：${data.detail}`:(data.error||'请求失败'));return data;}
-async function productionRequest(path,{method='GET',body=null,csrf=false}={}){const headers={};if(body!==null)headers['Content-Type']='application/json';if(csrf)headers['X-CSRF-Token']=sessionStorage.getItem(csrfKey)||'';const response=await fetch(path,{method,credentials:'include',cache:'no-store',headers,body:body===null?undefined:JSON.stringify(body)});const data=await response.json().catch(()=>({message:'服务返回格式异常'}));if(!response.ok)throw new Error(data.message||data.error||'请求失败');return data;}
+async function productionRequest(path,{method='GET',body=null,csrf=false}={}){const headers={};if(body!==null)headers['Content-Type']='application/json';if(csrf)headers['X-CSRF-Token']=sessionStorage.getItem(csrfKey)||'';const response=await fetch(path,{method,credentials:'include',cache:'no-store',headers,body:body===null?undefined:JSON.stringify(body)});const data=await response.json().catch(()=>({message:'服务返回格式异常'}));if(!response.ok){const failure=new Error(data.message||data.error||'请求失败');failure.code=data.code||'';failure.status=response.status;throw failure;}return data;}
+
+function showProductionTaskFailure(exc,button){
+  const status=$('#auth-status');
+  if(exc.code==='free_entitlement_unavailable'){
+    status.textContent='邮箱已验证，登录正常。此账号当前没有可用的免费任务资格；本次未创建新任务，也未启动后续调研。请查看账号已有交付；若旧交付不符合已确认的质量要求，请联系支持申请质量补跑。重复点击或重新验证邮箱不会恢复资格。';
+    $('#code-row').hidden=true;$('#auth-code').disabled=true;$('#request-code').disabled=true;
+    if(button){button.dataset.terminalError=exc.code;button.disabled=true;button.innerHTML='免费资格已使用';}
+    error.textContent='';return;
+  }
+  if(button)delete button.dataset.terminalError;
+  status.textContent=`邮箱已验证，但保存或启动任务失败：${exc.message}。登录仍有效，无需再次输入验证码；请稍后重试。`;
+  error.textContent=exc.message;
+}
 const wait=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
 function setProductionProgress(progress){const stage=String(progress.current_stage||'P1'),number=Number(stage.slice(1))||1;$('#task-workspace').hidden=false;$('#task-status-title').textContent=progress.status==='failed'?'任务未完成':`正在执行 ${stage}`;document.querySelector('.progress-line i').style.width=`${Math.min(96,Math.max(12,number*10))}%`;document.querySelectorAll('.task-status li').forEach((item,index)=>{const boundary=Math.ceil(number/2);item.className=index<boundary?'done':index===boundary?'active':'';});$('#plan-output').innerHTML=`<p class="empty-plan">任务已安全保存到云端。当前阶段：${escapeHtml(stage)}。关闭页面不会中断，完成后会发送邮件。</p>`;}
 async function pollProductionTask({untilIntent=false}={}){if(productionPolling)return;productionPolling=true;try{for(let count=0;count<180;count+=1){const response=await productionRequest(`/tasks/${encodeURIComponent(currentTaskId)}/progress`),progress=response.data||{};setProductionProgress(progress);const stageData=progress.stage_result?.data;if(untilIntent&&stageData?.normalized_topic){currentIntent=stageData;selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');$('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后开始完整调研 <span>→</span>':'确认并开始完整调研 <span>→</span>');result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});return;}if(progress.status==='completed'||progress.status==='partial'){location.href=`./delivery.html?task=${encodeURIComponent(currentTaskId)}`;return;}if(progress.status==='failed')throw new Error('任务未能完成，技术失败不会消耗首次免费资格');await wait(5000);}throw new Error('任务仍在运行，请稍后刷新页面查看');}finally{productionPolling=false;}}
@@ -194,8 +207,8 @@ form.addEventListener('submit',async event=>{
     $('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;$('#clarification').value='';
     confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后继续 <span>→</span>':'确认研究方向 <span>→</span>');
     result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});
-  }catch(exc){error.textContent=exc.message;}
-  finally{setBusy(form.querySelector('.primary'),false,'让系统先理解题目 <span>→</span>');}
+  }catch(exc){if(productionMode)showProductionTaskFailure(exc,form.querySelector('.primary'));else error.textContent=exc.message;}
+  finally{const button=form.querySelector('.primary');if(!button.dataset.terminalError)setBusy(button,false,'让系统先理解题目 <span>→</span>');}
 });
 
 confirmButton.addEventListener('click',async()=>{
