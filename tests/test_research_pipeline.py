@@ -84,10 +84,13 @@ class ResearchPipelineTests(unittest.TestCase):
             def screen_sources(self, *args):
                 raise AssertionError("empty candidate set must not invoke model screening")
 
-        result = search_and_screen_sources(
-            Workflow(), topic="cell topic", plan={"questions": [{"question_id": "Q1"}]},
-            tier="fast", candidate_records=[], environ={},
-        )
+        with patch("research_pipeline.search_all", return_value={
+            "query": "no results", "records": [], "errors": [],
+        }):
+            result = search_and_screen_sources(
+                Workflow(), topic="cell topic", plan={"questions": [{"question_id": "Q1"}]},
+                tier="fast", candidate_records=[], environ={},
+            )
         self.assertEqual(result["screening"]["summary"]["candidate_count"], 0)
         self.assertEqual(result["screening"]["quality_gate"]["usable_count"], 0)
         self.assertFalse(result["screening"]["quality_gate"]["passed"])
