@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import uuid
 
+from workflow_validation import REPORT_HAN_MAX, REPORT_HAN_MIN, report_body_han_count
+
 
 def build_final_artifacts(task_id, final_delivery, stage_payload):
     if not isinstance(final_delivery, dict) or not isinstance(stage_payload, dict):
@@ -12,6 +14,9 @@ def build_final_artifacts(task_id, final_delivery, stage_payload):
     report = final_delivery.get("final_report") or {}
     ppt = final_delivery.get("final_ppt") or {}
     markdown = str(report.get("markdown") or "").strip()
+    han_count = report_body_han_count(markdown)
+    if not REPORT_HAN_MIN <= han_count <= REPORT_HAN_MAX:
+        raise ValueError("正式交付报告正文必须为 8000—12000 个汉字；当前 %d 个，未发布交付物" % han_count)
     pages = ppt.get("pages")
     sources = stage_payload.get("source_records")
     evidence = stage_payload.get("evidence_records")

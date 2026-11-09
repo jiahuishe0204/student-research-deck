@@ -382,7 +382,7 @@ class WorkflowService:
                 "available_sources": ["PubMed", "Europe PMC", "Crossref"]
                 + (["智慧芽 MCP 专利"] if os.environ.get("PATSNAP_MCP_API_KEY", "").strip() else ["EPO OPS"])
                 + (["Patsnap"] if os.environ.get("PATSNAP_API_KEY", "").strip() else []) + ["official"],
-                "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
+                "runtime_config": {"source_limit": 24 if tier == "deep" else 19, "language": "zh-CN"},
                 "output_contract": load_contract("P2B"),
             }, validate_blueprint_output,
             # Reasoning tokens share the response cap with the JSON body. The
@@ -417,7 +417,7 @@ class WorkflowService:
         if not isinstance(candidates, list) or not 1 <= len(candidates) <= 30:
             raise ValueError("候选资料数量必须为 1—30 条")
         candidate_ids = self._ids(candidates, "source_id", "候选资料 source_id 缺失或重复")
-        keep_max = 8 if tier == "deep" else 4
+        keep_max = 12 if tier == "deep" else 8
         keys = ("source_id", "source", "title", "abstract", "year", "access", "url",
                 "canonical_identity", "source_type", "publication_level", "independence_group",
                 "reading_scope", "retrieved_at", "intended_uses", "also_found_in")
@@ -546,7 +546,7 @@ class WorkflowService:
             # Deep reports can include many source-bound evidence records; the
             # former 7,500 cap truncated complete drafts. Give only this stage
             # enough room, while the request-time task budget remains enforced.
-            validate_report_output, max_tokens=10000, max_attempts=2,
+            validate_report_output, max_tokens=20000, max_attempts=2,
         )
         return output, usage
 
@@ -581,19 +581,29 @@ class WorkflowService:
                                      max_tokens=token_limit, max_attempts=1)
             except ValueError as exc:
                 message = str(exc)
-                if "P6 页面使用了不存在的 evidence_id" not in message:
+                if not any(marker in message for marker in (
+                    "P6 页面使用了不存在的 evidence_id",
+                    "P6 页面使用了不存在的 source_id",
+                )):
                     raise
                 corrected_payload = dict(batch_payload)
-                corrected_payload["validation_feedback"] = (
-                    "上次页面因证据编号不在 allowed_evidence_ids 白名单而被拒绝。"
-                    "只可逐字使用白名单中的编号；若某条判断没有可用编号，应删除或收窄该判断，不得自造编号。"
-                    "校验信息：" + message[:400]
-                )
+                if "source_id" in message:
+                    correction = (
+                        "上次页面使用了 allowed_source_ids 白名单之外的来源编号。"
+                        "source_citations 只能逐字使用 allowed_source_ids 中的 source_id；"
+                        "没有匹配来源时请删除该引用，不得自造编号或改写编号。"
+                    )
+                else:
+                    correction = (
+                        "上次页面因证据编号不在 allowed_evidence_ids 白名单而被拒绝。"
+                        "只可逐字使用白名单中的编号；若某条判断没有可用编号，应删除或收窄该判断，不得自造编号。"
+                    )
+                corrected_payload["validation_feedback"] = correction + "校验信息：" + message[:400]
                 return self.generate("P6", tier, corrected_payload, validator,
                                      max_tokens=token_limit, max_attempts=1)
 
         arc = (plan or {}).get("ppt_story_arc", [])
-        split_long_report = tier == "deep" and len(str(report.get("report_markdown") or "")) > 7000 and len(arc) >= 4
+        split_long_report = len(str(report.get("report_markdown") or "")) > 7000 and len(arc) >= 4
         if split_long_report:
             midpoint = (len(arc) + 1) // 2
             parts = []

@@ -59,7 +59,7 @@ def search_and_screen_sources(
         for index, query in enumerate(queries):
             results.append(search_fn(
                 query,
-                per_source=4 if tier == "deep" else 3,
+                per_source=4,
                 patent_client=patent_client if index == 0 else None,
                 include_patsnap=False,
             ))
@@ -81,7 +81,7 @@ def search_and_screen_sources(
                 })
 
     if candidate_records is None:
-        sources = merge_search_results(results, 24 if tier == "deep" else 12)
+        sources = merge_search_results(results, 24)
     candidates = sources["records"]
     if candidates:
         screening, usage = workflow.screen_sources(topic, plan, candidates, tier)
@@ -98,13 +98,11 @@ def search_and_screen_sources(
                         "drop_count": 0, "open_issues": ["未检索到可筛选来源"]},
         }
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "attempts": 0}
-    candidates, enrichment = enrich_kept_open_full_text(candidates, screening) if tier == "deep" else (
-        candidates, {"lookups": 0, "enriched_source_ids": [], "errors": []}
-    )
+    candidates, enrichment = enrich_kept_open_full_text(candidates, screening)
     quality = assess_source_quality(plan, candidates, screening, tier)
     search_update = None
 
-    if tier == "deep" and supplement and not quality["passed"]:
+    if supplement and not quality["passed"]:
         known_queries = set(previous_queries or [])
         extra_queries = [query for query in plan_search_queries(plan, topic, supplement=True, limit=3)
                          if query not in known_queries][:2]

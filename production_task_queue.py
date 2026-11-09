@@ -16,6 +16,10 @@ class FreeEntitlementUnavailable(Exception):
     """The verified user has no available first free delivery entitlement."""
 
 
+class TaskNotRetryable(Exception):
+    """The task has no safely recoverable failed stage."""
+
+
 def _json(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -138,6 +142,71 @@ class PostgresTaskQueue:
                     task[name] = task[name].isoformat()
             tasks.append(task)
         return tasks
+
+    def retry_failed_task(self, *, user_id, task_id):
+        """Requeue only this owner's failed current stage, preserving prior checkpoints."""
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                """SELECT status,current_stage FROM research_tasks
+                     WHERE task_id=%s AND user_id=%s FOR UPDATE""",
+                (str(task_id), str(user_id)),
+            )
+            task = cursor.fetchone()
+            if not task:
+                raise LookupError("任务不存在")
+            if task[0] != "failed":
+                raise TaskNotRetryable("任务当前不是失败状态")
+            stage = str(task[1] or "").upper()
+            if stage not in VALID_STAGES:
+                raise TaskNotRetryable("任务没有可恢复的失败阶段")
+
+            cursor.execute(
+                """SELECT job_id,status FROM research_task_jobs
+                     WHERE task_id=%s AND stage=%s AND status='permanent_failed'
+                     ORDER BY updated_at DESC LIMIT 1 FOR UPDATE""",
+                (str(task_id), stage),
+            )
+            job = cursor.fetchone()
+            if not job:
+                raise TaskNotRetryable("该阶段没有可安全重试的失败作业")
+
+            cursor.execute(
+                """SELECT state,task_id FROM free_entitlements WHERE user_id=%s FOR UPDATE""",
+                (str(user_id),),
+            )
+            entitlement = cursor.fetchone()
+            if entitlement:
+                state, reserved_task = entitlement
+                if state == "available" and not reserved_task:
+                    cursor.execute(
+                        """UPDATE free_entitlements SET state='reserved',task_id=%s,
+                                  updated_at=CURRENT_TIMESTAMP
+                             WHERE user_id=%s AND state='available' AND task_id IS NULL""",
+                        (str(task_id), str(user_id)),
+                    )
+                elif not (state == "reserved" and str(reserved_task) == str(task_id)):
+                    raise FreeEntitlementUnavailable("账号的首次免费资格当前不可用于恢复此任务")
+
+            cursor.execute(
+                """UPDATE research_task_jobs
+                      SET status='pending',attempt=0,result=NULL,error_code=NULL,
+                          available_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_until=NULL,
+                          transition_status='not_ready',transition_attempts=0,
+                          transition_error=NULL,updated_at=CURRENT_TIMESTAMP
+                    WHERE job_id=%s AND status='permanent_failed'""",
+                (str(job[0]),),
+            )
+            cursor.execute(
+                """UPDATE research_tasks SET status='queued',updated_at=CURRENT_TIMESTAMP
+                     WHERE task_id=%s AND user_id=%s AND status='failed'""",
+                (str(task_id), str(user_id)),
+            )
+            self.connection.commit()
+            return {"task_id": str(task_id), "status": "queued", "current_stage": stage}
+        except Exception:
+            self.connection.rollback()
+            raise
 
     def task_delivery(self, *, user_id, task_id):
         cursor = self.connection.cursor()
@@ -269,7 +338,10 @@ class PostgresTaskQueue:
         cursor.execute(
             """WITH candidate AS (
                    SELECT job_id FROM research_task_jobs
-                    WHERE status IN ('pending','retryable_failed') AND attempt<3
+                    -- A timed-out SCF invocation leaves its job in `running`.
+                    -- Once its lease expires, let the next timer invocation reclaim
+                    -- it (with a new fencing token) instead of stranding the task.
+                    WHERE status IN ('pending','retryable_failed','running') AND attempt<3
                       AND available_at<=CURRENT_TIMESTAMP
                       AND (lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP)
                     ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1

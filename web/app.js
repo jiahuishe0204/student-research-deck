@@ -40,10 +40,42 @@ function renderSlidePreview(index,animate=false){
 }
 function showPreview(name){$('#preview-body').innerHTML=previews[name];document.querySelectorAll('.preview-tabs button').forEach(button=>button.classList.toggle('active',button.dataset.preview===name));if(name==='slides')renderSlidePreview(0);}
 async function request(path,payload){const headers={'Content-Type':'application/json'};if(currentTaskId&&currentTaskToken){headers['X-Task-ID']=currentTaskId;headers['X-Task-Token']=currentTaskToken;}const response=await fetch(path,{method:'POST',headers,body:JSON.stringify(payload)});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.detail?`${data.error||'请求失败'}：${data.detail}`:(data.error||'请求失败'));return data;}
-async function productionRequest(path,{method='GET',body=null,csrf=false}={}){const headers={};if(body!==null)headers['Content-Type']='application/json';if(csrf)headers['X-CSRF-Token']=sessionStorage.getItem(csrfKey)||'';const response=await fetch(path,{method,credentials:'include',cache:'no-store',headers,body:body===null?undefined:JSON.stringify(body)});const data=await response.json().catch(()=>({message:'服务返回格式异常'}));if(!response.ok)throw new Error(data.message||data.error||'请求失败');return data;}
+async function productionRequest(path,{method='GET',body=null,csrf=false}={}){const headers={};if(body!==null)headers['Content-Type']='application/json';if(csrf)headers['X-CSRF-Token']=sessionStorage.getItem(csrfKey)||'';const response=await fetch(path,{method,credentials:'include',cache:'no-store',headers,body:body===null?undefined:JSON.stringify(body)});const data=await response.json().catch(()=>({message:'服务返回格式异常'}));if(!response.ok){const failure=new Error(data.message||data.error||'请求失败');failure.code=data.code||'';failure.status=response.status;throw failure;}return data;}
+function showProductionTaskFailure(exc,button){
+  const status=$('#auth-status');
+  if(exc.code==='free_entitlement_unavailable'){
+    status.textContent='邮箱已验证，登录正常。此账号的首次免费任务资格已使用；本次未创建新任务，也未启动后续调研。请查看账号已有交付；若旧交付不符合已确认的质量要求，请联系支持申请质量补跑。重复点击或重新验证邮箱不会恢复资格。';
+    $('#code-row').hidden=true;$('#auth-code').disabled=true;$('#request-code').disabled=true;
+    if(button){button.dataset.terminalError=exc.code;button.disabled=true;button.innerHTML='免费资格已使用';}
+    error.textContent='';return;
+  }
+  if(button)delete button.dataset.terminalError;
+  status.textContent=`邮箱已验证，但保存或启动任务失败：${exc.message}。登录仍有效，无需再次输入验证码；请稍后重试。`;
+  error.textContent=exc.message;
+}
 const wait=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
-function setProductionProgress(progress){const stage=String(progress.current_stage||'P1'),number=Number(stage.slice(1))||1;$('#production-auth').hidden=true;$('#task-workspace').hidden=false;$('#task-status-title').textContent=progress.status==='failed'?'任务未完成':`正在执行 ${stage}`;document.querySelector('.progress-line i').style.width=`${Math.min(96,Math.max(12,number*10))}%`;document.querySelectorAll('.task-status li').forEach((item,index)=>{const boundary=Math.ceil(number/2);item.className=index<boundary?'done':index===boundary?'active':'';});$('#plan-output').innerHTML=`<p class="empty-plan">任务已安全保存到云端。当前阶段：${escapeHtml(stage)}。关闭页面不会中断，完成后会发送邮件。</p>`;}
-async function pollProductionTask({untilIntent=false}={}){if(productionPolling)return;productionPolling=true;try{for(let count=0;count<180;count+=1){const response=await productionRequest(`/tasks/${encodeURIComponent(currentTaskId)}/progress`),progress=response.data||{};setProductionProgress(progress);const stageData=progress.stage_result?.data;if(untilIntent&&stageData?.normalized_topic){currentIntent=stageData;selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');$('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后开始完整调研 <span>→</span>':'确认并开始完整调研 <span>→</span>');result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});return;}if(progress.status==='completed'||progress.status==='partial'){location.href=`./delivery.html?task=${encodeURIComponent(currentTaskId)}`;return;}if(progress.status==='failed')throw new Error('任务未能完成，技术失败不会消耗首次免费资格');await wait(5000);}throw new Error('任务仍在运行，请稍后刷新页面查看');}finally{productionPolling=false;}}
+function setProductionProgress(progress){const stage=String(progress.current_stage||'P1'),number=Number(stage.slice(1))||1,failed=progress.status==='failed';$('#production-auth').hidden=true;$('#task-workspace').hidden=false;$('#task-status-title').textContent=failed?'任务未完成':`正在执行 ${stage}`;$('#resume-task').hidden=!failed;$('#resume-task').textContent='恢复失败阶段';document.querySelector('.progress-line i').style.width=`${Math.min(96,Math.max(12,number*10))}%`;document.querySelectorAll('.task-status li').forEach((item,index)=>{const boundary=Math.ceil(number/2);item.className=index<boundary?'done':index===boundary?'active':'';});$('#plan-output').innerHTML=`<p class="empty-plan">任务已安全保存到云端。当前阶段：${escapeHtml(stage)}。${failed?'失败阶段可从已保存的检查点恢复。':'关闭页面不会中断，完成后会发送邮件。'}</p>`;}
+async function pollProductionTask({untilIntent=false}={}){
+  if(productionPolling)return;
+  const pollTaskId=currentTaskId;
+  if(typeof pollTaskId!=='string'||!/^TASK-[a-f0-9]{12}$/.test(pollTaskId)){
+    if(await restoreRecentProductionTask())return;
+    throw new Error('当前页面没有有效的任务编号，已停止查询；请验证邮箱后恢复最近任务。');
+  }
+  productionPolling=true;
+  try{
+    for(let count=0;count<180;count+=1){
+      if(currentTaskId!==pollTaskId)return;
+      const response=await productionRequest(`/tasks/${encodeURIComponent(pollTaskId)}/progress`),progress=response.data||{};
+      setProductionProgress(progress);const stageData=progress.stage_result?.data;
+      if(untilIntent&&stageData?.normalized_topic){currentIntent=stageData;selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');$('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后开始完整调研 <span>→</span>':'确认并开始完整调研 <span>→</span>');result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});return;}
+      if(progress.status==='completed'||progress.status==='partial'){location.href=`./delivery.html?task=${encodeURIComponent(pollTaskId)}`;return;}
+      if(progress.status==='failed')throw new Error('任务已保存，但后台执行失败；可恢复任务状态后按失败阶段处理，不要重新输入验证码。');
+      await wait(5000);
+    }
+    throw new Error('任务仍在运行，请稍后刷新页面查看');
+  }finally{productionPolling=false;}
+}
 async function restoreRecentProductionTask(){
   const response=await productionRequest('/tasks'),items=Array.isArray(response.data)?response.data:[];
   if(!items.length)return false;
@@ -170,8 +202,8 @@ $('#verify-code').addEventListener('click',async event=>{
   if(sessionStorage.getItem(csrfKey)){
     setBusy(button,true,'正在重试保存…');
     try{if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});}
-    catch(exc){status.textContent=`邮箱已验证，但任务保存或启动失败：${exc.message}。请稍后点击“重试保存任务”；无需再次输入验证码。`;error.textContent=exc.message;}
-    finally{setBusy(button,false,'重试保存任务');}
+    catch(exc){showProductionTaskFailure(exc,button);}
+    finally{if(!button.dataset.terminalError)setBusy(button,false,'重试保存任务');}
     return;
   }
   if(!productionChallengeId||!/^[0-9]{6}$/.test(code)){status.textContent='请输入邮件中的 6 位验证码。';$('#auth-code').focus();return;}
@@ -182,8 +214,8 @@ $('#verify-code').addEventListener('click',async event=>{
     $('#production-auth').classList.add('verified');status.textContent='邮箱验证成功。正在保存题目并启动调研…';
   }catch(exc){status.textContent=`验证码验证失败：${exc.message}`;setBusy(button,false,'确认登录');return;}
   try{if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});else await restoreRecentProductionTask();}
-  catch(exc){status.textContent=`邮箱已验证，但任务保存或启动失败：${exc.message}。请稍后点击“重试保存任务”；无需再次输入验证码。`;error.textContent=exc.message;}
-  finally{setBusy(button,false,'重试保存任务');}
+  catch(exc){showProductionTaskFailure(exc,button);}
+  finally{if(!button.dataset.terminalError)setBusy(button,false,'重试保存任务');}
 });
 
 form.addEventListener('submit',async event=>{
@@ -221,7 +253,7 @@ confirmButton.addEventListener('click',async()=>{
       productionConfirmedClarification=clarification;
       if(!sessionStorage.getItem(csrfKey)){$('#production-auth').hidden=false;$('#auth-status').textContent='题目已确认。请验证邮箱以保存任务并开始完整调研。';$('#production-auth').scrollIntoView({behavior:'smooth',block:'center'});return;}
       try{await startProductionTask();}
-      catch(exc){$('#production-auth').hidden=false;$('#auth-status').textContent=`邮箱已验证，但任务保存或启动失败：${exc.message}。请稍后点击“重试保存任务”；无需再次输入验证码。`;error.textContent=exc.message;}
+      catch(exc){$('#production-auth').hidden=false;showProductionTaskFailure(exc,$('#verify-code'));}
       return;
     }
     $('#task-workspace').hidden=false;$('#plan-output').innerHTML='<p class="empty-plan">正在确定研究问题、资料需求和交付结构…</p>';$('#task-status-title').textContent='正在建立调研规划';$('#task-workspace').scrollIntoView({behavior:'smooth',block:'start'});
@@ -368,7 +400,7 @@ function renderVerification(verification,finalDelivery,meta){
 function canRetryFinalAssembly(){return Boolean(currentTaskId&&currentReport&&currentPpt&&currentSources.length&&currentEvidenceGroups.some(group=>(group.evidence_records||[]).length));}
 
 $('#cancel-task').addEventListener('click',async()=>{if(!currentTaskId)return;await request(`/api/tasks/${currentTaskId}/cancel`,{});taskPaused=true;$('#cancel-task').hidden=true;$('#resume-task').hidden=false;$('#task-status-title').textContent='任务已暂停，已有结果已保存';});
-$('#resume-task').addEventListener('click',async()=>{if(!currentTaskId)return;await request(`/api/tasks/${currentTaskId}/resume`,{});taskPaused=false;$('#resume-task').hidden=true;$('#cancel-task').hidden=false;$('#task-status-title').textContent='任务已恢复，可以从当前阶段继续';});
+$('#resume-task').addEventListener('click',async()=>{if(!currentTaskId)return;if(productionMode){const button=$('#resume-task');setBusy(button,true,'正在恢复…');try{await productionRequest(`/tasks/${encodeURIComponent(currentTaskId)}/retry`,{method:'POST',csrf:true});error.textContent='';button.hidden=true;pollProductionTask().catch(exc=>{error.textContent=exc.message;});}catch(exc){error.textContent=exc.message;}finally{setBusy(button,false,'恢复失败阶段');}return;}await request(`/api/tasks/${currentTaskId}/resume`,{});taskPaused=false;$('#resume-task').hidden=true;$('#cancel-task').hidden=false;$('#task-status-title').textContent='任务已恢复，可以从当前阶段继续';});
 $('#forget-task').addEventListener('click',()=>{clearTaskSession();location.reload();});
 
 function restoreArtifacts(saved){
