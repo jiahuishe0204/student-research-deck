@@ -243,7 +243,8 @@ class PostgresTaskQueue:
         cursor.execute(
             """WITH candidate AS (
                    SELECT job_id FROM research_task_jobs
-                    WHERE status IN ('pending','retryable_failed') AND attempt<3
+                    -- Reclaim timed-out worker jobs after their lease expires.
+                    WHERE status IN ('pending','retryable_failed','running') AND attempt<3
                       AND available_at<=CURRENT_TIMESTAMP
                       AND (lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP)
                     ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
