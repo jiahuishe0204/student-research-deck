@@ -138,7 +138,9 @@ class TencentCosArtifactStore:
         digest = hashlib.sha256(payload).hexdigest()
         response = self.client.put_object(
             Bucket=self.bucket, Key=key, Body=payload, ContentType=content_type,
-            ServerSideEncryption="AES256", Metadata={"sha256": digest},
+            # qcloud_cos maps Metadata keys directly to request headers; COS
+            # custom metadata requires the x-cos-meta- prefix explicitly.
+            ServerSideEncryption="AES256", Metadata={"x-cos-meta-sha256": digest},
         )
         return StoredArtifact(key, digest, len(payload), str(response.get("ETag", "")).strip('"'))
 
@@ -158,12 +160,16 @@ class TencentCosArtifactStore:
         _valid_key(key)
         response = self.client.head_object(Bucket=self.bucket, Key=key)
         metadata = response.get("Metadata") or {}
+        headers = {str(name).lower(): value for name, value in response.items()}
+        metadata = {str(name).lower(): value for name, value in metadata.items()}
         return {
-            "sha256": metadata.get("sha256"),
-            "size_bytes": int(response.get("Content-Length", response.get("ContentLength", -1))),
-            "content_type": response.get("Content-Type", response.get("ContentType")),
-            "encryption": response.get("x-cos-server-side-encryption", response.get("ServerSideEncryption")),
-            "etag": str(response.get("ETag", "")).strip('"'),
+            # qcloud_cos.head_object returns raw HTTP headers, including
+            # x-cos-meta-* fields, rather than an S3-style Metadata mapping.
+            "sha256": metadata.get("sha256") or headers.get("x-cos-meta-sha256"),
+            "size_bytes": int(headers.get("content-length", response.get("ContentLength", -1))),
+            "content_type": headers.get("content-type", response.get("ContentType")),
+            "encryption": headers.get("x-cos-server-side-encryption") or response.get("ServerSideEncryption"),
+            "etag": str(headers.get("etag", "")).strip('"'),
         }
 
     def stat_or_none(self, key):

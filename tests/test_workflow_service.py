@@ -189,7 +189,7 @@ class WorkflowServiceTests(unittest.TestCase):
         def generate(stage, tier, payload, validator=None, **options):
             limits.append(options["max_tokens"])
             body = ("执行摘要\n摘要。\n研究范围与资料方法\n范围与方法。\n正文\n"
-                    + ("结果与限制[EV::SRC-1::001]。" * 300)
+                    + ("结果与限制[EV::SRC-1::001]。" * 1600)
                     + "\n综合结论\n结论。\n局限与后续研究\n局限。")
             value = {"report_version": "1", "report_title": "t", "report_markdown": body,
                      "used_evidence_ids": ["EV::SRC-1::001"], "figure_recommendations": [],
@@ -200,7 +200,7 @@ class WorkflowServiceTests(unittest.TestCase):
         evidence = [{"evidence_id": "EV::SRC-1::001"}]
         service.create_report({}, {}, evidence, "fast")
         service.create_report({}, {}, evidence, "deep")
-        self.assertEqual(limits, [10000, 10000])
+        self.assertEqual(limits, [20000, 20000])
 
     def test_full_text_evidence_has_room_for_complete_captions(self):
         service = WorkflowService("", FakeRouter(), "system", {"P4": "evidence"})
@@ -230,8 +230,8 @@ class WorkflowServiceTests(unittest.TestCase):
 
         self.assertEqual(len(calls), 3)
         self.assertEqual(output["summary"]["candidate_count"], 9)
-        self.assertEqual(output["summary"]["keep_count"], 4)
-        self.assertEqual(output["summary"]["reserve_count"], 5)
+        self.assertEqual(output["summary"]["keep_count"], 8)
+        self.assertEqual(output["summary"]["reserve_count"], 1)
         self.assertEqual(usage["total_tokens"], 30)
 
     def test_screen_sources_drops_harmless_notes_without_retry(self):
@@ -344,7 +344,7 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertIn("EPO OPS", captured["P2B"]["available_sources"])
         self.assertIn("只看临床", captured["P2A"]["intent"]["normalized_topic"])
         self.assertIn("疾病定义", captured["P2A"]["intent"]["scope_hint"])
-        self.assertEqual(captured["P2B"]["runtime_config"]["source_limit"], 19)
+        self.assertEqual(captured["P2B"]["runtime_config"]["source_limit"], 24)
         self.assertEqual(captured["P2A"]["output_contract"]["type"], "object")
         self.assertIn("questions", captured["P2B"]["output_contract"]["required"])
         self.assertEqual(captured["P2B"]["research_architecture"]["overall_story"], "story")
@@ -451,7 +451,7 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertIn("validation_feedback", payloads[1])
         self.assertIn("EV::INVALID::001", payloads[1]["validation_feedback"])
 
-    def test_ppt_revises_a_source_id_outside_the_allowed_source_list(self):
+    def test_ppt_drops_unmatched_source_id_without_paid_retry(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
         payloads = []
 
@@ -467,9 +467,60 @@ class WorkflowServiceTests(unittest.TestCase):
         service.generate = generate
         service.create_ppt({}, {"report_markdown": "结论[EV-1]。"}, [{"evidence_id": "EV-1"}], [], {}, "fast",
                             source_records=[{"source_id": "SRC-VALID", "title": "Valid source"}])
-        self.assertEqual(len(payloads), 2)
-        self.assertIn("allowed_source_ids", payloads[1])
-        self.assertIn("SRC-INVENTED", payloads[1]["validation_feedback"])
+        self.assertEqual(len(payloads), 1)
+        self.assertEqual(payloads[0]["allowed_source_ids"], ["SRC-VALID"])
+
+    def test_ppt_canonicalizes_pmid_alias_to_task_source_without_retry(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
+        calls = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            calls.append(payload)
+            page = {"page_id": "SL-01", "navigation_title": "检测机制", "title": "检测机制",
+                    "purpose": "解释诊断信号", "on_slide_text": ["Cas12识别靶标"],
+                    "visual_suggestion": "", "speaker_notes": "识别结果转为可测信号。",
+                    "evidence_ids": ["EV-1"], "figure_refs": [],
+                    "source_citations": [{"source_id": "PMID:37935845", "short_vancouver": "模型生成引用"}]}
+            return validator({"deck_title": "deck", "storyline": "story", "pages": [page]}), {"total_tokens": 1}, {}
+
+        service.generate = generate
+        output, _ = service.create_ppt(
+            {}, {"report_markdown": "结论[EV-1]。"},
+            [{"evidence_id": "EV-1", "source_id": "MED:42798004"}], [], {}, "fast",
+            source_records=[{"source_id": "MED:42798004", "pmid": "37935845",
+                             "authors": ["Example A"], "journal": "Example Journal", "year": "2025"}],
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(output["pages"][0]["source_citations"], [{
+            "source_id": "MED:42798004", "short_vancouver": "Example A. Example Journal. 2025.",
+        }])
+
+    def test_ppt_replaces_unmapped_source_citation_from_page_evidence(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
+        calls = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            calls.append(payload)
+            page = {"page_id": "SL-01", "navigation_title": "检测机制", "title": "检测机制",
+                    "purpose": "解释诊断信号", "on_slide_text": ["Cas12识别靶标"],
+                    "visual_suggestion": "", "speaker_notes": "识别结果转为可测信号。",
+                    "evidence_ids": ["EV-1"], "figure_refs": [],
+                    "source_citations": [{"source_id": "PMID:NOT-IN-TASK", "short_vancouver": "错误来源"}]}
+            return validator({"deck_title": "deck", "storyline": "story", "pages": [page]}), {"total_tokens": 1}, {}
+
+        service.generate = generate
+        output, _ = service.create_ppt(
+            {}, {"report_markdown": "结论[EV-1]。"},
+            [{"evidence_id": "EV-1", "source_id": "MED:42798004"}], [], {}, "fast",
+            source_records=[{"source_id": "MED:42798004", "authors": ["Example A"],
+                             "journal": "Example Journal", "year": "2025"}],
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(output["pages"][0]["source_citations"], [{
+            "source_id": "MED:42798004", "short_vancouver": "Example A. Example Journal. 2025.",
+        }])
 
     def test_long_deep_ppt_uses_two_bounded_arc_batches_and_unique_page_ids(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
@@ -570,7 +621,7 @@ class WorkflowServiceTests(unittest.TestCase):
         service = WorkflowService("secret", FakeRouter(), "system", {"P5": "report"})
 
         def generate(stage, tier, payload, validator=None, **options):
-            body = "# 摘要\n摘要。\n# 研究范围\n范围。\n# 资料方法\n方法。\n# 正文\n" + ("有证据的叙述[EV::SRC-1::001]与待核验叙述[EV::SRC-X::999]。" * 100) + "\n# 结论\n结论。\n# 局限\n局限。"
+            body = "# 摘要\n摘要。\n# 研究范围\n范围。\n# 资料方法\n方法。\n# 正文\n" + ("有证据的叙述[EV::SRC-1::001]与待核验叙述[EV::SRC-X::999]。" * 800) + "\n# 结论\n结论。\n# 局限\n局限。"
             value = {
                 "report_version": "1", "report_title": "t", "report_markdown": body,
                 "used_evidence_ids": ["EV::SRC-1::001", "EV::SRC-X::999"], "figure_recommendations": [],

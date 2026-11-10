@@ -12,6 +12,12 @@ from research_sources import merge_search_results, plan_patsnap_queries, plan_se
 
 def _data(result):
     value = (result or {}).get("data")
+    # P7 results produced by older worker versions persisted the full
+    # (data, usage, metadata) tuple as a JSON array. Accept that legacy shape
+    # so an already-paid successful stage can resume its transition safely.
+    if (isinstance(value, list) and len(value) == 3 and
+            isinstance(value[0], dict) and isinstance(value[1], dict)):
+        value = value[0]
     if not isinstance(value, dict):
         raise RuntimeError("阶段结果格式无效")
     return value
@@ -129,7 +135,10 @@ def advance(queue, job, result, *, root, publisher=None):
         return "P7"
     if stage == "P7":
         queue.enqueue(task_id=task_id, job_key="P8", stage="P8", payload={
-            "claims": data["claims"], "evidence": payload["evidence"],
+            # P8 consumes the complete P7 claim-set envelope. Passing only
+            # data["claims"] leaves a list where verify_claims expects the
+            # {claim_set_version, claims, extraction_notes} object.
+            "claims": data, "evidence": payload["evidence"],
             "sources": payload["sources"], "tier": payload["tier"],
             "report": payload["report"], "ppt": payload["ppt"],
             "figure_records": payload["figure_records"],
@@ -138,7 +147,7 @@ def advance(queue, job, result, *, root, publisher=None):
     if stage == "P8":
         queue.enqueue(task_id=task_id, job_key="P9", stage="P9", payload={
             "verification": data, "report": payload["report"], "ppt": payload["ppt"],
-            "claims": payload["claims"],
+            "claims": payload["claims"]["claims"],
             "source_ids": sorted({item["source_id"] for item in payload["evidence"]}),
             "evidence_ids": [item["evidence_id"] for item in payload["evidence"]],
             "evidence_version": "1.0", "evidence_records": payload["evidence"],

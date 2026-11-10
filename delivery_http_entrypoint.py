@@ -117,6 +117,10 @@ def main_handler(event, context=None, *, services=None):
                 confirmed_intent=confirmed["intent"],
             )
             return _response(201, {"ok": True, "data": task}, {"Cache-Control": "no-store"})
+        if method == "GET" and path.rstrip("/").endswith("/tasks"):
+            user_id = services["auth"].authenticate(_session_cookie(event))
+            tasks = services["tasks"].recent_tasks(user_id=user_id)
+            return _response(200, {"ok": True, "data": tasks}, {"Cache-Control": "no-store"})
         parts = path.strip("/").split("/")
         if method == "POST" and len(parts) >= 3 and parts[-1] == "continue" and parts[-3] == "tasks":
             task_id = parts[-2]
@@ -152,8 +156,13 @@ def main_handler(event, context=None, *, services=None):
             progress = services["tasks"].task_progress(user_id=user_id, task_id=task_id)
             return _response(200, {"ok": True, "data": progress}, {"Cache-Control": "no-store"})
         if method == "GET" and len(parts) >= 3 and parts[-1] == "delivery" and parts[-3] == "tasks":
+            task_id = parts[-2]
+            if task_id.lower() in ("", "null", "undefined"):
+                return _response(400, {"ok": False, "code": "task_id_invalid",
+                                       "message": "任务编号缺失或无效，请恢复最近任务后继续。"},
+                                 {"Cache-Control": "no-store"})
             user_id = services["auth"].authenticate(_session_cookie(event))
-            delivery = services["tasks"].task_delivery(user_id=user_id, task_id=parts[-2])
+            delivery = services["tasks"].task_delivery(user_id=user_id, task_id=task_id)
             return _response(200, {"ok": True, "data": delivery}, {"Cache-Control": "no-store"})
         if method == "POST" and path.endswith("/delivery/download"):
             url = services["download"](

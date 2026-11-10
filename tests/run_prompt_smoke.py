@@ -38,7 +38,7 @@ def main():
     cases=[
       {"id":"P1-clear","stage":"P1","model":"deepseek-flash","effort":"none","input":{"topic":"CRISPR分子诊断的主要技术路线","tier":"fast","runtime_config":{"language":"zh-CN"}}},
       {"id":"P1-ambiguous","stage":"P1","model":"deepseek-flash","effort":"none","input":{"topic":"苹果","tier":"fast","runtime_config":{"language":"zh-CN"}}},
-      {"id":"P2-deep","stage":"P2","model":"deepseek-v4-pro","effort":"high","input":{"intent":{"domain":"life_science","normalized_topic":"CAR-T用于实体瘤的技术路线比较","tier":"deep","need_clarification":False},"tier":"deep","available_sources":["PubMed","Europe PMC","Crossref","official"],"runtime_config":{"source_limit":19,"language":"zh-CN"}}}
+      {"id":"P2-deep","stage":"P2","model":"deepseek-v4-pro","effort":"high","input":{"intent":{"domain":"life_science","normalized_topic":"CAR-T用于实体瘤的技术路线比较","tier":"deep","need_clarification":False},"tier":"deep","available_sources":["PubMed","Europe PMC","Crossref","official"],"runtime_config":{"source_limit":24,"language":"zh-CN"}}}
     ]
     if args.case: cases=[case for case in cases if case['id']==args.case]
     stamp=dt.datetime.now().strftime('%Y%m%dT%H%M%S')

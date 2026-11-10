@@ -302,6 +302,84 @@ class WorkflowService:
         return values
 
     @staticmethod
+    def _canonicalize_ppt_source_citations(value, evidence_records, source_records):
+        """Resolve model-emitted citation aliases to task-owned source IDs.
+
+        P6 sometimes emits a source's PMID even when the task's canonical
+        source_id is a Europe PMC/MED identifier. Cite only source records
+        carried by this task, and fall back to sources of the page's verified
+        evidence when a model citation cannot be mapped.
+        """
+        source_by_id = {
+            str(item.get("source_id", "")).strip(): item
+            for item in source_records
+            if isinstance(item, dict) and str(item.get("source_id", "")).strip()
+        }
+        aliases = {}
+
+        def add_alias(alias, canonical):
+            alias = str(alias or "").strip()
+            if alias:
+                aliases[alias.casefold()] = canonical
+
+        for canonical, record in source_by_id.items():
+            add_alias(canonical, canonical)
+            for field in ("pmid", "pmcid", "doi", "url"):
+                alias = record.get(field)
+                if not alias:
+                    continue
+                add_alias(alias, canonical)
+                if field == "pmid":
+                    add_alias("PMID:" + str(alias).removeprefix("PMID:"), canonical)
+                elif field == "pmcid":
+                    add_alias("PMCID:" + str(alias).removeprefix("PMCID:"), canonical)
+                elif field == "doi":
+                    doi = str(alias).strip()
+                    add_alias(doi.removeprefix("https://doi.org/"), canonical)
+                    add_alias("https://doi.org/" + doi.removeprefix("https://doi.org/"), canonical)
+
+        evidence_source = {}
+        for item in evidence_records:
+            if isinstance(item, dict):
+                evidence_id = str(item.get("evidence_id", "")).strip()
+                source_id = str(item.get("source_id", "")).strip()
+                if evidence_id and source_id in source_by_id:
+                    evidence_source[evidence_id] = source_id
+
+        for page in value.get("pages", []):
+            if not isinstance(page, dict):
+                continue
+            repaired, seen, had_unmapped = [], set(), False
+            for citation in page.get("source_citations", []):
+                if not isinstance(citation, dict):
+                    continue
+                supplied = str(citation.get("source_id", "")).strip()
+                canonical = aliases.get(supplied.casefold())
+                if not canonical:
+                    had_unmapped = True
+                    continue
+                if canonical in seen:
+                    continue
+                seen.add(canonical)
+                repaired.append({
+                    "source_id": canonical,
+                    "short_vancouver": WorkflowService._short_vancouver(source_by_id[canonical]),
+                })
+
+            if had_unmapped:
+                for evidence_id in page.get("evidence_ids", []):
+                    canonical = evidence_source.get(str(evidence_id).strip())
+                    if not canonical or canonical in seen:
+                        continue
+                    seen.add(canonical)
+                    repaired.append({
+                        "source_id": canonical,
+                        "short_vancouver": WorkflowService._short_vancouver(source_by_id[canonical]),
+                    })
+            page["source_citations"] = repaired
+        return value
+
+    @staticmethod
     def _text_chunks(text, limit=1200):
         text = str(text or "")
         if not text:
@@ -382,7 +460,7 @@ class WorkflowService:
                 "available_sources": ["PubMed", "Europe PMC", "Crossref"]
                 + (["智慧芽 MCP 专利"] if os.environ.get("PATSNAP_MCP_API_KEY", "").strip() else ["EPO OPS"])
                 + (["Patsnap"] if os.environ.get("PATSNAP_API_KEY", "").strip() else []) + ["official"],
-                "runtime_config": {"source_limit": 19 if tier == "deep" else 10, "language": "zh-CN"},
+                "runtime_config": {"source_limit": 24 if tier == "deep" else 19, "language": "zh-CN"},
                 "output_contract": load_contract("P2B"),
             }, validate_blueprint_output,
             # Reasoning tokens share the response cap with the JSON body. The
@@ -417,7 +495,7 @@ class WorkflowService:
         if not isinstance(candidates, list) or not 1 <= len(candidates) <= 30:
             raise ValueError("候选资料数量必须为 1—30 条")
         candidate_ids = self._ids(candidates, "source_id", "候选资料 source_id 缺失或重复")
-        keep_max = 8 if tier == "deep" else 4
+        keep_max = 12 if tier == "deep" else 8
         keys = ("source_id", "source", "title", "abstract", "year", "access", "url",
                 "canonical_identity", "source_type", "publication_level", "independence_group",
                 "reading_scope", "retrieved_at", "intended_uses", "also_found_in")
@@ -546,7 +624,7 @@ class WorkflowService:
             # Deep reports can include many source-bound evidence records; the
             # former 7,500 cap truncated complete drafts. Give only this stage
             # enough room, while the request-time task budget remains enforced.
-            validate_report_output, max_tokens=10000, max_attempts=2,
+            validate_report_output, max_tokens=20000, max_attempts=2,
         )
         return output, usage
 
@@ -574,6 +652,10 @@ class WorkflowService:
                    "allowed_evidence_ids": evidence_ids, "allowed_figure_ids": figure_ids,
                    "allowed_source_ids": source_ids, "presentation_limits": PPT_DENSITY_LIMITS,
                    "constraints": constraints, "output_contract": load_contract("P6")}
+
+        def validate_ppt_output(value):
+            self._canonicalize_ppt_source_citations(value, evidence_records, source_records)
+            return validate_ppt(value, evidence_ids, figure_ids, source_ids)
 
         def generate_ppt_batch(batch_payload, token_limit, validator):
             try:
@@ -603,7 +685,7 @@ class WorkflowService:
                                      max_tokens=token_limit, max_attempts=1)
 
         arc = (plan or {}).get("ppt_story_arc", [])
-        split_long_report = tier == "deep" and len(str(report.get("report_markdown") or "")) > 7000 and len(arc) >= 4
+        split_long_report = len(str(report.get("report_markdown") or "")) > 7000 and len(arc) >= 4
         if split_long_report:
             midpoint = (len(arc) + 1) // 2
             parts = []
@@ -612,8 +694,7 @@ class WorkflowService:
                 batch_payload = {**payload, "page_batch": {"index": index, "total": 2,
                     "assigned_arc": subset, "target_pages": "4—6", "complete_arc": arc}}
                 partial, partial_usage, _ = generate_ppt_batch(
-                    batch_payload, 7000,
-                    lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids),
+                    batch_payload, 7000, validate_ppt_output,
                 )
                 parts.append(partial)
                 add_usage(usage, partial_usage)
@@ -621,11 +702,10 @@ class WorkflowService:
                       "pages": [page for part in parts for page in part["pages"]]}
             for index, page in enumerate(output["pages"], 1):
                 page["page_id"] = "SL-%02d" % index
-            validate_ppt(output, evidence_ids, figure_ids, source_ids)
+            validate_ppt_output(output)
         else:
             output, usage, _ = generate_ppt_batch(
-                payload, 9000,
-                lambda value: validate_ppt(value, evidence_ids, figure_ids, source_ids),
+                payload, 9000, validate_ppt_output,
             )
         figure_by_id = {item.get("figure_id"): item for item in figure_records}
         for page in output["pages"]:
@@ -647,8 +727,11 @@ class WorkflowService:
     @staticmethod
     def _short_vancouver(source):
         authors = source.get("authors") or []
-        first = str(authors[0]).strip() if authors else "Unknown author"
-        author_text = first + (", et al." if len(authors) > 1 else ".")
+        if isinstance(authors, str):
+            author_text = authors.strip().rstrip(".") or "Unknown author"
+        else:
+            first = str(authors[0]).strip() if authors else "Unknown author"
+            author_text = first + (", et al" if len(authors) > 1 else "")
         journal = str(source.get("journal") or source.get("source") or "Unknown journal").strip()
         year = str(source.get("year") or "n.d.").strip()
         volume = str(source.get("volume") or "").strip()
@@ -657,7 +740,7 @@ class WorkflowService:
         locator = volume + (("(" + issue + ")") if issue else "")
         if pages:
             locator += (":" if locator else "") + pages
-        return "%s %s. %s%s." % (author_text, journal, year, (";" + locator) if locator else "")
+        return "%s. %s. %s%s." % (author_text, journal, year, (";" + locator) if locator else "")
 
     def assemble_final(self, verification, report, ppt, claim_ids, source_ids, evidence_ids, evidence_version="1.0", tier="fast"):
         tier = self._tier(tier)

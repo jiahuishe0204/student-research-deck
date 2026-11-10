@@ -66,7 +66,7 @@ def execute_one(connection, identity_vault, mailer, *, lease_seconds=120):
         finish_event(connection, event_id, token, status,
                      error_code=str(getattr(exc, "error_code", type(exc).__name__))[:80],
                      retry_delay_seconds=delay)
-        return {"status": status, "event_id": event_id}
+        return {"status": status, "event_id": str(event_id)}
     if not finish_event(connection, event_id, token, "succeeded",
                         provider_request_id=response.get("request_id")):
         raise RuntimeError("邮件事件租约已失效，拒绝旧 Worker 提交状态")
@@ -75,7 +75,7 @@ def execute_one(connection, identity_vault, mailer, *, lease_seconds=120):
         cursor.execute("""UPDATE task_artifacts SET reminder_sent_at=CURRENT_TIMESTAMP
                            WHERE task_id=%s AND reminder_sent_at IS NULL""", (event["task_id"],))
         connection.commit()
-    return {"status": "succeeded", "event_id": event_id,
+    return {"status": "succeeded", "event_id": str(event_id),
             "provider_request_id": response.get("request_id")}
 
 

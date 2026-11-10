@@ -11,10 +11,10 @@ from scf_stage_dispatch import dispatch_stage
 
 def _stage_result(value):
     if isinstance(value, tuple) and len(value) in (2, 3):
-        normalized = {"data": value[0], "usage": value[1]}
+        result = {"data": value[0], "usage": value[1]}
         if len(value) == 3:
-            normalized["metadata"] = value[2]
-        return normalized
+            result["metadata"] = value[2]
+        return result
     return {"data": value, "usage": {"prompt_tokens": 0, "completion_tokens": 0,
                                        "total_tokens": 0, "attempts": 0}}
 
@@ -43,7 +43,20 @@ def execute_next_job(queue, workflow, *, root=None, advance_job=advance, publish
             next_stage = advance_job(queue, transition, transition["result"],
                                      root=Path(root or "."), publisher=publisher)
         except Exception as exc:
-            queue.finish_transition(transition, error_code=type(exc).__name__)
+            # Persist only explicitly allow-listed configuration diagnostics.
+            # Provider and database exceptions may contain request details, so
+            # keep those limited to their exception class.
+            safe_config_prefixes = (
+                "生产环境缺少必要变量：", "SCF 临时凭证不完整",
+                "EMAIL_FROM 格式无效", "PUBLIC_ORIGIN 必须是",
+                "IDENTITY_SECRET 至少需要", "模型预算必须是",
+            )
+            detail = type(exc).__name__
+            if isinstance(exc, RuntimeError):
+                message = str(exc)
+                if any(message.startswith(prefix) for prefix in safe_config_prefixes):
+                    detail += ":" + message[:160]
+            queue.finish_transition(transition, error_code=detail)
             raise
         if not queue.finish_transition(transition):
             raise RuntimeError("阶段推进租约已失效，拒绝旧 Worker 提交状态")

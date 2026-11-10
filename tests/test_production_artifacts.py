@@ -1,5 +1,6 @@
 import json
 import unittest
+import uuid
 
 from production_artifacts import build_final_artifacts, publish_final_artifacts
 
@@ -11,7 +12,7 @@ class Lifecycle:
 
 class ProductionArtifactsTests(unittest.TestCase):
     def setUp(self):
-        self.final = {"final_report": {"markdown": "# Report\nBody"},
+        self.final = {"final_report": {"markdown": "# Report\n\n" + "中" * 8000},
                       "final_ppt": {"deck_title": "Deck", "storyline": "Story",
                                     "pages": [{"page_id": "SL-01", "title": "One"}]}}
         self.payload = {"source_records": [{"source_id": "S1"}],
@@ -21,6 +22,8 @@ class ProductionArtifactsTests(unittest.TestCase):
         artifacts = build_final_artifacts("TASK-12345678", self.final, self.payload)
         self.assertEqual([item["kind"] for item in artifacts], ["report", "ppt_content", "references"])
         self.assertEqual([item["extension"] for item in artifacts], ["md", "json", "json"])
+        self.assertTrue(all(uuid.UUID(item["artifact_id"]) for item in artifacts))
+        self.assertEqual(artifacts, build_final_artifacts("TASK-12345678", self.final, self.payload))
         self.assertTrue(artifacts[0]["body"].endswith("\n"))
         self.assertEqual(json.loads(artifacts[2]["body"])["sources"][0]["source_id"], "S1")
 

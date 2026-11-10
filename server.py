@@ -28,6 +28,9 @@ from research_sources import (
 from task_store import TaskStore
 from task_public_view import delivery_view, progress_view
 from workflow_validation import (
+    REPORT_HAN_MAX,
+    REPORT_HAN_MIN,
+    report_body_han_count,
     validate_claims,
     validate_evidence,
     validate_final,
@@ -298,6 +301,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                     verification, report, ppt, claims, source_ids, evidence_ids,
                     "1.0", evidence_records, source_records, figure_records,
                 )
+                han_count = report_body_han_count(output["final_report"]["markdown"])
+                if not REPORT_HAN_MIN <= han_count <= REPORT_HAN_MAX:
+                    raise ValueError("终稿核验后正文为 %d 个汉字，必须保持在 8000—12000 个汉字；请修订报告后再提交" % han_count)
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             if len(parts) == 4 and parts[:2] == ["api", "tasks"]:
@@ -344,7 +350,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     raise ValueError("检索规划无效")
                 if plan:
                     queries = plan_search_queries(plan, topic)
-                    results = [search_all(item, per_source=4 if tier == "deep" else 3,
+                    results = [search_all(item, per_source=4,
                                           patent_client=patent_client if index == 0 else None,
                                           patent_query=epo_query, include_patsnap=False) for index, item in enumerate(queries)]
                     if os.environ.get("PATSNAP_API_KEY", "").strip():
@@ -357,9 +363,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                             except Exception as exc:
                                 results.append({"query": "Patsnap: " + patsnap_query, "records": [],
                                                 "errors": [{"source": "Patsnap", "error": type(exc).__name__}]})
-                    output = merge_search_results(results, 24 if tier == "deep" else 12)
+                    output = merge_search_results(results, 24)
                 else:
-                    output = search_all(query, per_source=6 if tier == "deep" else 4,
+                    output = search_all(query, per_source=6,
                                         patent_client=patent_client, patent_query=epo_query)
                 output["topic"] = topic
                 self.send_json(HTTPStatus.OK, {"data": output})
@@ -398,12 +404,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                 return
             if path == "/api/evidence":
                 source_record = body.get("source_record") or {}
-                if body.get("tier", "fast") == "deep":
+                if body.get("tier", "fast") in ("fast", "deep"):
                     artifacts = self.server.task_store.get_task(task_id)["artifacts"]
                     saved_plan = artifacts.get("plan", {}).get("data", {})
                     saved_sources = artifacts.get("sources", {}).get("data", {}).get("records", [])
                     saved_screening = artifacts.get("screening", {}).get("data", {})
-                    gate = assess_source_quality(saved_plan, saved_sources, saved_screening, "deep")
+                    gate = assess_source_quality(saved_plan, saved_sources, saved_screening, body.get("tier", "fast"))
                     if not gate["passed"]:
                         raise ValueError("来源质量门禁未通过，不能继续付费提取证据：" + "；".join(gate["problems"]))
                     kept_ids = {item.get("source_id") for item in saved_screening.get("decisions", []) if item.get("status") == "keep"}
@@ -416,7 +422,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 return
             if path == "/api/report":
                 tier = body.get("tier", "fast")
-                if tier == "deep":
+                if tier in ("fast", "deep"):
                     task = self.server.task_store.get_task(task_id)
                     artifacts = task["artifacts"]
                     sources = artifacts.get("sources", {}).get("data", {}).get("records", [])
@@ -506,6 +512,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                     body.get("claims"), body.get("source_ids"), body.get("evidence_ids"), body.get("evidence_version", "1.0"),
                     evidence_records, source_records, figure_records,
                 )
+                han_count = report_body_han_count(output["final_report"]["markdown"])
+                if not REPORT_HAN_MIN <= han_count <= REPORT_HAN_MAX:
+                    raise ValueError("终稿核验后正文为 %d 个汉字，必须保持在 8000—12000 个汉字；请修订报告后再提交" % han_count)
                 self.send_json(HTTPStatus.OK, {"data": output, "usage": usage})
                 return
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})

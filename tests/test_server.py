@@ -200,7 +200,7 @@ class ValidationTests(unittest.TestCase):
         calls = []
         workflow = SimpleNamespace(
             set_task_context=lambda task_id: None,
-            assemble_final_deterministic=lambda *args: (calls.append(args) or ({"final_report": {}, "final_ppt": {}}, {"total_tokens": 0})),
+            assemble_final_deterministic=lambda *args: (calls.append(args) or ({"final_report": {"markdown": "# 正文\n" + "中" * 8000}, "final_ppt": {}}, {"total_tokens": 0})),
         )
         handler = object.__new__(server.AppHandler)
         handler.path = "/api/final/retry"

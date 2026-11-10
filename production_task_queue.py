@@ -117,6 +117,32 @@ class PostgresTaskQueue:
                 result[name] = result[name].isoformat()
         return result
 
+    def recent_tasks(self, *, user_id, limit=10):
+        """Return minimal summaries for the signed-in user's recent tasks."""
+        try:
+            limit = max(1, min(20, int(limit)))
+        except (TypeError, ValueError):
+            limit = 10
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """SELECT task_id,topic,tier,status,current_stage,created_at,updated_at
+                 FROM research_tasks
+                WHERE user_id=%s
+                ORDER BY CASE WHEN status IN ('queued','running') THEN 0 ELSE 1 END,
+                         updated_at DESC
+                LIMIT %s""",
+            (str(user_id), limit),
+        )
+        tasks = []
+        for row in cursor.fetchall():
+            task = dict(zip(("task_id", "topic", "tier", "status", "current_stage",
+                             "created_at", "updated_at"), row))
+            for name in ("created_at", "updated_at"):
+                if hasattr(task[name], "isoformat"):
+                    task[name] = task[name].isoformat()
+            tasks.append(task)
+        return tasks
+
     def retry_failed_task(self, *, user_id, task_id):
         """Requeue only this owner's failed current stage, preserving prior checkpoints."""
         cursor = self.connection.cursor()
@@ -312,7 +338,9 @@ class PostgresTaskQueue:
         cursor.execute(
             """WITH candidate AS (
                    SELECT job_id FROM research_task_jobs
-                    -- Reclaim timed-out worker jobs after their lease expires.
+                    -- A timed-out SCF invocation leaves its job in `running`.
+                    -- Once its lease expires, let the next timer invocation reclaim
+                    -- it (with a new fencing token) instead of stranding the task.
                     WHERE status IN ('pending','retryable_failed','running') AND attempt<3
                       AND available_at<=CURRENT_TIMESTAMP
                       AND (lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP)
@@ -348,7 +376,7 @@ class PostgresTaskQueue:
         cursor.execute(
             """WITH candidate AS (
                    SELECT job_id FROM research_task_jobs
-                    WHERE status='succeeded' AND transition_status='pending'
+                    WHERE status='succeeded' AND transition_status IN ('pending','running')
                       AND transition_attempts<3 AND available_at<=CURRENT_TIMESTAMP
                       AND (lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP)
                     ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 1

@@ -91,6 +91,21 @@ class DeliveryRepositoryTests(unittest.TestCase):
                                         intent_confirmed=True,tier="fast")
         self.assertEqual(db.commits,0); self.assertEqual(db.rollbacks,1)
 
+    def test_artifact_prepare_rolls_back_database_errors_before_retry(self):
+        class FailingCursor(Cursor):
+            def execute(self, sql, params):
+                self.calls.append((sql, params))
+                raise RuntimeError("invalid artifact identifier")
+        db=Connection([])
+        db.c=FailingCursor(db.c.rows)
+        repo=PostgresDeliveryRepository(db,"https://example.com")
+        with self.assertRaisesRegex(RuntimeError,"invalid artifact identifier"):
+            repo.prepare_artifact(task_id="TASK-12345678",artifact_id="bad-id",kind="report",
+                                  object_key="deliveries/TASK-12345678/bad-id.md",
+                                  content_type="text/markdown")
+        self.assertEqual(db.commits,0)
+        self.assertEqual(db.rollbacks,1)
+
     def test_technical_failure_releases_reservation_and_closes_queued_work(self):
         db=Connection([("user-1","running","P4"),("user-1",)])
         result=PostgresDeliveryRepository(db,"https://example.com").fail_task_and_release_free_entitlement(

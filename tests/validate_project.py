@@ -50,6 +50,7 @@ required = [
     "production_session.py",
     "private_delivery_api.py",
     "delivery_http_entrypoint.py",
+    "research_task_http_entrypoint.py",
     "intent_http_entrypoint.py",
     "preauth_intent_ticket.py",
     "scf_queue.py",
@@ -94,11 +95,17 @@ for removed_field in ['id="occasion"', 'id="duration"']:
 assert "追问一个问题" in home
 app = (ROOT / "web/app.js").read_text()
 assert "/api/intent" in app
-production_submit = app.index("if(productionMode){")
-production_anon_intent = app.index("productionRequest('/api/intent'", production_submit)
-production_task_create = app.index("productionRequest('/tasks'")
-assert "async function startProductionTask()" in app and production_task_create < production_submit, \
-    "production must create a durable task only from the post-confirmation handler"
+intent_helper = app[app.index("async function loadProductionIntent()"):app.index("async function startProductionTask()")]
+otp_handler = app[app.index("$('#verify-code').addEventListener"):app.index("form.addEventListener('submit'")]
+submit_handler = app[app.index("form.addEventListener('submit'"):app.index("confirmButton.addEventListener")]
+confirm_handler = app[app.index("confirmButton.addEventListener"):app.index("$('#direction-options').addEventListener")]
+task_starter = app[app.index("async function startProductionTask()"):app.index("async function fetchCurrentTask()")]
+assert "productionRequest('/api/intent'" in intent_helper, "P1 intent must be produced by the post-login topic flow"
+assert "await loadProductionIntent()" in otp_handler, "email login must continue with the saved topic"
+assert "sessionStorage.setItem(pendingTopicKey,currentTopic)" in submit_handler
+assert "if(!sessionStorage.getItem(csrfKey))" in submit_handler and "loadProductionIntent()" in submit_handler
+assert "intent_ticket:currentIntentTicket" in task_starter
+assert "await startProductionTask()" in confirm_handler, "the full task must start only after the user confirms the direction"
 assert "if(!sessionStorage.getItem(csrfKey))" in app and "intent_ticket:currentIntentTicket" in app
 assert "request('/api/tasks'" in app, "local research runs must remain available through the local-only task store"
 assert "/api/search" in app

@@ -101,7 +101,8 @@ class ProductionTaskQueueTests(unittest.TestCase):
         job = PostgresTaskQueue(connection).claim_transition()
         sql = connection.cursor_value.calls[0][0]
         self.assertIn("status='succeeded'", sql)
-        self.assertIn("transition_status='pending'", sql)
+        self.assertIn("transition_status IN ('pending','running')", sql)
+        self.assertIn("lease_until<CURRENT_TIMESTAMP", sql)
         self.assertEqual(job["result"]["data"], {"plan": True})
 
     def test_third_transition_failure_refunds_entitlement(self):
@@ -155,6 +156,25 @@ class ProductionTaskQueueTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PostgresTaskQueue(connection).continue_after_intent(
                 user_id="u1", task_id="TASK-1", clarification="")
+        self.assertEqual(connection.rollbacks, 1)
+
+    def test_retry_failed_task_requeues_only_the_failed_checkpoint(self):
+        connection = Connection([
+            ("failed", "P6"), ("job-p6", "permanent_failed"), ("available", None),
+        ])
+        result = PostgresTaskQueue(connection).retry_failed_task(user_id="u1", task_id="TASK-1")
+        self.assertEqual(result, {"task_id": "TASK-1", "status": "queued", "current_stage": "P6"})
+        statements = [sql for sql, _ in connection.cursor_value.calls]
+        self.assertTrue(any("user_id=%s FOR UPDATE" in sql for sql in statements))
+        self.assertTrue(any("status='permanent_failed'" in sql for sql in statements))
+        self.assertTrue(any("status='pending',attempt=0" in sql for sql in statements))
+        self.assertTrue(any("state='reserved'" in sql for sql in statements))
+        self.assertEqual(connection.commits, 1)
+
+    def test_retry_failed_task_rejects_a_nonfailed_task(self):
+        connection = Connection([("running", "P6")])
+        with self.assertRaises(TaskNotRetryable):
+            PostgresTaskQueue(connection).retry_failed_task(user_id="u1", task_id="TASK-1")
         self.assertEqual(connection.rollbacks, 1)
 
     def test_delivery_requires_owner_completed_p9_and_three_artifacts(self):

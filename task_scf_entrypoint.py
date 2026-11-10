@@ -40,8 +40,13 @@ def main_handler(event, context=None, *, connection=None, workflow=None):
             daily_budget_ledger=PostgresPreAuthDailyBudget(connection),
             usage_ledger=PostgresModelUsageLedger(connection),
         )
-        return execute_next_job(PostgresTaskQueue(connection), active_workflow,
-                                root=ROOT, publisher_factory=publisher_factory)
+        try:
+            return execute_next_job(PostgresTaskQueue(connection), active_workflow,
+                                    root=ROOT, publisher_factory=publisher_factory)
+        except Exception as exc:
+            # Keep a bounded, secret-free cause in SCF logs for queue failures.
+            print("TASK_WORKER_ERROR %s: %s" % (type(exc).__name__, str(exc)[:500]))
+            raise
     finally:
         if owned:
             connection.close()

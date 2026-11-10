@@ -26,7 +26,8 @@ class FakeCos:
     def get_presigned_download_url(self, **kwargs): self.signed = kwargs; return "https://signed.invalid/object"
     def delete_object(self, **kwargs): self.deletes.append(kwargs)
     def head_object(self, **kwargs):
-        return {"Metadata":{"sha256":"a"*64},"Content-Length":3,"Content-Type":"application/pdf","x-cos-server-side-encryption":"AES256","ETag":'"etag"'}
+        # qcloud_cos.head_object returns raw HTTP headers, not S3-style Metadata.
+        return {"x-cos-meta-sha256":"a"*64,"Content-Length":"3","Content-Type":"application/pdf","x-cos-server-side-encryption":"AES256","ETag":'"etag"'}
 
 
 class TencentDeliveryTests(unittest.TestCase):
@@ -79,7 +80,7 @@ class TencentDeliveryTests(unittest.TestCase):
         client = FakeCos(); store = TencentCosArtifactStore(client, "bucket-123")
         saved = store.upload("deliveries/TASK_12345678/ART_12345678.pdf", b"pdf", "application/pdf")
         self.assertEqual(client.puts[0]["ServerSideEncryption"], "AES256")
-        self.assertEqual(client.puts[0]["Metadata"]["sha256"], saved.sha256)
+        self.assertEqual(client.puts[0]["Metadata"]["x-cos-meta-sha256"], saved.sha256)
         url = store.signed_download(saved.key, "report.pdf", 600)
         self.assertEqual(url, "https://signed.invalid/object")
         self.assertEqual(client.signed["Expired"], 600)

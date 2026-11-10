@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
     "intent_http_entrypoint.py", "preauth_intent_ticket.py",
     "delivery_http_entrypoint.py", "task_scf_entrypoint.py",
+    "research_task_http_entrypoint.py",
     "workflow_service.py", "production_task_queue.py",
     "config/model-routing.json", "config/prompt-stages.json",
     "prompts/P1-intent.md", "schemas/P1-intent.schema.json",
