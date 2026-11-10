@@ -1,10 +1,10 @@
 const REQUEST_HEADERS = ["content-type", "cookie", "x-csrf-token"];
 const RESPONSE_HEADERS = ["content-type", "cache-control", "set-cookie"];
 
-function json(payload, status) {
+function json(payload, status, headers = {}) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers }
   });
 }
 
@@ -25,6 +25,7 @@ function upstreamUrl(context, baseVariable) {
 export async function proxyControlApi(context, baseVariable, timeoutMs = 15_000) {
   const method = context.request.method.toUpperCase();
   if (!new Set(["GET", "POST"]).has(method)) return json({ ok: false, message: "请求方法不允许" }, 405);
+  const requestId = crypto.randomUUID();
   try {
     const env = runtime(context);
     const headers = new Headers();
@@ -34,6 +35,7 @@ export async function proxyControlApi(context, baseVariable, timeoutMs = 15_000)
     }
     headers.set("X-Gateway-Secret", String(env.EDGEONE_GATEWAY_SECRET));
     headers.set("X-EdgeOne-Client-IP", String(context.clientIp || ""));
+    headers.set("X-Request-ID", requestId);
     const body = method === "GET" ? undefined : await context.request.arrayBuffer();
     const upstream = await fetch(upstreamUrl(context, baseVariable), {
       method,
@@ -46,7 +48,8 @@ export async function proxyControlApi(context, baseVariable, timeoutMs = 15_000)
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
-      "Referrer-Policy": "no-referrer"
+      "Referrer-Policy": "no-referrer",
+      "X-Request-ID": requestId
     });
     for (const name of RESPONSE_HEADERS) {
       const value = upstream.headers.get(name);
@@ -55,7 +58,8 @@ export async function proxyControlApi(context, baseVariable, timeoutMs = 15_000)
     return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
   } catch (error) {
     const unavailable = error?.message === "GatewayNotConfigured" || error?.message === "GatewayOriginNotHttps";
-    return json({ ok: false, message: unavailable ? "生产网关尚未配置" : "生产服务暂时不可用" }, 503);
+    return json({ ok: false, code: unavailable ? "gateway_not_configured" : "upstream_unavailable", request_id: requestId,
+      message: unavailable ? "生产网关尚未配置" : "生产服务暂时不可用" }, 503, { "X-Request-ID": requestId });
   }
 }
 

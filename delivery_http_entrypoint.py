@@ -48,6 +48,15 @@ def _session_cookie(event):
     return cookie[SESSION_COOKIE].value if SESSION_COOKIE in cookie else ""
 
 
+def _failure(status, *, code, message, request_id):
+    body = {"ok": False, "code": code, "message": message}
+    response_headers = {"Cache-Control": "no-store"}
+    if request_id:
+        body["request_id"] = request_id
+        response_headers["X-Request-ID"] = request_id
+    return _response(status, body, response_headers)
+
+
 def _services(path):  # pragma: no cover - real SCF smoke path
     import psycopg
     common = load_delivery_common_config()
@@ -69,13 +78,14 @@ def _services(path):  # pragma: no cover - real SCF smoke path
 def main_handler(event, context=None, *, services=None):
     path = str(event.get("path", ""))
     owned = services is None
-    if owned and not _gateway_allowed(event):
-        return _response(403, {"ok": False, "message": "请求来源无效"}, {"Cache-Control": "no-store"})
-    services = services or _services(path)
-    method = str(event.get("httpMethod", "GET")).upper()
-    payload = _body(event)
     headers = {str(k).lower(): str(v) for k, v in (event.get("headers") or {}).items()}
+    request_id = headers.get("x-request-id", "")[:80]
     try:
+        if owned and not _gateway_allowed(event):
+            return _failure(403, code="gateway_invalid", message="请求来源无效", request_id=request_id)
+        services = services or _services(path)
+        method = str(event.get("httpMethod", "GET")).upper()
+        payload = _body(event)
         if method == "GET" and path.rstrip("/").endswith("/health"):
             cursor = services["connection"].cursor()
             cursor.execute("SELECT 1")
@@ -173,22 +183,24 @@ def main_handler(event, context=None, *, services=None):
             return _response(200, {"ok": True, "download_url": url}, {"Cache-Control": "no-store"})
         return _response(404, {"ok": False, "message": "接口不存在"})
     except FreeEntitlementUnavailable:
-        return _response(403, {"ok": False, "code": "free_entitlement_unavailable",
-                               "message": "该账号当前没有可用的首次免费资格。你已登录；如认为有误，请联系支持。"},
-                         {"Cache-Control": "no-store"})
+        return _failure(403, code="free_entitlement_unavailable",
+                        message="该账号当前没有可用的首次免费资格。你已登录；如认为有误，请联系支持。", request_id=request_id)
     except TaskNotRetryable as exc:
-        return _response(409, {"ok": False, "code": "task_not_retryable",
-                               "message": str(exc)}, {"Cache-Control": "no-store"})
+        return _failure(409, code="task_not_retryable", message=str(exc), request_id=request_id)
     except PermissionError:
-        return _response(401, {"ok": False, "code": "session_invalid", "message": "登录会话已失效，请重新验证邮箱。"}, {"Cache-Control": "no-store"})
+        return _failure(401, code="session_invalid", message="登录会话已失效，请重新验证邮箱。", request_id=request_id)
     except LookupError:
-        return _response(404, {"ok": False, "code": "task_not_found", "message": "未找到该任务，或当前账号无权访问。"}, {"Cache-Control": "no-store"})
+        return _failure(404, code="task_not_found", message="未找到该任务，或当前账号无权访问。", request_id=request_id)
     except ValueError as exc:
-        return _response(401, {"ok": False, "code": "request_invalid", "message": str(exc) or "请求参数无效。"}, {"Cache-Control": "no-store"})
+        return _failure(401, code="request_invalid", message=str(exc) or "请求参数无效。", request_id=request_id)
     except RuntimeError:
-        return _response(503, {"ok": False, "message": "生产服务暂时不可用"}, {"Cache-Control": "no-store"})
+        print(json.dumps({"event": "delivery_http_runtime_error", "request_id": request_id or None}, ensure_ascii=False))
+        return _failure(503, code="service_runtime_error", message="生产服务暂时不可用", request_id=request_id)
+    except Exception:
+        print(json.dumps({"event": "delivery_http_unexpected_error", "request_id": request_id or None}, ensure_ascii=False))
+        return _failure(503, code="service_unexpected_error", message="生产服务暂时不可用", request_id=request_id)
     finally:
-        if owned:
+        if owned and services:
             services["connection"].close()
 
 

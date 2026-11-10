@@ -30,6 +30,11 @@ class ProductionHomeAdapterTests(unittest.TestCase):
         self.assertIn("productionRequest('/auth/otp/verify'", self.script)
         self.assertNotIn("localStorage.setItem(csrfKey", self.script)
 
+    def test_login_failure_surfaces_a_safe_request_reference(self):
+        self.assertIn("response.headers.get('x-request-id')", self.script)
+        self.assertIn("请求编号", self.script)
+        self.assertIn("登录服务连接暂时不可用", self.script)
+
     def test_production_task_flow_covers_create_confirm_poll_and_delivery(self):
         self.assertIn("productionRequest('/api/intent'", self.script)
         self.assertIn("intent_ticket:currentIntentTicket", self.script)
@@ -55,6 +60,8 @@ class ProductionHomeAdapterTests(unittest.TestCase):
         self.assertIn(".production-auth", self.styles)
         self.assertIn("var(--accent)", self.styles)
         self.assertIn("var(--line)", self.styles)
+        self.assertIn("background:#fff", self.styles)
+        self.assertNotIn(".auth-row input{min-width:0;flex:1;border:1px solid var(--line);border-radius:8px;background:#07120f", self.styles)
 
 
 if __name__ == "__main__":
