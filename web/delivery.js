@@ -3,21 +3,18 @@ const SAMPLE_FILES = { report: './sample-delivery/report.md', slides: './sample-
 const state = { report: '', slides: '', reportSections: [], slidePages: [], sources: [], view: 'report', selectedSlide: 0, sourceFilter: '全部', taskId: '', topic: '', artifacts: [], production: false };
 const VIEW_ORDER = ['report', 'slides', 'sources'];
 const deliveryCsrfKey = 'research_csrf_token';
-const sharedCsrfKey = 'research-delivery.csrf.v1';
+const deliveryAuthChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('research-delivery-auth') : null;
 let viewTransitionId = 0;
 
 function deliveryCsrfToken() {
-  const token = sessionStorage.getItem('research_csrf_token') || localStorage.getItem(sharedCsrfKey) || '';
-  if (token && !sessionStorage.getItem(deliveryCsrfKey)) sessionStorage.setItem(deliveryCsrfKey, token);
-  return token;
+  return sessionStorage.getItem('research_csrf_token') || '';
 }
 function saveDeliveryCsrfToken(token) {
   sessionStorage.setItem(deliveryCsrfKey, token);
-  localStorage.setItem(sharedCsrfKey, token);
+  deliveryAuthChannel?.postMessage({ type: 'verified', csrf_token: token });
 }
 function clearDeliveryCsrfToken() {
   sessionStorage.removeItem(deliveryCsrfKey);
-  localStorage.removeItem(sharedCsrfKey);
 }
 
 function escapeHtml(value) {
