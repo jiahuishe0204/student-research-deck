@@ -233,7 +233,7 @@ $('#verify-code').addEventListener('click',async event=>{
   setBusy(button,true,'验证中…');
   try{
     const response=await productionRequest('/auth/otp/verify',{method:'POST',body:{challenge_id:productionChallengeId,code}});
-    saveProductionCsrfToken(response.csrf_token);productionChallengeId='';$('#auth-code').value='';$('#auth-code').disabled=true;
+    sessionStorage.setItem(csrfKey,response.csrf_token);saveProductionCsrfToken(response.csrf_token);productionChallengeId='';$('#auth-code').value='';$('#auth-code').disabled=true;
     $('#production-auth').classList.add('verified');status.textContent='邮箱验证成功。正在根据你的主题建立研究方向…';
   }catch(exc){status.textContent=`验证码验证失败：${exc.message}`;setBusy(button,false,'确认登录');return;}
   try{if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTopic&&!currentIntentTicket)await loadProductionIntent();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});}
