@@ -249,7 +249,8 @@ form.addEventListener('submit',async event=>{
   error.textContent='';setBusy(form.querySelector('.primary'),true,'正在理解题目… <span>·</span>');result.hidden=true;currentIntentTicket=null;productionConfirmedClarification=null;
   try{
     if(productionMode){
-      if(!productionCsrfToken()){
+      productionCsrfToken();
+      if(!sessionStorage.getItem(csrfKey)){
         $('#production-auth').hidden=false;
         $('#auth-status').textContent='主题已保存。请先验证邮箱；登录后系统会理解主题并让你确认研究方向。';
         $('#production-auth').scrollIntoView({behavior:'smooth',block:'center'});
@@ -280,7 +281,8 @@ confirmButton.addEventListener('click',async()=>{
   try{
     if(productionMode){
       productionConfirmedClarification=clarification;
-      if(!productionCsrfToken()){$('#production-auth').hidden=false;$('#auth-status').textContent='题目已确认。请验证邮箱以保存任务并开始完整调研。';$('#production-auth').scrollIntoView({behavior:'smooth',block:'center'});return;}
+      productionCsrfToken();
+      if(!sessionStorage.getItem(csrfKey)){$('#production-auth').hidden=false;$('#auth-status').textContent='题目已确认。请验证邮箱以保存任务并开始完整调研。';$('#production-auth').scrollIntoView({behavior:'smooth',block:'center'});return;}
       try{await startProductionTask();}
       catch(exc){$('#production-auth').hidden=false;showProductionTaskFailure(exc,$('#verify-code'));}
       return;
