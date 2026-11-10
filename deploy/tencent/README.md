@@ -40,7 +40,7 @@
 
 P9 不直接把任务标记为完成。Worker 先以确定性对象键上传 `report`、`ppt_content`、`references` 三类文件，逐个核验 SHA-256、大小和 AES256 服务端加密；第三类文件也成功后，数据库才原子发布下载权限、完成任务并写入邮件 Outbox。重复执行会复用相同对象与产物标识。
 
-交付阅读页支持 `delivery.html?task=TASK-...`。该模式只调用同源 `/tasks/{task_id}/delivery` 和 `/delivery/download`，携带 HttpOnly 会话 Cookie；下载请求还必须携带邮箱验证时返回的 CSRF Token。为支持用户在同一网站的不同标签页完成邮箱验证后继续原流程，浏览器会在同源 `localStorage` 与当前标签页 `sessionStorage` 暂存 CSRF Token；它本身不能代替 HttpOnly 会话 Cookie，收到会话失效响应时会从两处清除。无 `task` 参数时仍显示仓库内的验收样本。部署时必须由 EdgeOne 将这两个同源路径转发到独立 SCF 函数 URL，不能把上游地址或网关密钥注入浏览器脚本。
+交付阅读页支持 `delivery.html?task=TASK-...`。该模式只调用同源 `/tasks/{task_id}/delivery` 和 `/delivery/download`，携带 HttpOnly 会话 Cookie；下载请求还必须携带邮箱验证时返回的 CSRF Token。为支持用户在同一网站的多个已打开标签页完成邮箱验证后继续原流程，页面会通过 `BroadcastChannel` 临时传递 CSRF Token；每个标签页仍只把令牌留在自己的 `sessionStorage`，不写入跨标签持久存储。该令牌本身不能代替 HttpOnly 会话 Cookie；收到会话失效响应时会从当前标签页清除。无 `task` 参数时仍显示仓库内的验收样本。部署时必须由 EdgeOne 将这两个同源路径转发到独立 SCF 函数 URL，不能把上游地址或网关密钥注入浏览器脚本。
 
 首页通过同源 `/api/health` 自动探测生产网关。网关健康且各 API 上游均已配置时，访客先经 `/api/intent` 获取 P1 和短期签名凭证；确认方向后才验证邮箱，`POST /tasks` 使用签名凭证写入已完成的 P1 并原子保留免费资格，然后 `/tasks/{task_id}/continue` 启动 P2—P9。匿名 P1 使用共享 PostgreSQL 限频（每 IP 每 10 分钟最多 20 次，超限暂停 30 分钟）及单次/每日费用账本。生产域名健康检查失败时停止提交，不回退到本地演示流程；只有本地地址允许演示流程。生产部署必须通过 EdgeOne Cloud Functions 将 `/api/intent`、`/auth/*`、`/tasks*` 与 `/delivery/download` 分别转发到独立 SCF 函数 URL。旧 API 网关触发器已经退出服务，不作为新部署方案。
 

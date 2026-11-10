@@ -2,17 +2,16 @@ const $=selector=>document.querySelector(selector);
 const form=$('#intent-form'),task=$('#task'),result=$('#intent-result'),title=$('#intent-title'),copy=$('#intent-copy'),error=$('#error'),confirmButton=$('#confirm');
 let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',selectedDirection=null,currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,currentTaskToken=null,taskPaused=false;
 const taskSessionKey='research-delivery.active-task.v1';
-const productionTaskKey='research-delivery.production-task.v1',csrfKey='research_csrf_token',sharedCsrfKey='research-delivery.csrf.v1',pendingTopicKey='research-delivery.pending-topic.v1',pendingTierKey='research-delivery.pending-tier.v1';
+const productionTaskKey='research-delivery.production-task.v1',csrfKey='research_csrf_token',pendingTopicKey='research-delivery.pending-topic.v1',pendingTierKey='research-delivery.pending-tier.v1';
+const productionAuthChannel=typeof BroadcastChannel==='function'?new BroadcastChannel('research-delivery-auth'):null;
 function productionCsrfToken(){
-  const token=sessionStorage.getItem(csrfKey)||localStorage.getItem(sharedCsrfKey)||'';
-  if(token&&!sessionStorage.getItem(csrfKey))sessionStorage.setItem(csrfKey,token);
-  return token;
+  return sessionStorage.getItem(csrfKey)||'';
 }
 function saveProductionCsrfToken(token){
   if(!token)return;
-  sessionStorage.setItem(csrfKey,token);localStorage.setItem(sharedCsrfKey,token);
+  sessionStorage.setItem(csrfKey,token);productionAuthChannel?.postMessage({type:'verified',csrf_token:token});
 }
-function clearProductionCsrfToken(){sessionStorage.removeItem(csrfKey);localStorage.removeItem(sharedCsrfKey);}
+function clearProductionCsrfToken(){sessionStorage.removeItem(csrfKey);}
 function savedProductionTaskId(){
   return sessionStorage.getItem(productionTaskKey)||'';
 }
@@ -469,9 +468,10 @@ async function restoreTaskSession(){
   try{restoreArtifacts(await fetchCurrentTask());}catch(exc){console.warn('任务恢复失败',exc);clearTaskSession();}
 }
 
-window.addEventListener('storage',event=>{
-  if(event.key!==sharedCsrfKey||!event.newValue)return;
-  saveProductionCsrfToken(event.newValue);
+productionAuthChannel?.addEventListener('message',event=>{
+  const token=event.data?.type==='verified'?event.data.csrf_token:'';
+  if(typeof token!=='string'||!token)return;
+  sessionStorage.setItem(csrfKey,token);
   if(!productionMode)return;
   const draft=sessionStorage.getItem(pendingTopicKey)||'';
   if(draft){currentTopic=draft;currentTier=sessionStorage.getItem(pendingTierKey)||'fast';task.value=draft;loadProductionIntent().catch(exc=>{error.textContent=`邮箱已验证，主题仍已保留，但研究方向暂未生成：${exc.message}。点击“让系统先理解题目”重试。`;});}
