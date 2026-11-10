@@ -49,7 +49,9 @@ function renderSlidePreview(index,animate=false){
 }
 function showPreview(name){$('#preview-body').innerHTML=previews[name];document.querySelectorAll('.preview-tabs button').forEach(button=>button.classList.toggle('active',button.dataset.preview===name));if(name==='slides')renderSlidePreview(0);}
 async function request(path,payload){const headers={'Content-Type':'application/json'};if(currentTaskId&&currentTaskToken){headers['X-Task-ID']=currentTaskId;headers['X-Task-Token']=currentTaskToken;}const response=await fetch(path,{method:'POST',headers,body:JSON.stringify(payload)});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.detail?`${data.error||'请求失败'}：${data.detail}`:(data.error||'请求失败'));return data;}
-async function productionRequest(path,{method='GET',body=null,csrf=false}={}){const headers={};if(body!==null)headers['Content-Type']='application/json';if(csrf)headers['X-CSRF-Token']=productionCsrfToken();const response=await fetch(path,{method,credentials:'include',cache:'no-store',headers,body:body===null?undefined:JSON.stringify(body)});const data=await response.json().catch(()=>({message:'服务返回格式异常'}));if(!response.ok){if(response.status===401)clearProductionCsrfToken();const failure=new Error(data.message||data.error||'请求失败');failure.code=data.code||'';failure.status=response.status;throw failure;}return data;}
+async function productionRequest(path,{method='GET',body=null,csrf=false}={}){const headers={};if(body!==null)headers['Content-Type']='application/json';if(csrf)headers['X-CSRF-Token']=productionCsrfToken();const response=await fetch(path,{method,credentials:'include',cache:'no-store',headers,body:body===null?undefined:JSON.stringify(body)});const data=await response.json().catch(()=>({message:'服务返回格式异常'}));if(!response.ok){if(response.status===401)clearProductionCsrfToken();const failure=new Error(data.message||data.error||'请求失败');failure.code=data.code||'';failure.status=response.status;failure.requestId=data.request_id||response.headers.get('x-request-id')||'';throw failure;}return data;}
+function requestReference(exc){return exc&&exc.requestId?`（请求编号：${exc.requestId}）`:'';}
+function loginFailureMessage(exc){const reference=requestReference(exc);if(exc&&exc.code==='upstream_unavailable')return `登录服务连接暂时不可用，请稍后重试。${reference}`;if(exc&&['service_runtime_error','service_unexpected_error'].includes(exc.code))return `登录服务内部暂时不可用，请稍后重试。${reference}`;return `验证码验证失败：${exc.message}${reference}`;}
 function showProductionTaskFailure(exc,button){
   const status=$('#auth-status');
   if(exc.code==='free_entitlement_unavailable'){
@@ -234,7 +236,7 @@ $('#verify-code').addEventListener('click',async event=>{
     const response=await productionRequest('/auth/otp/verify',{method:'POST',body:{challenge_id:productionChallengeId,code}});
     sessionStorage.setItem(csrfKey,response.csrf_token);saveProductionCsrfToken(response.csrf_token);productionChallengeId='';$('#auth-code').value='';$('#auth-code').disabled=true;
     $('#production-auth').classList.add('verified');status.textContent='邮箱验证成功。正在根据你的主题建立研究方向…';
-  }catch(exc){status.textContent=`验证码验证失败：${exc.message}`;setBusy(button,false,'确认登录');return;}
+  }catch(exc){status.textContent=loginFailureMessage(exc);setBusy(button,false,'确认登录');return;}
   try{if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTopic&&!currentIntentTicket)await loadProductionIntent();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});}
   catch(exc){if(currentTopic&&!currentIntentTicket&&productionConfirmedClarification===null)status.textContent=`邮箱已验证，但主题理解暂时失败：${exc.message}。主题已保留，点击此处可重试。`;else showProductionTaskFailure(exc,button);}
   finally{if(!button.dataset.terminalError)setBusy(button,false,currentTopic&&!currentIntentTicket?'重试理解主题':'重试保存任务');}

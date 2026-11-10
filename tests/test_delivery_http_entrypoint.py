@@ -112,5 +112,17 @@ class HttpEntrypointTests(unittest.TestCase):
             response=main_handler({"httpMethod":"GET","path":"/health","headers":{}})
         self.assertEqual(response["statusCode"],403)
 
+    def test_runtime_failure_returns_safe_reference_for_log_correlation(self):
+        class BrokenOtp:
+            def verify(self, challenge, code): raise RuntimeError("database unavailable")
+        response=main_handler({"httpMethod":"POST","path":"/auth/otp/verify","headers":{"x-request-id":"trace-123"},
+                               "body":json.dumps({"challenge_id":"c","code":"123456"})},
+                              services={**self.services,"otp":BrokenOtp()})
+        body=json.loads(response["body"])
+        self.assertEqual(response["statusCode"],503)
+        self.assertEqual(body["code"],"service_runtime_error")
+        self.assertEqual(body["request_id"],"trace-123")
+        self.assertNotIn("database unavailable",response["body"])
+
 
 if __name__ == "__main__": unittest.main()
