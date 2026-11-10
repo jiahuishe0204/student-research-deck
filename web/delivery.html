@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="./delivery-title-hierarchy.css?v=1" />
   <link rel="stylesheet" href="./delivery-auth.css?v=1" />
   <script src="./sample-delivery/data.js?v=9" defer></script>
-  <script src="./delivery.js?v=18" defer></script>
+  <script src="./delivery.js?v=19" defer></script>
 </head>
 <body class="delivery-page">
   <header class="site-header delivery-site-header">
@@ -68,6 +68,7 @@
         <h2>本地样本未能载入</h2>
         <p>请通过仓库的本地服务打开此页面；直接双击 HTML 时，浏览器通常会阻止读取相邻文件。</p>
         <button type="button" id="retry-load">重新载入</button>
+        <a id="task-progress-link" href="./index.html" hidden>返回任务进度</a>
       </div>
       <div id="loading-state" class="delivery-message"><span class="loading-ring" aria-hidden="true"></span><p>正在读取已保存的本地交付……</p></div>
       <div id="delivery-body" class="delivery-body" hidden>

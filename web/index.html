@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="./mvp.css?v=8" />
     <link rel="stylesheet" href="./prototype-typography.css?v=7" />
     <link rel="stylesheet" href="./home-delivery-theme.css?v=8" />
-    <script src="./app.js?v=12" defer></script>
+    <script src="./app.js?v=13" defer></script>
   </head>
   <body>
     <div class="ambient" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
@@ -29,7 +29,7 @@
         <form id="intent-form" class="command-panel">
           <div class="panel-head"><span>NEW RESEARCH</span><span class="status-dot">系统就绪</span></div>
           <section id="production-auth" class="production-auth" hidden aria-label="邮箱验证">
-            <strong>先验证邮箱，再开始免费任务</strong>
+            <strong>验证邮箱，继续你的主题调研</strong>
             <div class="auth-row"><input id="auth-email" type="email" autocomplete="email" placeholder="你的邮箱" maxlength="254" /><button id="request-code" type="button">发送验证码</button></div>
             <div id="code-row" class="auth-row" hidden><input id="auth-code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码" maxlength="6" /><button id="verify-code" type="button">确认登录</button></div>
             <small id="auth-status" role="status">邮箱仅用于登录、完成通知和七天到期提醒。</small>
@@ -47,8 +47,8 @@
             <label><input type="radio" name="tier" value="deep" /><span><b>深入版</b><small>同为 8,000—12,000 汉字，增加比较、反证与独立核验</small></span><strong>¥15.9 起</strong></label>
           </fieldset>
           <p id="error" role="alert"></p>
-          <button class="primary" type="submit">免费体验第一次调研 <span>→</span></button>
-          <p class="form-note">内测期间，每位新用户可免费体验一次快速版；只有歧义会实质改变结果时，系统才会追问一个问题。</p>
+          <button class="primary" type="submit">提交主题，继续下一步 <span>→</span></button>
+          <p class="form-note">提交主题后验证邮箱；系统先理解主题并请你确认方向，再开始检索、撰写报告和 PPT 内容及独立核验。</p>
         </form>
       </section>
       <section id="intent-result" class="intent-drawer" hidden aria-live="polite">

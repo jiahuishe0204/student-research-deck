@@ -357,7 +357,26 @@ async function loadDelivery() {
       const response = await fetch(`/tasks/${encodeURIComponent(taskId)}/delivery`, { credentials: 'include', cache: 'no-store' });
       const payload = await response.json().catch(() => ({}));
       if (response.status === 401) { sessionStorage.removeItem('research_csrf_token'); byId('loading-state').hidden = true; byId('delivery-login').hidden = false; byId('delivery-login-status').textContent = '请使用任务所属邮箱重新验证。'; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); return; }
-      if (!response.ok || !payload.data?.final_delivery) throw new Error(payload.message || 'delivery unavailable');
+      if (!response.ok || !payload.data?.final_delivery) {
+        const progressResponse = await fetch(`/tasks/${encodeURIComponent(taskId)}/progress`, { credentials: 'include', cache: 'no-store' });
+        const progressPayload = await progressResponse.json().catch(() => ({}));
+        if (progressResponse.ok && progressPayload.data) {
+          const progress = progressPayload.data;
+          const stage = progress.current_stage || '未知阶段';
+          const heading = byId('load-error').querySelector('h2');
+          const copy = byId('load-error').querySelector('p');
+          const link = byId('task-progress-link');
+          document.querySelector('.header-action').textContent = '任务状态';
+          heading.textContent = progress.status === 'failed' ? `任务在 ${stage} 阶段中断` : `任务尚未完成（${stage}）`;
+          copy.textContent = progress.status === 'failed'
+            ? '邮箱验证和任务保存已完成，但后台尚未生成最终交付。返回任务页可从已保存的阶段恢复；不会要求重新输入验证码或新建任务。'
+            : '当前还没有可阅读的最终报告。任务完成后，这个链接会显示报告和 PPT；你也可以返回任务页查看最新进度。';
+          link.hidden = false;
+          link.onclick = () => sessionStorage.setItem('research-delivery.production-task.v1', taskId);
+          throw new Error('task status shown');
+        }
+        throw new Error(payload.message || 'delivery unavailable');
+      }
       const delivery = payload.data; const final = delivery.final_delivery;
       state.taskId = taskId; state.topic = delivery.topic || ''; state.production = true; state.artifacts = delivery.artifacts || [];
       state.report = final.final_report?.markdown || '';
@@ -383,7 +402,7 @@ async function loadDelivery() {
     state.reportSections = parseHeadings(state.report); state.slidePages = parseSlides(state.slides); state.sources = extractSources(state.report, state.slides);
     if (!state.reportSections.length || !state.slidePages.length) throw new Error('sample format invalid');
     byId('loading-state').hidden = true; byId('delivery-body').hidden = false; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); showView('report');
-  } catch (_) { if (taskId) { byId('load-error').querySelector('h2').textContent = '暂时无法读取交付内容'; byId('load-error').querySelector('p').textContent = '请确认链接完整，并稍后重试。'; } byId('loading-state').hidden = true; byId('load-error').hidden = false; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); }
+  } catch (error) { if (taskId && error.message !== 'task status shown') { byId('load-error').querySelector('h2').textContent = '暂时无法读取交付内容'; byId('load-error').querySelector('p').textContent = '请确认链接完整，并稍后重试。'; } byId('loading-state').hidden = true; byId('load-error').hidden = false; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); }
 }
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => changeView(button.dataset.view)));
 document.querySelector('.delivery-view-tabs').addEventListener('keydown', event => { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; const buttons = Array.from(document.querySelectorAll('[data-view]')); const current = buttons.findIndex(button => button.getAttribute('aria-selected') === 'true'); const next = buttons[(current + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length]; next.focus(); changeView(next.dataset.view); event.preventDefault(); });

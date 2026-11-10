@@ -2,7 +2,7 @@ const $=selector=>document.querySelector(selector);
 const form=$('#intent-form'),task=$('#task'),result=$('#intent-result'),title=$('#intent-title'),copy=$('#intent-copy'),error=$('#error'),confirmButton=$('#confirm');
 let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',selectedDirection=null,currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,currentTaskToken=null,taskPaused=false;
 const taskSessionKey='research-delivery.active-task.v1';
-const productionTaskKey='research-delivery.production-task.v1',csrfKey='research_csrf_token';
+const productionTaskKey='research-delivery.production-task.v1',csrfKey='research_csrf_token',pendingTopicKey='research-delivery.pending-topic.v1',pendingTierKey='research-delivery.pending-tier.v1';
 function savedProductionTaskId(){
   return sessionStorage.getItem(productionTaskKey)||'';
 }
@@ -114,7 +114,17 @@ async function detectProduction(){
   }
   let health={};try{const response=await fetch('/api/health',{cache:'no-store'});health=await response.json();const data=health;productionMode=response.ok&&data.runtime==='edgeone-gateway'&&data.ok===true;}catch(_exc){productionMode=false;}
   if(!productionMode){const local=['localhost','127.0.0.1','::1'].includes(location.hostname);if(local){if(health.owner_test_mode===true)showOwnerTestCopy();return false;}error.textContent='线上服务暂时不可用，请稍后再试。';form.querySelector('.primary').disabled=true;return true;}
-  $('#cancel-task').hidden=true;$('#resume-task').hidden=true;const csrf=sessionStorage.getItem(csrfKey);if(csrf){$('#production-auth').classList.add('verified');$('#auth-status').textContent='邮箱登录状态已就绪。';}const saved=savedProductionTaskId();if(saved){currentTaskId=saved;persistProductionTaskId(saved);if(!csrf){$('#production-auth').hidden=false;$('#auth-status').textContent='正在验证任务所属邮箱的登录状态…';}pollProductionTask().catch(exc=>{if(/登录会话已失效|会话不存在/.test(exc.message)){ $('#production-auth').hidden=false;$('#auth-status').textContent='请验证任务所属邮箱，以恢复已保存任务的进度。';error.textContent='';}else error.textContent=exc.message;});}else if(csrf){restoreRecentProductionTask().catch(exc=>{if(!/登录会话已失效/.test(exc.message))error.textContent=exc.message;});}else{$('#production-auth').hidden=false;$('#auth-status').textContent='验证邮箱后可恢复此账号最近保存的任务。';}return true;
+  $('#cancel-task').hidden=true;$('#resume-task').hidden=true;const csrf=sessionStorage.getItem(csrfKey);if(csrf){$('#production-auth').classList.add('verified');$('#auth-status').textContent='邮箱登录状态已就绪。';}const saved=savedProductionTaskId();if(saved){currentTaskId=saved;persistProductionTaskId(saved);if(!csrf){$('#production-auth').hidden=false;$('#auth-status').textContent='验证任务所属邮箱后，继续这个已保存的任务。';}pollProductionTask().catch(exc=>{if(/登录会话已失效|会话不存在/.test(exc.message)){ $('#production-auth').hidden=false;$('#auth-status').textContent='请验证任务所属邮箱，以恢复已保存任务的进度。';error.textContent='';}else error.textContent=exc.message;});}else{currentTopic=sessionStorage.getItem(pendingTopicKey)||'';currentTier=sessionStorage.getItem(pendingTierKey)||'fast';if(currentTopic){task.value=currentTopic;$('input[name="tier"][value="'+currentTier+'"]').checked=true;if(!csrf){$('#production-auth').hidden=false;$('#auth-status').textContent='主题已保存。验证邮箱后，系统会先理解这个主题，再让你确认研究方向。';}}}return true;
+}
+async function loadProductionIntent(){
+  const response=await productionRequest('/api/intent',{method:'POST',body:{topic:currentTopic,tier:currentTier}});
+  currentIntent=response.data;currentIntentTicket=response.intent_ticket;currentTaskId=null;
+  selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);
+  const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');
+  directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');
+  $('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;$('#clarification').value='';
+  confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后继续 <span>→</span>':'确认研究方向 <span>→</span>');
+  $('#production-auth').hidden=true;result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});
 }
 async function startProductionTask(){
   if(!currentTaskId){
@@ -123,6 +133,7 @@ async function startProductionTask(){
     currentTaskId=created.data.task_id;persistProductionTaskId(currentTaskId);currentIntentTicket=null;
   }
   await productionRequest(`/tasks/${encodeURIComponent(currentTaskId)}/continue`,{method:'POST',csrf:true,body:{clarification:productionConfirmedClarification||''}});
+  sessionStorage.removeItem(pendingTopicKey);sessionStorage.removeItem(pendingTierKey);
   productionConfirmedClarification=null;result.hidden=true;$('#production-auth').hidden=true;$('#task-workspace').hidden=false;
   $('#task-status-title').textContent='方向已确认，正在执行完整调研';
   $('#plan-output').innerHTML='<p class="empty-plan">系统将按 P2—P9 完成检索、证据提取、报告与 PPT 编排及独立核验。关闭页面不会中断任务。</p>';
@@ -200,10 +211,10 @@ $('#request-code').addEventListener('click',async event=>{
 $('#verify-code').addEventListener('click',async event=>{
   if(!productionMode)return;const button=event.currentTarget,code=$('#auth-code').value.trim(),status=$('#auth-status');
   if(sessionStorage.getItem(csrfKey)){
-    setBusy(button,true,'正在重试保存…');
-    try{if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});}
-    catch(exc){showProductionTaskFailure(exc,button);}
-    finally{if(!button.dataset.terminalError)setBusy(button,false,'重试保存任务');}
+    setBusy(button,true,currentTopic&&!currentIntentTicket?'正在理解主题…':'正在重试保存…');
+    try{if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTopic&&!currentIntentTicket)await loadProductionIntent();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});}
+    catch(exc){if(currentTopic&&!currentIntentTicket&&productionConfirmedClarification===null)status.textContent=`邮箱已验证，但主题理解暂时失败：${exc.message}。主题已保留，点击此处可重试。`;else showProductionTaskFailure(exc,button);}
+    finally{if(!button.dataset.terminalError)setBusy(button,false,currentTopic&&!currentIntentTicket?'重试理解主题':'重试保存任务');}
     return;
   }
   if(!productionChallengeId||!/^[0-9]{6}$/.test(code)){status.textContent='请输入邮件中的 6 位验证码。';$('#auth-code').focus();return;}
@@ -211,22 +222,28 @@ $('#verify-code').addEventListener('click',async event=>{
   try{
     const response=await productionRequest('/auth/otp/verify',{method:'POST',body:{challenge_id:productionChallengeId,code}});
     sessionStorage.setItem(csrfKey,response.csrf_token);productionChallengeId='';$('#auth-code').value='';$('#auth-code').disabled=true;
-    $('#production-auth').classList.add('verified');status.textContent='邮箱验证成功。正在保存题目并启动调研…';
+    $('#production-auth').classList.add('verified');status.textContent='邮箱验证成功。正在根据你的主题建立研究方向…';
   }catch(exc){status.textContent=`验证码验证失败：${exc.message}`;setBusy(button,false,'确认登录');return;}
-  try{if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});else await restoreRecentProductionTask();}
-  catch(exc){showProductionTaskFailure(exc,button);}
-  finally{if(!button.dataset.terminalError)setBusy(button,false,'重试保存任务');}
+  try{if(productionConfirmedClarification!==null)await startProductionTask();else if(currentTopic&&!currentIntentTicket)await loadProductionIntent();else if(currentTaskId)pollProductionTask().catch(exc=>{error.textContent=exc.message;});}
+  catch(exc){if(currentTopic&&!currentIntentTicket&&productionConfirmedClarification===null)status.textContent=`邮箱已验证，但主题理解暂时失败：${exc.message}。主题已保留，点击此处可重试。`;else showProductionTaskFailure(exc,button);}
+  finally{if(!button.dataset.terminalError)setBusy(button,false,currentTopic&&!currentIntentTicket?'重试理解主题':'重试保存任务');}
 });
 
 form.addEventListener('submit',async event=>{
   event.preventDefault();const submittedTopic=task.value.trim(),submittedTier=$('input[name="tier"]:checked').value;
   if(submittedTopic.length<2){error.textContent='输入一个调研主题就可以开始。';task.focus();return;}
   resetRunForNewTopic();currentTopic=submittedTopic;currentTier=submittedTier;
+  if(productionMode){sessionStorage.setItem(pendingTopicKey,currentTopic);sessionStorage.setItem(pendingTierKey,currentTier);}
   error.textContent='';setBusy(form.querySelector('.primary'),true,'正在理解题目… <span>·</span>');result.hidden=true;currentIntentTicket=null;productionConfirmedClarification=null;
   try{
     if(productionMode){
-      const response=await productionRequest('/api/intent',{method:'POST',body:{topic:currentTopic,tier:currentTier}});
-      currentIntent=response.data;currentIntentTicket=response.intent_ticket;currentTaskId=null;
+      if(!sessionStorage.getItem(csrfKey)){
+        $('#production-auth').hidden=false;
+        $('#auth-status').textContent='主题已保存。请先验证邮箱；登录后系统会理解主题并让你确认研究方向。';
+        $('#production-auth').scrollIntoView({behavior:'smooth',block:'center'});
+        return;
+      }
+      await loadProductionIntent();return;
     }else{
       const taskResponse=await request('/api/tasks',{topic:currentTopic,tier:currentTier});currentTaskId=taskResponse.data.task_id;currentTaskToken=taskResponse.data.owner_token;saveTaskSession();
       const response=await request('/api/intent',{topic:currentTopic,tier:currentTier});currentIntent=response.data;
