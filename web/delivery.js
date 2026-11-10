@@ -2,7 +2,20 @@ const byId = id => document.getElementById(id);
 const SAMPLE_FILES = { report: './sample-delivery/report.md', slides: './sample-delivery/ppt-content.md' };
 const state = { report: '', slides: '', reportSections: [], slidePages: [], sources: [], view: 'report', selectedSlide: 0, sourceFilter: '全部', taskId: '', topic: '', artifacts: [], production: false };
 const VIEW_ORDER = ['report', 'slides', 'sources'];
+const deliveryCsrfKey = 'research_csrf_token';
+const deliveryAuthChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('research-delivery-auth') : null;
 let viewTransitionId = 0;
+
+function deliveryCsrfToken() {
+  return sessionStorage.getItem('research_csrf_token') || '';
+}
+function saveDeliveryCsrfToken(token) {
+  sessionStorage.setItem(deliveryCsrfKey, token);
+  deliveryAuthChannel?.postMessage({ type: 'verified', csrf_token: token });
+}
+function clearDeliveryCsrfToken() {
+  sessionStorage.removeItem(deliveryCsrfKey);
+}
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -80,7 +93,7 @@ function pptToMarkdown(ppt) {
 }
 function artifact(kind) { return state.artifacts.find(item => item.kind === kind); }
 async function requestPrivateDownload(kind, filename) {
-  const item = artifact(kind); const csrf = sessionStorage.getItem('research_csrf_token') || '';
+  const item = artifact(kind); const csrf = deliveryCsrfToken();
   if (!item || !csrf) throw new Error('登录状态或下载凭证已过期，请重新通过邮箱进入任务页');
   const response = await fetch('/delivery/download', { method: 'POST', credentials: 'include',
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
@@ -331,7 +344,7 @@ byId('delivery-login').addEventListener('submit', async event => {
   try {
     const data = await deliveryAuthRequest('/auth/otp/verify', { challenge_id: deliveryChallengeId, code });
     if (!data.csrf_token) throw new Error('登录未完成，请重试。');
-    sessionStorage.setItem('research_csrf_token', data.csrf_token);
+    saveDeliveryCsrfToken(data.csrf_token);
     deliveryChallengeId = ''; byId('delivery-code').value = '';
     await loadDelivery();
   } catch (error) { status.textContent = error.message; }
@@ -353,10 +366,10 @@ async function loadDelivery() {
   try {
     if (taskId) {
       if (!/^TASK-[A-Za-z0-9_-]{6,64}$/.test(taskId)) throw new Error('invalid task id');
-      if (!sessionStorage.getItem('research_csrf_token')) { byId('loading-state').hidden = true; byId('delivery-login').hidden = false; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); return; }
+      if (!deliveryCsrfToken()) { byId('loading-state').hidden = true; byId('delivery-login').hidden = false; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); return; }
       const response = await fetch(`/tasks/${encodeURIComponent(taskId)}/delivery`, { credentials: 'include', cache: 'no-store' });
       const payload = await response.json().catch(() => ({}));
-      if (response.status === 401) { sessionStorage.removeItem('research_csrf_token'); byId('loading-state').hidden = true; byId('delivery-login').hidden = false; byId('delivery-login-status').textContent = '请使用任务所属邮箱重新验证。'; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); return; }
+      if (response.status === 401) { clearDeliveryCsrfToken(); byId('loading-state').hidden = true; byId('delivery-login').hidden = false; byId('delivery-login-status').textContent = '请使用任务所属邮箱重新验证。'; document.querySelector('.delivery-app').setAttribute('aria-busy', 'false'); return; }
       if (!response.ok || !payload.data?.final_delivery) {
         const progressResponse = await fetch(`/tasks/${encodeURIComponent(taskId)}/progress`, { credentials: 'include', cache: 'no-store' });
         const progressPayload = await progressResponse.json().catch(() => ({}));
@@ -367,9 +380,9 @@ async function loadDelivery() {
           const copy = byId('load-error').querySelector('p');
           const link = byId('task-progress-link');
           document.querySelector('.header-action').textContent = '任务状态';
-          heading.textContent = progress.status === 'failed' ? `任务在 ${stage} 阶段中断` : `任务尚未完成（${stage}）`;
+          heading.textContent = progress.status === 'failed' ? `旧任务在 ${stage} 阶段中断` : `任务尚未完成（${stage}）`;
           copy.textContent = progress.status === 'failed'
-            ? '邮箱验证和任务保存已完成，但后台尚未生成最终交付。返回任务页可从已保存的阶段恢复；不会要求重新输入验证码或新建任务。'
+            ? '邮箱验证和任务保存已完成，但后台尚未生成最终交付。你可以返回查看这条旧任务并恢复失败阶段；如果要开始新主题，请回到首页，在主题框输入内容后提交。'
             : '当前还没有可阅读的最终报告。任务完成后，这个链接会显示报告和 PPT；你也可以返回任务页查看最新进度。';
           link.hidden = false;
           link.onclick = () => sessionStorage.setItem('research-delivery.production-task.v1', taskId);
