@@ -451,7 +451,7 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertIn("validation_feedback", payloads[1])
         self.assertIn("EV::INVALID::001", payloads[1]["validation_feedback"])
 
-    def test_ppt_revises_a_source_id_outside_the_allowed_source_list(self):
+    def test_ppt_drops_unmatched_source_id_without_paid_retry(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
         payloads = []
 
@@ -467,9 +467,60 @@ class WorkflowServiceTests(unittest.TestCase):
         service.generate = generate
         service.create_ppt({}, {"report_markdown": "结论[EV-1]。"}, [{"evidence_id": "EV-1"}], [], {}, "fast",
                             source_records=[{"source_id": "SRC-VALID", "title": "Valid source"}])
-        self.assertEqual(len(payloads), 2)
-        self.assertIn("allowed_source_ids", payloads[1])
-        self.assertIn("SRC-INVENTED", payloads[1]["validation_feedback"])
+        self.assertEqual(len(payloads), 1)
+        self.assertEqual(payloads[0]["allowed_source_ids"], ["SRC-VALID"])
+
+    def test_ppt_canonicalizes_pmid_alias_to_task_source_without_retry(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
+        calls = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            calls.append(payload)
+            page = {"page_id": "SL-01", "navigation_title": "检测机制", "title": "检测机制",
+                    "purpose": "解释诊断信号", "on_slide_text": ["Cas12识别靶标"],
+                    "visual_suggestion": "", "speaker_notes": "识别结果转为可测信号。",
+                    "evidence_ids": ["EV-1"], "figure_refs": [],
+                    "source_citations": [{"source_id": "PMID:37935845", "short_vancouver": "模型生成引用"}]}
+            return validator({"deck_title": "deck", "storyline": "story", "pages": [page]}), {"total_tokens": 1}, {}
+
+        service.generate = generate
+        output, _ = service.create_ppt(
+            {}, {"report_markdown": "结论[EV-1]。"},
+            [{"evidence_id": "EV-1", "source_id": "MED:42798004"}], [], {}, "fast",
+            source_records=[{"source_id": "MED:42798004", "pmid": "37935845",
+                             "authors": ["Example A"], "journal": "Example Journal", "year": "2025"}],
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(output["pages"][0]["source_citations"], [{
+            "source_id": "MED:42798004", "short_vancouver": "Example A. Example Journal. 2025.",
+        }])
+
+    def test_ppt_replaces_unmapped_source_citation_from_page_evidence(self):
+        service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
+        calls = []
+
+        def generate(stage, tier, payload, validator=None, **options):
+            calls.append(payload)
+            page = {"page_id": "SL-01", "navigation_title": "检测机制", "title": "检测机制",
+                    "purpose": "解释诊断信号", "on_slide_text": ["Cas12识别靶标"],
+                    "visual_suggestion": "", "speaker_notes": "识别结果转为可测信号。",
+                    "evidence_ids": ["EV-1"], "figure_refs": [],
+                    "source_citations": [{"source_id": "PMID:NOT-IN-TASK", "short_vancouver": "错误来源"}]}
+            return validator({"deck_title": "deck", "storyline": "story", "pages": [page]}), {"total_tokens": 1}, {}
+
+        service.generate = generate
+        output, _ = service.create_ppt(
+            {}, {"report_markdown": "结论[EV-1]。"},
+            [{"evidence_id": "EV-1", "source_id": "MED:42798004"}], [], {}, "fast",
+            source_records=[{"source_id": "MED:42798004", "authors": ["Example A"],
+                             "journal": "Example Journal", "year": "2025"}],
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(output["pages"][0]["source_citations"], [{
+            "source_id": "MED:42798004", "short_vancouver": "Example A. Example Journal. 2025.",
+        }])
 
     def test_long_deep_ppt_uses_two_bounded_arc_batches_and_unique_page_ids(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P6": "ppt"})
