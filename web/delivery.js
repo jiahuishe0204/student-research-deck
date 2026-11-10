@@ -7,7 +7,7 @@ const sharedCsrfKey = 'research-delivery.csrf.v1';
 let viewTransitionId = 0;
 
 function deliveryCsrfToken() {
-  const token = sessionStorage.getItem(deliveryCsrfKey) || localStorage.getItem(sharedCsrfKey) || '';
+  const token = sessionStorage.getItem('research_csrf_token') || localStorage.getItem(sharedCsrfKey) || '';
   if (token && !sessionStorage.getItem(deliveryCsrfKey)) sessionStorage.setItem(deliveryCsrfKey, token);
   return token;
 }
