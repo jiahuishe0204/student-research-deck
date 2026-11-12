@@ -155,21 +155,46 @@ class PostgresTaskQueue:
             task = cursor.fetchone()
             if not task:
                 raise LookupError("任务不存在")
-            if task[0] != "failed":
-                raise TaskNotRetryable("任务当前不是失败状态")
+            # A timed-out SCF invocation can leave the task itself in running
+            # even though the stage lease has expired (and the worker has
+            # exhausted its three attempts).  Treat that stale state as
+            # recoverable; otherwise the UI recovery action can never requeue
+            # the durable P8 checkpoint.
+            if task[0] not in ("failed", "running"):
+                raise TaskNotRetryable("任务当前不是可恢复状态")
             stage = str(task[1] or "").upper()
             if stage not in VALID_STAGES:
                 raise TaskNotRetryable("任务没有可恢复的失败阶段")
+            if task[0] == "running" and stage != "P8":
+                raise TaskNotRetryable("任务当前不是可恢复状态")
 
             cursor.execute(
                 """SELECT job_id,status FROM research_task_jobs
-                     WHERE task_id=%s AND stage=%s AND status='permanent_failed'
+                     WHERE task_id=%s AND stage=%s
+                       AND (status='permanent_failed' OR status IN ('retryable_failed','running'))
+                       AND (status <> 'running' OR lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP)
                      ORDER BY updated_at DESC LIMIT 1 FOR UPDATE""",
                 (str(task_id), stage),
             )
             job = cursor.fetchone()
+            retry_transition_result = False
+            if not job and task[0] == "failed" and stage == "P3":
+                # P3 screening can succeed as a durable job while its
+                # deterministic quality-gate transition fails. Re-run that
+                # screening job after a repair rather than leaving the task
+                # stranded with no failed job to claim.
+                cursor.execute(
+                    """SELECT job_id,status FROM research_task_jobs
+                         WHERE task_id=%s AND stage='P3' AND job_key='P3:screen'
+                           AND status='succeeded' AND transition_status='done'
+                           AND transition_error IS NOT NULL
+                         ORDER BY updated_at DESC LIMIT 1 FOR UPDATE""",
+                    (str(task_id),),
+                )
+                job = cursor.fetchone()
+                retry_transition_result = bool(job)
             if not job:
-                raise TaskNotRetryable("该阶段没有可安全重试的失败作业")
+                raise TaskNotRetryable("该阶段没有可安全恢复的作业")
 
             cursor.execute(
                 """SELECT state,task_id FROM free_entitlements WHERE user_id=%s FOR UPDATE""",
@@ -188,18 +213,30 @@ class PostgresTaskQueue:
                 elif not (state == "reserved" and str(reserved_task) == str(task_id)):
                     raise FreeEntitlementUnavailable("账号的首次免费资格当前不可用于恢复此任务")
 
-            cursor.execute(
-                """UPDATE research_task_jobs
-                      SET status='pending',attempt=0,result=NULL,error_code=NULL,
-                          available_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_until=NULL,
-                          transition_status='not_ready',transition_attempts=0,
-                          transition_error=NULL,updated_at=CURRENT_TIMESTAMP
-                    WHERE job_id=%s AND status='permanent_failed'""",
-                (str(job[0]),),
-            )
+            if retry_transition_result:
+                cursor.execute(
+                    """UPDATE research_task_jobs
+                          SET status='pending',attempt=0,result=NULL,error_code=NULL,
+                              available_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_until=NULL,
+                              transition_status='not_ready',transition_attempts=0,
+                              transition_error=NULL,updated_at=CURRENT_TIMESTAMP
+                        WHERE job_id=%s AND status='succeeded'
+                          AND transition_status='done' AND transition_error IS NOT NULL""",
+                    (str(job[0]),),
+                )
+            else:
+                cursor.execute(
+                    """UPDATE research_task_jobs
+                          SET status='pending',attempt=0,result=NULL,error_code=NULL,
+                              available_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_until=NULL,
+                              transition_status='not_ready',transition_attempts=0,
+                              transition_error=NULL,updated_at=CURRENT_TIMESTAMP
+                        WHERE job_id=%s AND (status='permanent_failed' OR status IN ('retryable_failed','running'))""",
+                    (str(job[0]),),
+                )
             cursor.execute(
                 """UPDATE research_tasks SET status='queued',updated_at=CURRENT_TIMESTAMP
-                     WHERE task_id=%s AND user_id=%s AND status='failed'""",
+                      WHERE task_id=%s AND user_id=%s AND status IN ('failed','running')""",
                 (str(task_id), str(user_id)),
             )
             self.connection.commit()

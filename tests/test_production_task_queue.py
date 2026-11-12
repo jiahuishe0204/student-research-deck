@@ -132,6 +132,33 @@ class ProductionTaskQueueTests(unittest.TestCase):
             PostgresTaskQueue(connection).retry_failed_task(user_id="u1", task_id="TASK-1")
         self.assertEqual(connection.rollbacks, 1)
 
+    def test_retry_failed_task_requeues_an_expired_running_p8_checkpoint(self):
+        connection = Connection([
+            ("running", "P8"), ("job-p8", "running"), ("reserved", "TASK-1"),
+        ])
+
+        result = PostgresTaskQueue(connection).retry_failed_task(user_id="u1", task_id="TASK-1")
+
+        self.assertEqual(result, {"task_id": "TASK-1", "status": "queued", "current_stage": "P8"})
+        statements = [sql for sql, _ in connection.cursor_value.calls]
+        self.assertTrue(any("lease_until<CURRENT_TIMESTAMP" in sql for sql in statements))
+        self.assertTrue(any("status IN ('failed','running')" in sql for sql in statements))
+        self.assertEqual(connection.commits, 1)
+
+    def test_retry_failed_task_requeues_a_failed_p3_transition_result(self):
+        connection = Connection([
+            ("failed", "P3"), None, ("job-p3", "succeeded"), ("available", None),
+        ])
+
+        result = PostgresTaskQueue(connection).retry_failed_task(user_id="u1", task_id="TASK-1")
+
+        self.assertEqual(result, {"task_id": "TASK-1", "status": "queued", "current_stage": "P3"})
+        statements = [sql for sql, _ in connection.cursor_value.calls]
+        self.assertTrue(any("job_key='P3:screen'" in sql for sql in statements))
+        self.assertTrue(any("status='succeeded'" in sql and "transition_error IS NOT NULL" in sql
+                            for sql in statements))
+        self.assertEqual(connection.commits, 1)
+
     def test_progress_is_owner_scoped_and_returns_latest_stage_result(self):
         connection = Connection([("TASK-1", "CRISPR", "fast", "running", "P1",
                                   "created", "updated", {"normalized_topic": "CRISPR"})])
