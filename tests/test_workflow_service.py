@@ -255,6 +255,41 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(output["summary"]["keep_count"], 1)
         self.assertNotIn("title", output["decisions"][0])
 
+    def test_screen_sources_reserves_unreadable_keeps_and_restores_readable_choice(self):
+        def client(*args):
+            return {
+                "screening_version": "1.0", "topic": "topic",
+                "decisions": [
+                    {"source_id": "SRC-UNREADABLE", "status": "keep", "question_ids": ["Q1"],
+                     "intended_uses": ["overview"], "reason": "relevant", "priority": "high",
+                     "relevance_score": 0.9, "evidence_type": "cohort", "flags": []},
+                    {"source_id": "SRC-READABLE", "status": "reserve", "question_ids": ["Q1"],
+                     "intended_uses": ["overview"],
+                     "reason": "relevant 全局保留上限由程序降为备选。", "priority": "high",
+                     "relevance_score": 0.8, "evidence_type": "cohort", "flags": []},
+                ],
+                "summary": {"candidate_count": 2, "keep_count": 1, "reserve_count": 1,
+                            "drop_count": 0, "open_issues": []},
+            }, {"total_tokens": 10}
+
+        service = WorkflowService("secret", FakeRouter(), "system", {"P3": "screen"}, client)
+        candidates = [
+            {"source_id": "SRC-UNREADABLE", "source": "PubMed", "title": "metadata only",
+             "abstract": "", "full_text": "", "year": "2024", "access": "metadata", "url": "u1"},
+            {"source_id": "SRC-READABLE", "source": "PubMed", "title": "has abstract",
+             "abstract": "readable", "full_text": "", "year": "2024", "access": "abstract", "url": "u2"},
+        ]
+        plan = {"research_scope": "scope", "questions": [], "source_plan": [], "selection_criteria": []}
+
+        output, _ = service.screen_sources("topic", plan, candidates, "fast")
+        decisions = {item["source_id"]: item for item in output["decisions"]}
+
+        self.assertEqual(decisions["SRC-UNREADABLE"]["status"], "reserve")
+        self.assertIn("没有可读取摘要或全文", decisions["SRC-UNREADABLE"]["reason"])
+        self.assertEqual(decisions["SRC-READABLE"]["status"], "keep")
+        self.assertNotIn("全局保留上限", decisions["SRC-READABLE"]["reason"])
+        self.assertEqual(output["summary"]["keep_count"], 1)
+
     def test_generate_binds_prompt_route_and_client_options(self):
         calls = []
 

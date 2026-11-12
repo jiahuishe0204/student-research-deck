@@ -542,6 +542,21 @@ class WorkflowService:
             decisions.extend(partial["decisions"])
             open_issues.extend(partial["summary"].get("open_issues", []))
             add_usage(usage, partial_usage)
+        candidate_by_id = {item["source_id"]: item for item in candidates}
+        for item in decisions:
+            record = candidate_by_id.get(item["source_id"], {})
+            readable = bool(record.get("abstract") or record.get("full_text"))
+            if item["status"] == "keep" and not readable:
+                item["status"] = "reserve"
+                item["reason"] = (item.get("reason", "") + " 当前来源没有可读取摘要或全文，保留为备选。").strip()
+            elif (item["status"] == "reserve" and readable and
+                  "全局保留上限由程序降为备选。" in item.get("reason", "")):
+                # Restore an original model-approved keep after an unreadable
+                # keep is removed from the cap. This keeps the quality gate's
+                # readable-source minimum reachable without promoting weaker
+                # model-selected reserves.
+                item["status"] = "keep"
+                item["reason"] = item["reason"].replace(" 全局保留上限由程序降为备选。", "").strip()
         kept = sorted((item for item in decisions if item["status"] == "keep"), key=lambda item: (item.get("relevance_score", 0), item.get("priority") == "high"), reverse=True)
         for item in kept[keep_max:]:
             item["status"] = "reserve"
