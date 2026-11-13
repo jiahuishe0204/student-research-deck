@@ -581,7 +581,7 @@ def create_server(host="127.0.0.1", port=4180, api_key=None):
     )
     server.workflow = WorkflowService.from_project(server.api_key, server.model_router, ROOT, usage_ledger=server.model_usage, daily_budget_ledger=server.daily_budget_ledger, model_limits={
         "task_max_cost_cny": float(os.environ.get("MODEL_TASK_MAX_COST_CNY", "3.0") or 3.0),
-        "task_max_total_tokens": int(os.environ.get("MODEL_TASK_MAX_TOTAL_TOKENS", "600000") or 600000),
+        "task_max_total_tokens": int(os.environ.get("MODEL_TASK_MAX_TOTAL_TOKENS", "3000000") or 3000000),
         "pro_max_calls": int(os.environ.get("MODEL_PRO_MAX_CALLS", "0") or 0),
         "pro_max_output_tokens": int(os.environ.get("MODEL_PRO_MAX_OUTPUT_TOKENS", "0") or 0),
         "pro_max_total_tokens": int(os.environ.get("MODEL_PRO_MAX_TOTAL_TOKENS", "0") or 0),

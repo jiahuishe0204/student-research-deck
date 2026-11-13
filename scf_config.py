@@ -10,7 +10,7 @@ from dataclasses import dataclass
 class ScfConfig:
     database_url: str
     deepseek_api_key: str
-    task_max_total_tokens: int = 600000
+    task_max_total_tokens: int = 3000000
     task_max_cost_cny: float = 3.0
 
 
@@ -22,7 +22,7 @@ def load_scf_config(environ=None) -> ScfConfig:
     if missing:
         raise RuntimeError("SCF 缺少必要环境变量：" + ", ".join(missing))
     try:
-        tokens = int(values.get("MODEL_TASK_MAX_TOTAL_TOKENS", "600000"))
+        tokens = int(values.get("MODEL_TASK_MAX_TOTAL_TOKENS", "3000000"))
         cost = float(values.get("MODEL_TASK_MAX_COST_CNY", "3"))
     except (TypeError, ValueError) as exc:
         raise RuntimeError("模型预算环境变量格式无效") from exc
