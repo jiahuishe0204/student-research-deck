@@ -40,6 +40,8 @@
 - `server.py`：本地 HTTP API 与 P1—P9 流程编排。
 - `model_client.py` 与 `model_routing.py`：可校验重试的 DeepSeek 调用以及配置驱动的模型选择。
 - `model_usage.py`：逐次记录模型、阶段、成功/失败和 Tokens；可在下一次请求发出前按人民币费用、任务总 Tokens、Pro 调用次数或 Pro Tokens 上限停止。费用停止器按官方高峰价并假设输入全部缓存未命中进行保守预留。运行环境可配置 `MODEL_TASK_MAX_COST_CNY`、`MODEL_TASK_MAX_TOTAL_TOKENS`、`MODEL_PRO_MAX_CALLS`、`MODEL_PRO_MAX_OUTPUT_TOKENS`、`MODEL_PRO_MAX_TOTAL_TOKENS`，值为 `0` 表示暂不启用该项上限。
+
+预留与结算采用不同用量、相同费率表：预留按全部输入为缓存未命中及最大输出 Tokens 计算；settled 按模型返回的缓存命中、未命中和输出 Tokens 计算。`MODEL_PRICES_CNY_PER_MILLION` 是可选 JSON，键为模型 ID，值需包含 `cache_hit`、`cache_miss`、`output` 三个经核实的峰值 CNY/百万 Tokens 费率，例如 `{"deepseek-flash":{"cache_hit":0.04,"cache_miss":2.0,"output":8.0}}`。系统按请求创建时的北京时间工作日时段应用峰/谷倍率：工作日 09:00–12:00、14:00–18:00 为峰值，其他时段按峰值一半；无节假日日历时周一至周五保守按普通工作日。若谷时请求超时窗口会跨入峰时，预留按峰值；settled 使用数据库记录的请求创建时段倍率，不采用完成时段。仓库回退费率于 2026-11-13 依据本账户官方用量导出核对；供应商改价后应通过环境配置更新。该账本值仍是按配置费率计算，不等同于供应商最终账单。未知结果仍保留整笔预留，未知模型费率则拒绝结算而不按零成本记账。
 - `workflow_validation.py` 与 `contracts.py`：P1—P9 的跨阶段业务校验和 JSON 结构契约。
 - `retrieval.py`、`patsnap_mcp.py` 与 `epo_ops.py`：PubMed / Europe PMC / Crossref / 专利检索和去重。比赛版通过中国区智慧芽 MCP 获取最多 3 条专利书目；EPO 仅保留为可回退提供方。配置 `PATSNAP_API_KEY` 后仍可额外调用另一账户的智慧芽医学文献 REST API。
 - `docs/公开数据源与边界.md`：数据源限速、版权、失败降级与上线边界。

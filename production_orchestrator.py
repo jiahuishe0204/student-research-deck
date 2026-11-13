@@ -8,6 +8,10 @@ from epo_ops import EPOClient
 from patsnap_mcp import PatsnapMCPClient
 from retrieval import search_all, search_patsnap_literature
 from research_sources import merge_search_results, plan_patsnap_queries, plan_search_queries
+from production_task_queue import p8_recovery_job_key
+
+
+P8_BATCH_SIZE = 6
 
 
 def _data(result):
@@ -134,20 +138,43 @@ def advance(queue, job, result, *, root, publisher=None):
         })
         return "P7"
     if stage == "P7":
-        queue.enqueue(task_id=task_id, job_key="P8", stage="P8", payload={
-            # P8 consumes the complete P7 claim-set envelope. Passing only
-            # data["claims"] leaves a list where verify_claims expects the
-            # {claim_set_version, claims, extraction_notes} object.
-            "claims": data, "evidence": payload["evidence"],
-            "sources": payload["sources"], "tier": payload["tier"],
-            "report": payload["report"], "ppt": payload["ppt"],
-            "figure_records": payload["figure_records"],
-        })
-        return "P8"
+        claims = data.get("claims")
+        if not isinstance(claims, list) or not claims:
+            raise RuntimeError("P7 未产生可核验主张")
+        for offset in range(0, len(claims), P8_BATCH_SIZE):
+            batch_claims = claims[offset:offset + P8_BATCH_SIZE]
+            queue.enqueue(task_id=task_id,
+                          job_key=p8_recovery_job_key(batch_claims, prefix="P8:batch:"),
+                          stage="P8", payload={
+                "claims": {**data, "claims": batch_claims},
+                "all_claims": data,
+                "evidence": payload["evidence"], "sources": payload["sources"],
+                "tier": payload["tier"], "report": payload["report"],
+                "ppt": payload["ppt"], "figure_records": payload["figure_records"],
+            })
+        return "P8:%d-batches" % ((len(claims) + P8_BATCH_SIZE - 1) // P8_BATCH_SIZE)
     if stage == "P8":
+        p8_jobs = queue.stage_jobs(task_id=task_id, stage="P8")
+        if not p8_jobs or any(item["status"] != "succeeded" for item in p8_jobs):
+            return "P8:awaiting-batches"
+        verifications = []
+        for item in p8_jobs:
+            result_data = _data(item["result"])
+            verifications.extend(result_data.get("results", []))
+        full_claims = payload.get("all_claims", payload["claims"])
+        expected_ids = {item.get("claim_id") for item in full_claims.get("claims", [])}
+        actual_ids = {item.get("claim_id") for item in verifications}
+        if actual_ids != expected_ids:
+            raise RuntimeError("P8 持久化批次未覆盖全部主张")
+        order = {item.get("claim_id"): index for index, item in enumerate(full_claims.get("claims", []))}
+        verifications.sort(key=lambda item: order[item["claim_id"]])
+        verification = {"verification_version": "P8-queue-batched-1.0", "results": verifications,
+                        "summary": {status: sum(item.get("support_status") == status for item in verifications)
+                                    for status in ("supported", "partially_supported", "unsupported", "cannot_determine")}}
+        verification["summary"]["high_risk_remaining"] = 0
         queue.enqueue(task_id=task_id, job_key="P9", stage="P9", payload={
-            "verification": data, "report": payload["report"], "ppt": payload["ppt"],
-            "claims": payload["claims"]["claims"],
+            "verification": verification, "report": payload["report"], "ppt": payload["ppt"],
+            "claims": full_claims["claims"],
             "source_ids": sorted({item["source_id"] for item in payload["evidence"]}),
             "evidence_ids": [item["evidence_id"] for item in payload["evidence"]],
             "evidence_version": "1.0", "evidence_records": payload["evidence"],

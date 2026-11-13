@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import math
 from dataclasses import dataclass
 
 
@@ -12,6 +14,7 @@ class ScfConfig:
     deepseek_api_key: str
     task_max_total_tokens: int = 3000000
     task_max_cost_cny: float = 3.0
+    model_prices_cny_per_million: dict | None = None
 
 
 def load_scf_config(environ=None) -> ScfConfig:
@@ -28,7 +31,23 @@ def load_scf_config(environ=None) -> ScfConfig:
         raise RuntimeError("模型预算环境变量格式无效") from exc
     if tokens <= 0 or cost <= 0:
         raise RuntimeError("模型预算必须为正数")
-    return ScfConfig(database_url, api_key, tokens, cost)
+    raw_prices = values.get("MODEL_PRICES_CNY_PER_MILLION", "")
+    prices = None
+    if raw_prices:
+        try:
+            prices = json.loads(raw_prices)
+            if not isinstance(prices, dict) or not prices:
+                raise ValueError
+            for model, schedule in prices.items():
+                if not isinstance(model, str) or not isinstance(schedule, dict):
+                    raise ValueError
+                if any(key not in schedule or not math.isfinite(float(schedule[key]))
+                       or float(schedule[key]) < 0
+                       for key in ("cache_hit", "cache_miss", "output")):
+                    raise ValueError
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("MODEL_PRICES_CNY_PER_MILLION 格式无效") from exc
+    return ScfConfig(database_url, api_key, tokens, cost, prices)
 
 
 __all__ = ["ScfConfig", "load_scf_config"]

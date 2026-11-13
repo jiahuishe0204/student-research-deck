@@ -44,8 +44,8 @@
     "budget_conversion_usd_to_cny_ceiling":8.5,
     "conversion_note":"Conservative budget estimate only: official USD prices converted with an 8.5 CNY/USD ceiling and rounded upward; actual billing is provider USD billing.",
     "peak_hours_beijing":"Mon-Fri 09:00-12:00, 14:00-18:00",
-    "deepseek-flash":{"cache_hit_input":{"off_peak":0.06,"peak":0.06},"cache_miss_input":{"off_peak":1.3,"peak":2.6},"output":{"off_peak":5.25,"peak":10.5}},
-    "deepseek-v4-pro":{"cache_hit_input":{"off_peak":0.4,"peak":0.4},"cache_miss_input":{"off_peak":5.75,"peak":11.5},"output":{"off_peak":17.0,"peak":34.0}}
+    "deepseek-flash":{"cache_hit_input":{"off_peak":0.02,"peak":0.04},"cache_miss_input":{"off_peak":1.0,"peak":2.0},"output":{"off_peak":4.0,"peak":8.0}},
+    "deepseek-v4-pro":{"cache_hit_input":{"off_peak":0.15,"peak":0.3},"cache_miss_input":{"off_peak":4.5,"peak":9.0},"output":{"off_peak":13.5,"peak":27.0}}
   },
   "notes": [
     "USD price source checked against official DeepSeek API documentation on 2026-10-25; CNY figures are conservative budget estimates, not provider billing quotes, and must be rechecked before launch.",

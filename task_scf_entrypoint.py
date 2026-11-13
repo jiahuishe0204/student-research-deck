@@ -38,7 +38,9 @@ def main_handler(event, context=None, *, connection=None, workflow=None):
         active_workflow = workflow if workflow is not None else build_workflow(
             ROOT,
             daily_budget_ledger=PostgresPreAuthDailyBudget(connection),
-            usage_ledger=PostgresModelUsageLedger(connection),
+            usage_ledger=PostgresModelUsageLedger(
+                connection, getattr(config, "model_prices_cny_per_million", None),
+            ),
         )
         try:
             return execute_next_job(PostgresTaskQueue(connection), active_workflow,

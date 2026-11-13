@@ -42,7 +42,9 @@ def main_handler(event, context, *, connection=None, workflow=None,
         workflow = workflow or build_workflow(
             ROOT, environ=environ,
             daily_budget_ledger=PostgresPreAuthDailyBudget(connection),
-            usage_ledger=PostgresModelUsageLedger(connection),
+            usage_ledger=PostgresModelUsageLedger(
+                connection, getattr(config, "model_prices_cny_per_million", None),
+            ),
         )
         if stage_dispatcher is None:
             from scf_terminal_delivery import publish_final_delivery

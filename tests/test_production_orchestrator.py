@@ -15,6 +15,9 @@ class Queue:
         self.completed = []
 
     def enqueue(self, **values):
+        if any(item.get("task_id") == values.get("task_id") and item.get("job_key") == values.get("job_key")
+               for item in self.enqueued):
+            return False
         self.enqueued.append(values)
         return True
 
@@ -99,6 +102,69 @@ class ProductionOrchestratorTests(unittest.TestCase):
                                  publisher=lambda *args: calls.append(args)), "completed")
         self.assertEqual(calls[0][0], "TASK-1")
         self.assertEqual(queue.completed, [])
+
+    def test_p7_persists_small_p8_batches_with_full_claim_manifest(self):
+        queue = Queue()
+        claims = [{"claim_id": "C%03d" % index} for index in range(14)]
+        payload = {"evidence": [{"evidence_id": "E1"}], "sources": [], "tier": "deep",
+                   "report": {}, "ppt": {}, "figure_records": []}
+        self.assertEqual(advance(queue, {"task_id": "TASK-1", "stage": "P7", "payload": payload},
+                                 wrapped({"claims": claims, "claim_set_version": "v1"}), root=Path(".")),
+                         "P8:3-batches")
+        self.assertEqual(len(set(job["job_key"] for job in queue.enqueued)), 3)
+        self.assertTrue(all(job["job_key"].startswith("P8:batch:") for job in queue.enqueued))
+        self.assertEqual([len(job["payload"]["claims"]["claims"]) for job in queue.enqueued], [6, 6, 2])
+        self.assertEqual(len(queue.enqueued[1]["payload"]["all_claims"]["claims"]), 14)
+
+    def test_p8_waits_for_all_batches_then_aggregates_exactly_once(self):
+        full_claims = {"claims": [{"claim_id": "C1"}, {"claim_id": "C2"}]}
+        payload = {"claims": {"claims": [{"claim_id": "C2"}]}, "all_claims": full_claims,
+                   "report": {}, "ppt": {}, "evidence": [{"evidence_id": "E1", "source_id": "S1"}],
+                   "sources": [{"source_id": "S1"}], "figure_records": [], "tier": "fast"}
+        queue = Queue({"P8": [
+            {"job_key": "P8:batch:0001", "status": "succeeded", "result": wrapped({"results": [
+                {"claim_id": "C1", "support_status": "supported"}]})},
+            {"job_key": "P8:batch:0002", "status": "pending", "result": None},
+        ]})
+        job = {"task_id": "TASK-1", "stage": "P8", "payload": payload}
+        self.assertEqual(advance(queue, job, wrapped({"results": [{"claim_id": "C2", "support_status": "unsupported"}]}), root=Path(".")),
+                         "P8:awaiting-batches")
+        self.assertEqual(queue.enqueued, [])
+        queue.jobs["P8"][1] = {"job_key": "P8:batch:0002", "status": "succeeded",
+                               "result": wrapped({"results": [{"claim_id": "C2", "support_status": "unsupported"}]})}
+        self.assertEqual(advance(queue, job, wrapped({}), root=Path(".")), "P9")
+        self.assertEqual(len(queue.enqueued), 1)
+        p9 = queue.enqueued[0]["payload"]
+        self.assertEqual([item["claim_id"] for item in p9["verification"]["results"]], ["C1", "C2"])
+        self.assertEqual(p9["claims"], full_claims["claims"])
+
+    def test_end_to_end_p7_batches_persist_then_enqueue_one_p9(self):
+        queue = Queue()
+        claims = [{"claim_id": "C%02d" % i} for i in range(13)]
+        common = {"evidence": [{"evidence_id": "E1", "source_id": "S1"}],
+                  "sources": [{"source_id": "S1"}], "tier": "deep", "report": {},
+                  "ppt": {}, "figure_records": []}
+        p7_job = {"task_id": "TASK-E2E", "stage": "P7", "payload": common}
+        self.assertEqual(advance(queue, p7_job, wrapped({"claims": claims}), root=Path(".")), "P8:3-batches")
+        p8_jobs = list(queue.enqueued)
+        persisted_p8 = [{**item, "status": "pending", "result": None} for item in p8_jobs]
+        queue.jobs["P8"] = persisted_p8
+        for index, queued in enumerate(persisted_p8):
+            result = wrapped({"results": [{"claim_id": item["claim_id"], "support_status": "supported"}
+                                          for item in queued["payload"]["claims"]["claims"]]})
+            queued["status"] = "succeeded"
+            queued["result"] = result
+            status = advance(queue, {"task_id": "TASK-E2E", "stage": "P8", "payload": queued["payload"]},
+                             result, root=Path("."))
+            if index < len(p8_jobs) - 1:
+                self.assertEqual(status, "P8:awaiting-batches")
+        p9_jobs = [item for item in queue.enqueued if item["stage"] == "P9"]
+        self.assertEqual(len(p9_jobs), 1)
+        # A replayed transition is safe because the durable queue key is unique.
+        final_job = persisted_p8[-1]
+        advance(queue, {"task_id": "TASK-E2E", "stage": "P8", "payload": final_job["payload"]},
+                final_job["result"], root=Path("."))
+        self.assertEqual(len([item for item in queue.enqueued if item["stage"] == "P9"]), 1)
 
     def test_p9_never_completes_without_private_publisher(self):
         queue = Queue()

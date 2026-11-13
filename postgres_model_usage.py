@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from model_usage import ModelBudgetExceeded, ModelUsageLedger
@@ -41,18 +42,20 @@ class PostgresModelUsageLedger:
     conservative reservation until reconciled.
     """
 
-    def __init__(self, connection):
+    def __init__(self, connection, model_prices_cny_per_million=None, clock=None):
         self.connection = connection
+        self.model_prices_cny_per_million = model_prices_cny_per_million
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def reserve_attempt(self, task_id, request_id, attempt, stage, model, effort,
-                        limits, next_input_tokens, next_output_tokens):
+                        limits, next_input_tokens, next_output_tokens,
+                        request_timeout_seconds=300):
         task_id = str(task_id)
         request_id = str(uuid.UUID(str(request_id)))
         if isinstance(attempt, bool) or not isinstance(attempt, int) or not 1 <= attempt <= 100:
             raise ValueError("模型尝试次数无效")
         input_tokens, output_tokens = _int(next_input_tokens), _int(next_output_tokens)
         reserve_tokens = input_tokens + output_tokens
-        reserve_cost = Decimal(str(ModelUsageLedger.estimate_peak_cost_cny(model, input_tokens, output_tokens)))
         cost_limit = Decimal(str((limits or {}).get("task_max_cost_cny", 0) or 0))
         token_limit = int((limits or {}).get("task_max_total_tokens", 0) or 0)
         cursor = self.connection.cursor()
@@ -66,6 +69,13 @@ class PostgresModelUsageLedger:
                      FROM model_usage_attempts WHERE task_id=%s""", (task_id,),
             )
             rows = cursor.fetchall()
+            # Capture the attempt time after budget-lock acquisition, close to
+            # the reservation commit and subsequent provider request.
+            created_at = self.clock()
+            multiplier = ModelUsageLedger.peak_multiplier(created_at, request_timeout_seconds)
+            reserve_cost = Decimal(str(multiplier * ModelUsageLedger.estimate_peak_cost_cny(
+                model, input_tokens, output_tokens, self.model_prices_cny_per_million,
+            )))
             spent_cost = Decimal("0")
             spent_tokens = 0
             pro_calls, pro_output, pro_tokens = 0, 0, 0
@@ -96,10 +106,10 @@ class PostgresModelUsageLedger:
                        (request_id,attempt,task_id,stage,model,effort,budget_state,
                         reserved_cost_cny,reserved_input_tokens,reserved_output_tokens,
                         reserved_total_tokens,result_status,detail_json,created_at,updated_at)
-                     VALUES (%s,%s,%s,%s,%s,%s,'reserved',%s,%s,%s,%s,'reserved','{}'::jsonb,NOW(),NOW())
+                     VALUES (%s,%s,%s,%s,%s,%s,'reserved',%s,%s,%s,%s,'reserved','{}'::jsonb,%s,NOW())
                      ON CONFLICT (request_id,attempt) DO NOTHING RETURNING request_id""",
                 (request_id, attempt, task_id, str(stage), str(model), str(effort), reserve_cost,
-                 input_tokens, output_tokens, reserve_tokens),
+                 input_tokens, output_tokens, reserve_tokens, created_at),
             )
             if not cursor.fetchone():
                 raise ModelBudgetExceeded("模型请求预留已存在，拒绝重复发送")
@@ -123,20 +133,23 @@ class PostgresModelUsageLedger:
         reasoning = _int(completion_details.get("reasoning_tokens"))
         cursor = self.connection.cursor()
         try:
-            cursor.execute("SELECT task_id,model,budget_state FROM model_usage_attempts WHERE request_id=%s AND attempt=%s FOR UPDATE", (request_id, attempt))
+            cursor.execute("SELECT task_id,model,budget_state,created_at FROM model_usage_attempts WHERE request_id=%s AND attempt=%s FOR UPDATE", (request_id, attempt))
             row = cursor.fetchone()
             if not row:
                 # Cache hits and P1 calls not protected by this task ledger have
                 # no pre-reservation; they do not spend task budget here.
                 self.connection.commit()
                 return False
-            stored_task_id, model, state = str(row[0]), str(row[1]), str(row[2])
+            stored_task_id, model, state, created_at = str(row[0]), str(row[1]), str(row[2]), row[3]
             if stored_task_id != str(task_id):
                 raise RuntimeError("模型预留与任务编号不一致")
             has_usage = bool(prompt_tokens or completion_tokens or total_tokens)
             settlement = _settlement(result_status, detail, has_usage)
             if state == "reserved" and settlement == "settled":
-                actual_cost = Decimal(str(ModelUsageLedger.estimate_peak_cost_cny(model, prompt_tokens, completion_tokens)))
+                multiplier = ModelUsageLedger.peak_multiplier(created_at)
+                actual_cost = Decimal(str(multiplier * ModelUsageLedger.usage_cost_cny(
+                    model, usage, self.model_prices_cny_per_million,
+                )))
                 budget_state = "settled"
             elif state == "reserved" and settlement == "released":
                 actual_cost, budget_state = Decimal("0"), "released"

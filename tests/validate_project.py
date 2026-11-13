@@ -81,7 +81,7 @@ assert routing["tiers"]["fast"]["intent_detection"]["model"] == "deepseek-v4-pro
 assert routing["tiers"]["fast"]["intent_detection"]["reasoning_effort"] == "low"
 assert routing["tiers"]["fast"]["research_planning"]["model"] == "deepseek-v4-pro"
 assert routing["tiers"]["deep"]["research_planning"]["model"] == "deepseek-v4-pro"
-assert routing["pricing_snapshot"]["deepseek-v4-pro"]["output"]["peak"] == 34.0
+assert routing["pricing_snapshot"]["deepseek-v4-pro"]["output"]["peak"] == 27.0
 server_source = (ROOT / "server.py").read_text()
 assert '"deepseek-flash"' not in server_source, "server should obtain model IDs from model-routing.json"
 assert '"deepseek-v4-pro"' not in server_source, "server should obtain model IDs from model-routing.json"

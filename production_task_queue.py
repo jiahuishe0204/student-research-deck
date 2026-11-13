@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import uuid
 
 from workflow_validation import validate_intent
@@ -10,6 +11,35 @@ from workflow_validation import validate_intent
 
 VALID_TIERS = frozenset({"fast", "deep"})
 VALID_STAGES = frozenset("P%d" % number for number in range(1, 10))
+P8_RECOVERY_BATCH_SIZE = 6
+
+
+def split_legacy_p8_payload(payload, completed_claim_ids=(), batch_size=P8_RECOVERY_BATCH_SIZE):
+    """Return minimal P8 retry payloads while preserving the full claim set."""
+    claim_set = payload.get("claims") if isinstance(payload, dict) else None
+    claims = claim_set.get("claims") if isinstance(claim_set, dict) else None
+    if not isinstance(claims, list) or batch_size < 1:
+        raise ValueError("旧 P8 作业缺少有效声明集合")
+    completed = set(completed_claim_ids)
+    remaining = [item for item in claims if isinstance(item, dict)
+                 and item.get("claim_id") not in completed]
+    batches = []
+    for offset in range(0, len(remaining), batch_size):
+        batch_payload = dict(payload)
+        batch_payload["all_claims"] = claim_set
+        batch_payload["claims"] = {**claim_set, "claims": remaining[offset:offset + batch_size]}
+        batch_payload["recovery_job_key"] = p8_recovery_job_key(batch_payload["claims"]["claims"])
+        batches.append(batch_payload)
+    return batches
+
+
+def p8_recovery_job_key(claim_items, prefix="P8:recovery:"):
+    """Stable key derived from claim IDs, independent of migration order."""
+    ids = [str(item.get("claim_id") or "") for item in claim_items if isinstance(item, dict)]
+    if not ids or any(not claim_id for claim_id in ids):
+        raise ValueError("P8 恢复批次缺少声明编号")
+    digest = hashlib.sha256("\0".join(ids).encode("utf-8")).hexdigest()[:16]
+    return prefix + digest
 
 
 class FreeEntitlementUnavailable(Exception):
@@ -169,7 +199,7 @@ class PostgresTaskQueue:
                 raise TaskNotRetryable("任务当前不是可恢复状态")
 
             cursor.execute(
-                """SELECT job_id,status FROM research_task_jobs
+                """SELECT job_id,status,payload FROM research_task_jobs
                      WHERE task_id=%s AND stage=%s
                        AND (status='permanent_failed' OR status IN ('retryable_failed','running'))
                        AND (status <> 'running' OR lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP)
@@ -195,6 +225,33 @@ class PostgresTaskQueue:
                 retry_transition_result = bool(job)
             if not job:
                 raise TaskNotRetryable("该阶段没有可安全恢复的作业")
+
+            # Older workers stored every P7 claim in one P8 job. Before retrying
+            # that failed job, fan it out into durable, idempotent small jobs so
+            # a later failure only repeats its own batch. Completed batch claim
+            # IDs are excluded when recovering a partially migrated task.
+            if stage == "P8" and job[1] != "succeeded":
+                legacy_payload = job[2] or {}
+                claim_set = legacy_payload.get("claims") if isinstance(legacy_payload, dict) else None
+                claim_items = claim_set.get("claims") if isinstance(claim_set, dict) else None
+                if isinstance(claim_items, list) and len(claim_items) > P8_RECOVERY_BATCH_SIZE:
+                    cursor.execute(
+                        "SELECT result FROM research_task_jobs WHERE task_id=%s AND stage='P8' AND status='succeeded'",
+                        (str(task_id),),
+                    )
+                    completed = set()
+                    for result_row in cursor.fetchall():
+                        data = (result_row[0] or {}).get("data", {})
+                        completed.update(item.get("claim_id") for item in data.get("results", [])
+                                         if isinstance(item, dict) and item.get("claim_id"))
+                    batches = split_legacy_p8_payload(legacy_payload, completed)
+                    if not batches:
+                        raise TaskNotRetryable("P8 没有未完成主张，需先核对阶段推进状态")
+                    cursor.execute("UPDATE research_task_jobs SET payload=%s::jsonb WHERE job_id=%s",
+                                   (_json(batches[0]), str(job[0])))
+                    for next_payload in batches[1:]:
+                        self._enqueue(cursor, task_id=str(task_id), job_key=next_payload["recovery_job_key"],
+                                      stage="P8", payload=next_payload)
 
             cursor.execute(
                 """SELECT state,task_id FROM free_entitlements WHERE user_id=%s FOR UPDATE""",

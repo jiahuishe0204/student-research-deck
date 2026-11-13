@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 
@@ -12,20 +12,77 @@ class ModelBudgetExceeded(RuntimeError):
 
 class ModelUsageLedger:
     PEAK_PRICES_CNY_PER_MILLION = {
-        # Official prices are USD. These CNY values use a conservative 8.5
-        # CNY/USD conversion ceiling and round upward, so budget guards stop early.
-        "deepseek-flash": {"cache_hit": 0.06, "cache_miss": 2.6, "output": 10.5},
-        "deepseek-v4-flash": {"cache_hit": 0.06, "cache_miss": 2.6, "output": 10.5},
-        "deepseek-v4-pro": {"cache_hit": 0.4, "cache_miss": 11.5, "output": 34.0},
+        # Verified against the account's official DeepSeek usage export on
+        # 2026-11-13. Operators can override this dated fallback through
+        # MODEL_PRICES_CNY_PER_MILLION when the provider changes prices.
+        "deepseek-flash": {"cache_hit": 0.04, "cache_miss": 2.0, "output": 8.0},
+        "deepseek-v4-flash": {"cache_hit": 0.04, "cache_miss": 2.0, "output": 8.0},
+        "deepseek-v4-pro": {"cache_hit": 0.3, "cache_miss": 9.0, "output": 27.0},
     }
 
     @classmethod
-    def estimate_peak_cost_cny(cls, model, input_tokens, output_tokens):
-        """Conservative request estimate: assume all input is an uncached peak-price miss."""
-        prices = cls.PEAK_PRICES_CNY_PER_MILLION.get(model)
-        if not prices:
+    def usage_cost_cny(cls, model, usage, prices=None):
+        """Price known usage separately from the conservative reservation.
+
+        `prices` is an explicit peak CNY-per-million-token schedule. The
+        checked-in schedule remains a conservative fallback, not a live quote;
+        settled values are calculations at the configured rates.
+        """
+        schedule = cls.PEAK_PRICES_CNY_PER_MILLION if prices is None else prices
+        model_prices = schedule.get(model)
+        if not model_prices:
+            raise ModelBudgetExceeded("模型结算费率未配置，已拒绝费用结算")
+        usage = usage or {}
+        prompt = max(0, int(usage.get("prompt_tokens", 0) or 0))
+        output = max(0, int(usage.get("completion_tokens", 0) or 0))
+        details = usage.get("prompt_tokens_details", {}) or {}
+        cache_hit = max(0, int(usage.get("prompt_cache_hit_tokens", details.get("cached_tokens", 0)) or 0))
+        cache_hit = min(prompt, cache_hit)
+        explicit_miss = max(0, int(usage.get("prompt_cache_miss_tokens", 0) or 0))
+        cache_miss = min(prompt - cache_hit, explicit_miss) if explicit_miss else prompt - cache_hit
+        # Any unclassified prompt tokens are conservatively charged as misses.
+        cache_miss += prompt - cache_hit - cache_miss
+        return (cache_hit * float(model_prices["cache_hit"])
+                + cache_miss * float(model_prices["cache_miss"])
+                + output * float(model_prices["output"])) / 1_000_000
+
+    @classmethod
+    def estimate_peak_cost_cny(cls, model, input_tokens, output_tokens, prices=None):
+        """Conservative request estimate using peak miss and output rates."""
+        schedule = cls.PEAK_PRICES_CNY_PER_MILLION if prices is None else prices
+        model_prices = schedule.get(model)
+        if not model_prices:
             raise ModelBudgetExceeded("模型价格未配置，已拒绝受费用上限保护的模型调用")
-        return (int(input_tokens or 0) * prices["cache_miss"] + int(output_tokens or 0) * prices["output"]) / 1_000_000
+        return (int(input_tokens or 0) * float(model_prices["cache_miss"])
+                + int(output_tokens or 0) * float(model_prices["output"])) / 1_000_000
+
+    @classmethod
+    def peak_multiplier(cls, instant, request_timeout_seconds=0):
+        """Return provider peak/valley multiplier in Beijing local time.
+
+        Holidays are intentionally not inferred: weekdays use the regular
+        peak schedule, which is conservative when a holiday calendar is absent.
+        A valley request whose timeout window reaches the next peak is reserved
+        at peak rates to avoid crossing the boundary under-reserved.
+        """
+        if instant.tzinfo is None:
+            instant = instant.replace(tzinfo=timezone.utc)
+        beijing_tz = timezone(timedelta(hours=8))
+        local = instant.astimezone(beijing_tz)
+        if cls._is_peak(local):
+            return 1.0
+        window = max(0, int(request_timeout_seconds or 0))
+        if window:
+            window_end = local + timedelta(seconds=window)
+            for offset in range(8):
+                day = (local + timedelta(days=offset)).date()
+                if day.weekday() >= 5:
+                    continue
+                for hour in (9, 14):
+                    boundary = datetime.combine(day, time(hour), tzinfo=beijing_tz)
+                    if local <= boundary <= window_end:
+                        return 1.0
+        return 0.5
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)

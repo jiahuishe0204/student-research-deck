@@ -1,7 +1,9 @@
 import unittest
 from datetime import datetime, timezone
 
-from production_task_queue import FreeEntitlementUnavailable, PostgresTaskQueue, TaskNotRetryable
+from production_task_queue import (FreeEntitlementUnavailable, PostgresTaskQueue,
+                                   TaskNotRetryable, split_legacy_p8_payload,
+                                   p8_recovery_job_key)
 
 
 class Cursor:
@@ -36,6 +38,62 @@ class Connection:
 
 
 class ProductionTaskQueueTests(unittest.TestCase):
+    def test_legacy_p8_checkpoint_splits_only_remaining_claims(self):
+        claims = [{"claim_id": "C%02d" % index} for index in range(15)]
+        legacy = {"claims": {"claim_set_version": "v1", "claims": claims},
+                  "evidence": [], "sources": [], "tier": "deep"}
+        batches = split_legacy_p8_payload(legacy, {"C00", "C01", "C13", "C14"}, batch_size=4)
+        self.assertEqual([len(item["claims"]["claims"]) for item in batches], [4, 4, 3])
+        self.assertEqual([claim["claim_id"] for batch in batches for claim in batch["claims"]["claims"]],
+                         ["C%02d" % index for index in range(2, 13)])
+        self.assertTrue(all(len(batch["all_claims"]["claims"]) == 15 for batch in batches))
+        self.assertTrue(all(batch["recovery_job_key"].startswith("P8:recovery:") for batch in batches))
+
+    def test_p8_recovery_keys_do_not_depend_on_remaining_batch_ordinals(self):
+        claims = [{"claim_id": "C%02d" % index} for index in range(14)]
+        # Simulate a partial migration where a legacy recovery:0002 already
+        # exists with a different payload. Stable claim-derived keys cannot
+        # silently collide with that ordinal key or renumber another batch.
+        first = split_legacy_p8_payload({"claims": {"claims": claims}}, set())
+        partly_done = split_legacy_p8_payload({"claims": {"claims": claims}}, {"C06", "C07", "C08", "C09", "C10", "C11"})
+        self.assertNotEqual(first[1]["recovery_job_key"], "P8:recovery:0002")
+        self.assertNotEqual(partly_done[1]["recovery_job_key"], first[1]["recovery_job_key"])
+        self.assertEqual(p8_recovery_job_key(partly_done[0]["claims"]["claims"]),
+                         partly_done[0]["recovery_job_key"])
+
+    def test_retry_of_legacy_p8_job_persists_sibling_batch_jobs_atomically(self):
+        import json
+        legacy_payload = {"claims": {"claim_set_version": "v1",
+                                     "claims": [{"claim_id": "C%02d" % i} for i in range(14)]},
+                          "evidence": [], "sources": [], "tier": "deep"}
+        class RecoveryCursor:
+            def __init__(self): self.current = None; self.calls = []
+            def execute(self, sql, params=()):
+                self.calls.append((sql, params)); self.current = sql
+            def fetchone(self):
+                if "SELECT status,current_stage" in self.current: return ("failed", "P8")
+                if "SELECT job_id,status,payload" in self.current: return ("job-p8", "permanent_failed", legacy_payload)
+                if "SELECT state,task_id" in self.current: return ("available", None)
+                return None
+            def fetchall(self): return []
+        class RecoveryConnection:
+            def __init__(self): self.cur = RecoveryCursor(); self.commits = 0; self.rollbacks = 0
+            def cursor(self): return self.cur
+            def commit(self): self.commits += 1
+            def rollback(self): self.rollbacks += 1
+        connection = RecoveryConnection()
+        result = PostgresTaskQueue(connection).retry_failed_task(user_id="u1", task_id="TASK-1")
+        self.assertEqual(result["current_stage"], "P8")
+        payload_update = next(params for sql, params in connection.cur.calls
+                              if "UPDATE research_task_jobs SET payload" in sql)
+        first = json.loads(payload_update[0])
+        self.assertEqual(len(first["claims"]["claims"]), 6)
+        siblings = [(sql, params) for sql, params in connection.cur.calls
+                    if "INSERT INTO research_task_jobs" in sql]
+        self.assertEqual(len(siblings), 2)
+        self.assertTrue(all("P8:recovery:" in params[2] for _, params in siblings))
+        self.assertEqual(connection.commits, 1)
+
     def test_create_task_reserves_entitlement_and_enqueues_p1_atomically(self):
         connection = Connection([("available",)])
         task = PostgresTaskQueue(connection).create_task(user_id="u1", topic="CRISPR diagnostics", tier="fast")
@@ -134,7 +192,7 @@ class ProductionTaskQueueTests(unittest.TestCase):
 
     def test_retry_failed_task_requeues_an_expired_running_p8_checkpoint(self):
         connection = Connection([
-            ("running", "P8"), ("job-p8", "running"), ("reserved", "TASK-1"),
+            ("running", "P8"), ("job-p8", "running", {}), ("reserved", "TASK-1"),
         ])
 
         result = PostgresTaskQueue(connection).retry_failed_task(user_id="u1", task_id="TASK-1")

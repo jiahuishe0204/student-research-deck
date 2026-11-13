@@ -262,6 +262,7 @@ class WorkflowService:
                     reserve_attempt(
                         usage_task_id, usage_request_id, attempt, stage, route["model"],
                         route["effort"], usage_limits, estimated_input_tokens, max_tokens,
+                        request_timeout_seconds=request_timeout,
                     )
                 else:
                     self.usage_ledger.guard(task_id, route["model"], usage_limits, max_tokens, estimated_input_tokens)

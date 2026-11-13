@@ -27,6 +27,7 @@ PATSNAP_MCP_API_KEY
 PATSNAP_MCP_TIMEOUT_SECONDS
 MODEL_TASK_MAX_TOTAL_TOKENS
 MODEL_TASK_MAX_COST_CNY
+MODEL_PRICES_CNY_PER_MILLION (optional JSON; explicit provider CNY-per-million-token schedule)
 IDENTITY_SECRET
 EMAIL_FROM
 PUBLIC_ORIGIN
@@ -97,3 +98,15 @@ partial-delivery status. Code deployment does not apply database migrations.
 The 2026-11-01 production read-only audit found the final schema target for
 migrations 001-010 and an isolated logical restore passed. Recheck the live
 schema snapshot before release; the audit does not prove write behavior.
+
+Model reservations remain conservative: peak miss-price for all prompt tokens
+and the configured maximum output. Settled attempts use returned cache-hit,
+cache-miss, and output usage against `MODEL_PRICES_CNY_PER_MILLION`; this
+schedule must contain verified peak rates. Settled values are conservative
+ledger calculations, not provider invoices. At reservation time and settlement,
+the worker applies the Beijing weekday peak window (09:00-12:00, 14:00-18:00)
+or the half-price valley multiplier. A valley reservation whose request timeout
+reaches the next peak is reserved at peak; settlement uses the attempt's stored
+creation time. Without a holiday calendar, weekdays are conservatively treated
+as normal workdays. If unset, the checked-in fallback schedule applies. Unknown
+provider outcomes remain reserved.
