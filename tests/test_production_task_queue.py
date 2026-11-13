@@ -61,6 +61,13 @@ class ProductionTaskQueueTests(unittest.TestCase):
         self.assertEqual(p8_recovery_job_key(partly_done[0]["claims"]["claims"]),
                          partly_done[0]["recovery_job_key"])
 
+    def test_p8_recovery_key_changes_when_claim_content_changes(self):
+        original = [{"claim_id": "C01", "atomic_claim": "原始内容"}]
+        changed = [{"claim_id": "C01", "atomic_claim": "修订内容"}]
+
+        self.assertNotEqual(p8_recovery_job_key(original),
+                            p8_recovery_job_key(changed))
+
     def test_retry_of_legacy_p8_job_persists_sibling_batch_jobs_atomically(self):
         import json
         legacy_payload = {"claims": {"claim_set_version": "v1",
@@ -87,10 +94,10 @@ class ProductionTaskQueueTests(unittest.TestCase):
         payload_update = next(params for sql, params in connection.cur.calls
                               if "UPDATE research_task_jobs SET payload" in sql)
         first = json.loads(payload_update[0])
-        self.assertEqual(len(first["claims"]["claims"]), 6)
+        self.assertEqual(len(first["claims"]["claims"]), 4)
         siblings = [(sql, params) for sql, params in connection.cur.calls
                     if "INSERT INTO research_task_jobs" in sql]
-        self.assertEqual(len(siblings), 2)
+        self.assertEqual(len(siblings), 3)
         self.assertTrue(all("P8:recovery:" in params[2] for _, params in siblings))
         self.assertEqual(connection.commits, 1)
 

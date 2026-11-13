@@ -11,7 +11,7 @@ from workflow_validation import validate_intent
 
 VALID_TIERS = frozenset({"fast", "deep"})
 VALID_STAGES = frozenset("P%d" % number for number in range(1, 10))
-P8_RECOVERY_BATCH_SIZE = 6
+P8_RECOVERY_BATCH_SIZE = 4
 
 
 def split_legacy_p8_payload(payload, completed_claim_ids=(), batch_size=P8_RECOVERY_BATCH_SIZE):
@@ -34,11 +34,13 @@ def split_legacy_p8_payload(payload, completed_claim_ids=(), batch_size=P8_RECOV
 
 
 def p8_recovery_job_key(claim_items, prefix="P8:recovery:"):
-    """Stable key derived from claim IDs, independent of migration order."""
+    """Stable key bound to both claim IDs and their current content."""
     ids = [str(item.get("claim_id") or "") for item in claim_items if isinstance(item, dict)]
     if not ids or any(not claim_id for claim_id in ids):
         raise ValueError("P8 恢复批次缺少声明编号")
-    digest = hashlib.sha256("\0".join(ids).encode("utf-8")).hexdigest()[:16]
+    fingerprint = json.dumps(claim_items, ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":"))
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:16]
     return prefix + digest
 
 

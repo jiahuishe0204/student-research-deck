@@ -110,10 +110,10 @@ class ProductionOrchestratorTests(unittest.TestCase):
                    "report": {}, "ppt": {}, "figure_records": []}
         self.assertEqual(advance(queue, {"task_id": "TASK-1", "stage": "P7", "payload": payload},
                                  wrapped({"claims": claims, "claim_set_version": "v1"}), root=Path(".")),
-                         "P8:3-batches")
-        self.assertEqual(len(set(job["job_key"] for job in queue.enqueued)), 3)
+                         "P8:4-batches")
+        self.assertEqual(len(set(job["job_key"] for job in queue.enqueued)), 4)
         self.assertTrue(all(job["job_key"].startswith("P8:batch:") for job in queue.enqueued))
-        self.assertEqual([len(job["payload"]["claims"]["claims"]) for job in queue.enqueued], [6, 6, 2])
+        self.assertEqual([len(job["payload"]["claims"]["claims"]) for job in queue.enqueued], [4, 4, 4, 2])
         self.assertEqual(len(queue.enqueued[1]["payload"]["all_claims"]["claims"]), 14)
 
     def test_p8_waits_for_all_batches_then_aggregates_exactly_once(self):
@@ -145,7 +145,7 @@ class ProductionOrchestratorTests(unittest.TestCase):
                   "sources": [{"source_id": "S1"}], "tier": "deep", "report": {},
                   "ppt": {}, "figure_records": []}
         p7_job = {"task_id": "TASK-E2E", "stage": "P7", "payload": common}
-        self.assertEqual(advance(queue, p7_job, wrapped({"claims": claims}), root=Path(".")), "P8:3-batches")
+        self.assertEqual(advance(queue, p7_job, wrapped({"claims": claims}), root=Path(".")), "P8:4-batches")
         p8_jobs = list(queue.enqueued)
         persisted_p8 = [{**item, "status": "pending", "result": None} for item in p8_jobs]
         queue.jobs["P8"] = persisted_p8

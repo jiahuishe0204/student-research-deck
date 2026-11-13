@@ -11,7 +11,7 @@ from research_sources import merge_search_results, plan_patsnap_queries, plan_se
 from production_task_queue import p8_recovery_job_key
 
 
-P8_BATCH_SIZE = 6
+P8_BATCH_SIZE = 4
 
 
 def _data(result):

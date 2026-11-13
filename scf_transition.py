@@ -13,7 +13,7 @@ from scf_handler import WorkerEventError
 from scf_queue_contracts import parse_queue_job_key, queue_job_key
 
 
-P8_BATCH_SIZE = 6
+P8_BATCH_SIZE = 4
 
 
 def _decoded(value):
