@@ -118,7 +118,11 @@ class WorkflowService:
 
     @classmethod
     def _verification_batches(cls, items, evidence_by_id, upgrade):
-        max_claims = 4 if upgrade else 8
+        # High-risk verification uses the stronger model and a verbose audit
+        # contract.  Keep each upgraded request to one claim so a single queue
+        # checkpoint cannot lose several paid verdicts when JSON reaches the
+        # provider's per-response output ceiling.
+        max_claims = 1 if upgrade else 8
         max_complexity = 14 if upgrade else 16
         max_evidence_chars = 10000 if upgrade else 14000
         batches, current = [], []
@@ -143,7 +147,10 @@ class WorkflowService:
     @classmethod
     def _verification_output_limit(cls, items, evidence_by_id, upgrade):
         complexity = sum(cls._claim_complexity(item, evidence_by_id)[0] for item in items)
-        ceiling = 9600 if upgrade else 3800
+        # Stay below the provider's per-response ceiling.  The task-wide token
+        # budget is intentionally much larger, but it cannot extend one model
+        # response; batching is the correct way to spend that budget safely.
+        ceiling = 8000 if upgrade else 3800
         floor = 6400 if upgrade else 1200
         multiplier = 2 if upgrade else 1
         return min(ceiling, max(floor, multiplier * (650 + len(items) * 220 + complexity * 70)))

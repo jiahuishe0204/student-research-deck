@@ -1097,7 +1097,25 @@ class WorkflowServiceTests(unittest.TestCase):
         evidence = {"EV-1": {"evidence_id": "EV-1", "source_id": "SRC-1"}}
 
         self.assertEqual(WorkflowService._verification_output_limit([claim], evidence, upgrade=True), 6400)
-        self.assertLessEqual(WorkflowService._verification_output_limit([claim], evidence, upgrade=True), 9600)
+        self.assertLessEqual(WorkflowService._verification_output_limit([claim], evidence, upgrade=True), 8000)
+
+    def test_high_risk_verification_isolated_to_one_claim_per_model_call(self):
+        evidence = {
+            "EV-1": {"evidence_id": "EV-1", "source_id": "SRC-1"},
+        }
+        claims = [{
+            "claim_id": "CL-%d" % index,
+            "atomic_claim": "高风险结论%d" % index,
+            "cited_evidence_ids": ["EV-1"],
+            "risk_level": "high",
+            "claim_type": "efficacy",
+        } for index in range(1, 4)]
+
+        batches = WorkflowService._verification_batches(claims, evidence, upgrade=True)
+
+        self.assertEqual([[item["claim_id"] for item in batch] for batch in batches], [
+            ["CL-1"], ["CL-2"], ["CL-3"],
+        ])
 
     def test_verify_claims_merges_safe_near_duplicates_before_model_call(self):
         service = WorkflowService("secret", FakeRouter(), "system", {"P8": "verify"})
