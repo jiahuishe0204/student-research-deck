@@ -1,9 +1,14 @@
 const $=selector=>document.querySelector(selector);
 const form=$('#intent-form'),task=$('#task'),result=$('#intent-result'),title=$('#intent-title'),copy=$('#intent-copy'),error=$('#error'),confirmButton=$('#confirm');
+const submitButton=form.querySelector('.primary'),entryStatus=$('#task-entry-status');
+const httpPage=['http:','https:'].includes(location.protocol);
+const hostname=location.hostname.replace(/\.$/,'');
+const staticPreview=!httpPage||hostname==='github.io'||hostname.endsWith('.github.io');
+const loopback=['localhost','127.0.0.1','[::1]'].includes(hostname);
 let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',selectedDirection=null,currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,currentTaskToken=null,taskPaused=false;
 const taskSessionKey='research-delivery.active-task.v1';
 const productionTaskKey='research-delivery.production-task.v1',csrfKey='research_csrf_token';
-let productionMode=false,productionChallengeId='',productionPolling=false;
+let productionMode=false,localDemo=false,productionChallengeId='',productionPolling=false;
 
 const slidePreviewPages=[
   {label:'问题',eyebrow:'01 / RESEARCH QUESTION',title:'实体瘤为什么仍是 CAR-T 的困难场景？',bullets:['抗原异质性带来逃逸风险','肿瘤微环境抑制 T 细胞活性','浸润与持续性仍限制疗效'],sources:'SOURCES · 03 / 07 / 11',notes:'这一页先建立问题，不急着给出路线优劣。讲述时用三个障碍解释后续技术为什么分别从靶点、细胞状态和递送方式入手。',chips:['来源 03','来源 07']},
@@ -84,7 +89,9 @@ $('#verify-code').addEventListener('click',async event=>{
 });
 
 form.addEventListener('submit',async event=>{
-  event.preventDefault();currentTopic=task.value.trim();currentTier=$('input[name="tier"]:checked').value;
+  event.preventDefault();
+  if(!localDemo&&!productionMode)return;
+  currentTopic=task.value.trim();currentTier=$('input[name="tier"]:checked').value;
   if(currentTopic.length<2){error.textContent='输入一个调研主题就可以开始。';task.focus();return;}
   error.textContent='';setBusy(form.querySelector('.primary'),true,'正在理解题目… <span>·</span>');result.hidden=true;
   try{
@@ -108,6 +115,7 @@ form.addEventListener('submit',async event=>{
 });
 
 confirmButton.addEventListener('click',async()=>{
+  if(!localDemo&&!productionMode)return;
   const directions=Array.isArray(currentIntent?.direction_options)?currentIntent.direction_options:[];
   const clarification=directions.length?(selectedDirection?`${selectedDirection.title}：${selectedDirection.focus}`:''):$('#clarification').value.trim();
   if(currentIntent?.need_clarification&&!clarification){(directions.length?$('#direction-options .direction-card'):$('#clarification'))?.focus();return;}
@@ -268,5 +276,26 @@ async function restoreTaskSession(){
   try{restoreArtifacts(await fetchCurrentTask());}catch(exc){console.warn('任务恢复失败',exc);clearTaskSession();}
 }
 
-async function bootstrap(){const active=await detectProduction();if(!active)await restoreTaskSession();}
+function enableTaskSubmission(){
+  submitButton.type='submit';
+  submitButton.disabled=false;
+  submitButton.hidden=false;
+  $('#task-preview-note').hidden=true;
+  $('#task-submit-note').hidden=false;
+  entryStatus.textContent='系统就绪';
+}
+
+async function bootstrap(){
+  if(staticPreview)return;
+  entryStatus.textContent='正在连接';
+  if(await detectProduction()){
+    enableTaskSubmission();
+  }else if(loopback){
+    localDemo=true;
+    enableTaskSubmission();
+    await restoreTaskSession();
+  }else{
+    entryStatus.textContent='连接失败，请刷新重试';
+  }
+}
 bootstrap().catch(exc=>{console.warn('页面初始化失败',exc);});

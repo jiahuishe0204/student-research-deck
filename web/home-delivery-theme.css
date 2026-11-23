@@ -108,6 +108,7 @@ body {
 .tier-picker strong, .plan-label, .retrieval-head span, .evidence-id, .ppt-page > div b, .report-result summary, .ppt-page summary { color: var(--accent) !important; }
 .primary { background: #6658b5; color: #fff; box-shadow: 0 9px 20px rgba(84, 71, 156, .18); }
 .primary:hover { background: #54479c; }
+.command-panel .primary[hidden] { display: none; }
 
 .intent-drawer { background: #fff; border-color: #dcd6eb; box-shadow: var(--home-shadow); }
 .intent-mark { color: rgba(102, 88, 181, .32); }
