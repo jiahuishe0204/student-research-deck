@@ -17,11 +17,9 @@ class ProductionHomeAdapterTests(unittest.TestCase):
         self.assertIn('id="auth-email"', self.html)
         self.assertIn('id="auth-code"', self.html)
 
-    def test_production_mode_requires_confirmed_healthy_edgeone_gateway(self):
-        self.assertIn("fetch('/api/health'", self.script)
-        self.assertIn("data.runtime==='edgeone-gateway'&&data.ok===true", self.script)
-        self.assertIn("if(!productionMode){const local=", self.script)
-        self.assertIn("form.querySelector('.primary').disabled=true", self.script)
+    def test_form_starts_with_submission_disabled_and_connection_status(self):
+        self.assertRegex(self.html, r'<button class="primary" type="submit" disabled>')
+        self.assertIn('id="service-status" role="status">正在连接服务…', self.html)
 
     def test_otp_and_mutating_requests_use_cookie_and_tab_scoped_csrf(self):
         self.assertIn("credentials:'include'", self.script)
