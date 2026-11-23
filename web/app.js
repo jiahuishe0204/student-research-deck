@@ -5,6 +5,7 @@ const httpPage=['http:','https:'].includes(location.protocol);
 const hostname=location.hostname.replace(/\.$/,'');
 const staticPreview=!httpPage||hostname==='github.io'||hostname.endsWith('.github.io');
 const loopback=['localhost','127.0.0.1','[::1]'].includes(hostname);
+const healthTimeoutMs=12000;
 let currentIntent=null,currentPlan=null,currentTopic='',currentTier='fast',selectedDirection=null,currentSources=[],currentScreening=null,currentEvidenceGroups=[],currentReport=null,currentPpt=null,currentTaskId=null,currentTaskToken=null,taskPaused=false;
 const taskSessionKey='research-delivery.active-task.v1';
 const productionTaskKey='research-delivery.production-task.v1',csrfKey='research_csrf_token';
@@ -56,7 +57,12 @@ function showProductionTaskFailure(exc,button){
 const wait=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
 function setProductionProgress(progress){const stage=String(progress.current_stage||'P1'),number=Number(stage.slice(1))||1;$('#task-workspace').hidden=false;$('#task-status-title').textContent=progress.status==='failed'?'任务未完成':`正在执行 ${stage}`;document.querySelector('.progress-line i').style.width=`${Math.min(96,Math.max(12,number*10))}%`;document.querySelectorAll('.task-status li').forEach((item,index)=>{const boundary=Math.ceil(number/2);item.className=index<boundary?'done':index===boundary?'active':'';});$('#plan-output').innerHTML=`<p class="empty-plan">任务已安全保存到云端。当前阶段：${escapeHtml(stage)}。关闭页面不会中断，完成后会发送邮件。</p>`;}
 async function pollProductionTask({untilIntent=false}={}){if(productionPolling)return;productionPolling=true;try{for(let count=0;count<180;count+=1){const response=await productionRequest(`/tasks/${encodeURIComponent(currentTaskId)}/progress`),progress=response.data||{};setProductionProgress(progress);const stageData=progress.stage_result?.data;if(untilIntent&&stageData?.normalized_topic){currentIntent=stageData;selectedDirection=null;title.textContent=currentIntent.normalized_topic;copy.textContent=currentIntent.need_clarification?currentIntent.clarification_question:(currentIntent.confirmation_text||currentIntent.scope_hint);const directions=Array.isArray(currentIntent.direction_options)?currentIntent.direction_options:[],directionBox=$('#direction-options');directionBox.hidden=!directions.length;directionBox.innerHTML=directions.map(item=>`<button type="button" class="direction-card" data-direction-id="${escapeHtml(item.direction_id)}"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.focus)}</span></button>`).join('');$('#clarification-wrap').hidden=!currentIntent.need_clarification||directions.length>0;confirmButton.innerHTML=directions.length?'选择一个方向后继续 <span>→</span>':(currentIntent.need_clarification?'回答后开始完整调研 <span>→</span>':'确认并开始完整调研 <span>→</span>');result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'center'});return;}if(progress.status==='completed'){location.href=`./delivery.html?task=${encodeURIComponent(currentTaskId)}`;return;}if(progress.status==='failed')throw new Error('任务未能完成，技术失败不会消耗首次免费资格');await wait(5000);}throw new Error('任务仍在运行，请稍后刷新页面查看');}finally{productionPolling=false;}}
-async function detectProduction(){try{const response=await fetch('/api/health',{cache:'no-store'}),data=await response.json();productionMode=response.ok&&data.runtime==='edgeone-gateway'&&data.ok===true;}catch(_){productionMode=false;}if(!productionMode)return false;$('#production-auth').hidden=false;$('#cancel-task').hidden=true;$('#resume-task').hidden=true;const csrf=sessionStorage.getItem(csrfKey);if(csrf){$('#production-auth').classList.add('verified');$('#auth-status').textContent='邮箱登录状态已就绪。';}const saved=sessionStorage.getItem(productionTaskKey);if(saved){currentTaskId=saved;pollProductionTask({untilIntent:true}).catch(exc=>{error.textContent=exc.message;});}return true;}
+async function detectProduction(){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),healthTimeoutMs);
+  try{const response=await fetch('/api/health',{cache:'no-store',signal:controller.signal}),data=await response.json();productionMode=response.ok&&data.runtime==='edgeone-gateway'&&data.ok===true;}catch(_){productionMode=false;}finally{clearTimeout(timer);}
+  if(!productionMode)return false;
+  $('#production-auth').hidden=false;$('#cancel-task').hidden=true;$('#resume-task').hidden=true;const csrf=sessionStorage.getItem(csrfKey);if(csrf){$('#production-auth').classList.add('verified');$('#auth-status').textContent='邮箱登录状态已就绪。';}const saved=sessionStorage.getItem(productionTaskKey);if(saved){currentTaskId=saved;pollProductionTask({untilIntent:true}).catch(exc=>{error.textContent=exc.message;});}return true;
+}
 async function fetchCurrentTask(){const response=await fetch(`/api/tasks/${encodeURIComponent(currentTaskId)}`,{headers:{'X-Task-ID':currentTaskId,'X-Task-Token':currentTaskToken}});const data=await response.json().catch(()=>({error:'服务返回格式异常'}));if(!response.ok)throw new Error(data.error||'任务恢复失败');return data.data;}
 function saveTaskSession(){if(currentTaskId&&currentTaskToken)sessionStorage.setItem(taskSessionKey,JSON.stringify({taskId:currentTaskId,token:currentTaskToken}));}
 function clearTaskSession(){sessionStorage.removeItem(taskSessionKey);sessionStorage.removeItem(productionTaskKey);currentTaskId=null;currentTaskToken=null;}
@@ -296,6 +302,7 @@ async function bootstrap(){
     await restoreTaskSession();
   }else{
     entryStatus.textContent='连接失败，请刷新重试';
+    error.textContent='服务暂时不可用，请稍后刷新页面重试。';
   }
 }
 bootstrap().catch(exc=>{console.warn('页面初始化失败',exc);});

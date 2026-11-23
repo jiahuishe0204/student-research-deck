@@ -21,6 +21,14 @@ class ProductionHomeAdapterTests(unittest.TestCase):
         self.assertIn("fetch('/api/health'", self.script)
         self.assertIn("data.runtime==='edgeone-gateway'&&data.ok===true", self.script)
         self.assertIn("if(!productionMode)return false", self.script)
+        self.assertIn("AbortController", self.script)
+        self.assertIn("healthTimeoutMs=12000", self.script)
+
+    def test_static_previews_and_unhealthy_remote_hosts_cannot_submit(self):
+        self.assertIn("const staticPreview=!httpPage||hostname==='github.io'||hostname.endsWith('.github.io');", self.script)
+        self.assertIn("if(!localDemo&&!productionMode)return;", self.script)
+        self.assertIn('type="button" disabled hidden', self.html)
+        self.assertIn("正式工作台", self.html)
 
     def test_otp_and_mutating_requests_use_cookie_and_tab_scoped_csrf(self):
         self.assertIn("credentials:'include'", self.script)
